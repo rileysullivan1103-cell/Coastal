@@ -19,11 +19,12 @@ import sys
 import pandas as pd
 import requests
 
+import ckan_join
 import find_candidate_sites as f
 
 BASE = f.CA_CKAN_BASE
 STATIONS_ID = f.CA_CKAN_RESOURCE_ID
-RESULTS_ID = "15a63495-8d9f-4a49-b43a-3092ef3106b9"
+RESULTS_ID = ckan_join.RESULTS_ID
 
 STATION_KEY = "Station_Name"
 RESULT_KEY = "StationCode"

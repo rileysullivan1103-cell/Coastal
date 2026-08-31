@@ -4,3 +4,4 @@ __pycache__/
 .env
 candidate_sites_ranked.csv
 webcoos_assets_raw.json
+data/

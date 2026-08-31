@@ -192,6 +192,53 @@ have no results in the 2020-present resource (check the 2010-2020 one), and
 2063 results stations are not beaches at all -- the results resource is
 statewide surface water, so codes like `514SAC011` are Sacramento River sites.
 
+## Pulling observations
+
+`pull_observations.py` fetches a year for each qualifying site. The four
+sources have four different native resolutions and the script does not paper
+over that:
+
+| source | resolution | what you get |
+|---|---|---|
+| NDBC `stdmet` | hourly | wind, waves, air and water temperature |
+| CO-OPS `water_level` | 6-minute | level, rate of change, rising/falling/slack |
+| CO-OPS `wind` | 6-minute | speed, direction, gust |
+| NOAA CDO GHCND | **daily** | precipitation, plus 24/48/72h rolling totals |
+| data.ca.gov CKAN | irregular | bacteria samples, a few a week in swim season |
+
+**Hourly precipitation is not available.** GHCND publishes one PRCP total per
+day, so `rain_24h_mm` / `rain_48h_mm` / `rain_72h_mm` are 1/2/3-day rolling
+sums. `RAIN_INCLUDE_SAME_DAY` decides whether the window ends on the sample day
+(so rain falling after a morning sample still counts) or the day before (strictly
+antecedent, but blind to same-day rain). Daily data cannot separate the two.
+
+A day the station did not report stays `NaN` rather than becoming 0, so any
+window spanning a gap is `NaN` instead of a silent under-count.
+
+Tide direction is derived from the real elapsed time between readings, so a gap
+in the record does not manufacture a huge apparent rate. Movement slower than
+`TIDE_SLACK_M_PER_HR` is reported as `slack` rather than a direction, which
+keeps noise around high and low water from reading as a trend.
+
+CO-OPS needs no token, and caps its 6-minute products at 31 days per request,
+so a year is stitched from twelve chunks. It answers HTTP 200 with an `error`
+body when a station lacks a product, so the status code alone proves nothing —
+the script checks the body.
+
+`test_pull_offline.py` exercises the rolling sums, tide direction and wind
+parsing against fixtures, with no network.
+
+## Reading the WebCOOS product catalogue
+
+`explore_webcoos_products.py` lists every feed, product and service per camera
+from the saved `webcoos_assets_raw.json`, so it costs nothing to re-run.
+
+It exists because **`pywebcoos` hardcodes `feed_name = 'raw-video-data'`** in
+`get_products()`, `get_inventory()` and `download()`. Any product published under
+a different feed — which is where a derived rip-detection output would most
+likely live — is invisible to that library and needs a direct API call. The
+script flags each feed accordingly.
+
 ## Buoy station types
 
 `NdbcApi().stations()` returns 1351 stations nationally: 709 land-based

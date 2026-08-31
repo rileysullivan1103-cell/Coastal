@@ -19,6 +19,9 @@ import pandas as pd
 
 import find_candidate_sites as f
 
+# Fecal Indicator Bacteria Monitoring Results, 2020 to present.
+RESULTS_ID = "15a63495-8d9f-4a49-b43a-3092ef3106b9"
+
 STATION_KEY = "Station_Name"
 RESULT_KEY = "StationCode"
 
