@@ -240,22 +240,6 @@ Coastal water temperature is pulled separately from CO-OPS. A tide gauge at the
 beach and a buoy 20-30 km offshore are measuring different water; for surf-zone
 bacteria the near one is likelier to be the relevant predictor, so both are kept.
 
-## Public discharge data (SFPUC)
-
-`probe_sfpuc.py` finds the data endpoint behind
-`webapps.sfpuc.org/sapps/beachesandbay.html`. That URL is a rendered page, not
-an API, so the client has to be written against whatever backend it actually
-calls — the probe extracts endpoint-like URLs from the page, scans its linked
-scripts, and can fetch each candidate to show the real response shape.
-
-**Note the geography.** SFPUC's combined sewer discharge monitoring covers the
-San Francisco shoreline, and none of the seven qualifying sites are in San
-Francisco — they are in San Diego, Marin, Santa Cruz and Santa Barbara
-counties. Sausalito is the nearest, across the Golden Gate in Marin. So this
-source has no site to attach to yet unless San Francisco cameras are added, or
-unless Bay discharges are taken to influence Sausalito, which is a modelling
-assumption rather than a given.
-
 ## Reading the WebCOOS product catalogue
 
 `explore_webcoos_products.py` lists every feed, product and service per camera
