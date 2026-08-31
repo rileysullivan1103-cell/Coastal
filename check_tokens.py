@@ -35,9 +35,14 @@ def check_webcoos(token):
     if r.status_code != 200:
         return False, f"unexpected {r.status_code}: {r.text[:200]}"
     try:
-        count = r.json().get("count")
+        payload = r.json()
     except ValueError:
         return False, "200 OK but response was not JSON"
+    # WebCOOS omits a top-level 'count' (cursor-style paging), so fall back to
+    # the number of records in this page rather than reporting "None".
+    count = payload.get("count")
+    if count is None:
+        count = f"{len(payload.get('results', []))} in first page"
     return True, f"accepted — {count} assets visible"
 
 
