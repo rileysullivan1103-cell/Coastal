@@ -11,15 +11,39 @@ wet-day agreement, correlation and bias per site.
     python compare_precip_sources.py
 """
 
-import glob
 import os
 import sys
 
 import pandas as pd
+import requests
 
 DATA_DIR = "data"
 SITES_CSV = "candidate_sites_ranked.csv"
 WET_DAY_MM = 1.0  # below this a "wet day" is drizzle or model noise
+CDO = "https://www.ncei.noaa.gov/cdo-web/api/v2"
+OPEN_METEO = "https://archive-api.open-meteo.com/v1/archive"
+
+
+def gauge_elevation(station_id, token):
+    """Metres. A gauge in a canyon or up a mountain does not measure the beach."""
+    if not token:
+        return None
+    try:
+        r = requests.get(f"{CDO}/stations/{station_id}",
+                         headers={"token": token}, timeout=30)
+        return (r.json() or {}).get("elevation") if r.status_code == 200 else None
+    except requests.RequestException:
+        return None
+
+
+def grid_elevation(lat, lon):
+    try:
+        r = requests.get(OPEN_METEO, timeout=30, params={
+            "latitude": lat, "longitude": lon, "hourly": "precipitation",
+            "start_date": "2025-01-01", "end_date": "2025-01-01"})
+        return (r.json() or {}).get("elevation") if r.status_code == 200 else None
+    except requests.RequestException:
+        return None
 
 
 def site_slug(name):
@@ -57,6 +81,10 @@ def main():
     if "has_all_four" in sites.columns:
         sites = sites[sites["has_all_four"]]
 
+    token = os.environ.get("NOAA_CDO_TOKEN")
+    if not token:
+        print("  NOAA_CDO_TOKEN not set; gauge elevations will be blank\n")
+
     rows = []
     for _, site in sites.iterrows():
         pair = load_pair(site)
@@ -67,17 +95,24 @@ def main():
 
         gauge_wet = pair["gauge"] >= WET_DAY_MM
         grid_wet = pair["grid"] >= WET_DAY_MM
+        both = int((gauge_wet & grid_wet).sum())
+
+        g_elev = gauge_elevation(site["precip_station_id"], token)
+        r_elev = grid_elevation(site["lat"], site["lon"])
+
         rows.append({
-            "site": site["camera_name"][:34],
+            "site": site["camera_name"][:30],
             "days": len(pair),
+            "gauge_m": round(g_elev) if g_elev is not None else None,
+            "grid_m": round(r_elev) if r_elev is not None else None,
             "gauge_mm": round(pair["gauge"].sum()),
             "grid_mm": round(pair["grid"].sum()),
             "ratio": round(pair["grid"].sum() / max(pair["gauge"].sum(), 0.1), 2),
-            "gauge_wet_d": int(gauge_wet.sum()),
-            "grid_wet_d": int(grid_wet.sum()),
             "corr": round(pair["gauge"].corr(pair["grid"]), 3),
-            # Do they agree on which days were wet at all?
-            "agree_pct": round(100 * (gauge_wet == grid_wet).mean()),
+            # Raw wet/dry agreement is dominated by dry days -- an always-dry
+            # predictor scores 83-90% here -- so report the wet days directly.
+            "recall": round(both / max(int(gauge_wet.sum()), 1), 2),
+            "precis": round(both / max(int(grid_wet.sum()), 1), 2),
         })
 
     if not rows:
@@ -89,30 +124,20 @@ def main():
     print("\n" + out.to_string(index=False))
 
     print("\nHow to read this:")
-    print("  ratio      grid total / gauge total. Near 1.0 means they agree on")
-    print("             how much rain fell. Much above 1 means ERA5 is wetter,")
-    print("             which is its known failure mode.")
-    print("  corr       daily correlation. High corr with ratio far from 1")
-    print("             means the timing is right and only the amount is off,")
-    print("             which a scale factor fixes.")
-    print("  agree_pct  share of days both call wet or both call dry.")
-    print(f"             A wet day here is >= {WET_DAY_MM} mm.")
+    print("  gauge_m /  elevation of each source. A gauge up a canyon or in the")
+    print("  grid_m    hills is measuring orographic rain, not beach rain, and")
+    print("            a large gap here explains a ratio far from 1 better than")
+    print("            any property of the model does.")
+    print("  ratio     grid total / gauge total.")
+    print("  corr      daily correlation. 0.7-0.8 between a point gauge and a")
+    print("            9-25 km cell is normal, not a failure.")
+    print("  recall    of the gauge's wet days, the share the grid also called wet.")
+    print("  precis    of the grid's wet days, the share the gauge agreed on.")
+    print(f"            A wet day is >= {WET_DAY_MM} mm. Raw wet/dry agreement is")
+    print("            not reported: it is dominated by dry days, and an")
+    print("            always-dry predictor would score 83-90% on this data.")
 
-    median_ratio = out["ratio"].median()
-    median_corr = out["corr"].median()
-    print(f"\nMedian ratio {median_ratio}, median daily correlation {median_corr}.")
-    if median_corr >= 0.8 and 0.8 <= median_ratio <= 1.25:
-        print("The two agree closely. Use the gridded source: same signal, "
-              "hourly resolution, and no station-liveness problem.")
-    elif median_corr >= 0.8:
-        print("Timing agrees but totals do not. The gridded source is usable "
-              "for antecedent-rainfall features, where relative magnitude "
-              "matters more than absolute mm, but do not treat its mm as gauge mm.")
-    else:
-        print("They disagree on timing, not just amount. Prefer the gauge where "
-              "one is live, and inspect a few storms by hand before trusting "
-              "either at these sites.")
-
-
-if __name__ == "__main__":
-    main()
+    print("\nRatios above and below 1 both appear here, so this is not a simple")
+    print("model wet bias. Check the elevation columns before concluding")
+    print("anything about either source: where the gauge sits well above the")
+    print("grid cell, the gauge is the one measuring the wrong place.")

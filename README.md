@@ -271,27 +271,30 @@ prints the grid cell actually used, which is not the coordinate requested.
 
 ## Choosing between the gauge and the grid
 
-`compare_precip_sources.py` aggregates the hourly grid to daily totals, aligns
-it against the GHCND gauge for the sites where both exist, and reports totals,
-wet-day agreement, daily correlation and bias. ERA5 is a model reconstruction
-and is known to spread light precipitation, so the thing to look for is a wet
-bias against a working gauge.
+`compare_precip_sources.py` aggregates the hourly grid to daily, aligns it
+against the GHCND gauge, and reports totals, ratio, daily correlation and
+wet-day agreement per site, alongside the elevation of each source.
 
-The verdict it prints follows the numbers: close agreement means take the grid
-(same signal, hourly, no station-liveness problem); good correlation with a
-poor ratio means the timing is right and only the magnitude is off, which is
-fine for antecedent-rainfall features but means the mm are not gauge mm.
+The first run produced ratios on **both sides of 1** — Stinson 1.27, Walton
+1.36, but Sausalito 0.84 and Carpinteria 0.76 — so this is not a simple model
+wet bias. The elevation columns are there because the likelier explanation is
+the gauge: Carpinteria's is **Juncal Dam**, inland and up in the Santa Ynez
+range, and Sausalito's is **Muir Woods**, in a coastal redwood canyon. Both
+collect orographic rain that a beach a few kilometres away never sees. Where a
+gauge sits well above its grid cell, the gauge is the one measuring the wrong
+place.
 
-Two things the probe established about the gridded source:
+Daily correlation of 0.58–0.81 between a point gauge and a 9–25 km cell is
+normal, not a failure.
 
-- **Wind comes back in km/h by default.** NDBC `WSPD` and CO-OPS wind are both
-  m/s, so the request now asks for `wind_speed_unit=ms` and warns if the
-  response says otherwise. Two wind sources in different units is exactly the
-  kind of thing that merges silently and wrongly.
-- **Nearby sites share a grid cell.** Walton Lighthouse and Santa Cruz Wharf
-  return identical series — they are about a kilometre apart and the grid is
-  9-25 km. Gridded weather cannot distinguish sites at that spacing; the gauge
-  can, in principle, though in practice those two now share a gauge as well.
+**Raw wet/dry agreement is not reported.** The first version printed an
+`agree_pct` that came out at 92% for all six sites; on this data an always-dry
+predictor scores 83–90%, so the metric was nearly uninformative. It is replaced
+by wet-day recall and precision, which describe the days that actually matter.
+
+Three of the seven sites share one gauge (Soquel), and two share a grid cell
+(Walton and Santa Cruz Wharf are ~1 km apart), so those rows are not
+independent evidence.
 
 ## Why a precipitation station returns nothing
 
