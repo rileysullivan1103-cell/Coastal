@@ -271,16 +271,36 @@ prints the grid cell actually used, which is not the coordinate requested.
 
 ## Why a precipitation station returns nothing
 
-`diagnose_precip.py` answers this per station. An empty PRCP response never
-means "it did not rain": GHCND records `PRCP = 0` on dry days at a reporting
-station, so empty means nothing was published. Three things cause that, and the
-script tells them apart:
+An empty PRCP response never means "it did not rain": GHCND records `PRCP = 0`
+on dry days, so empty means the station published nothing.
 
-| finding | meaning |
-|---|---|
-| `maxdate` is old | the station stopped reporting; `datacoverage` is a lifetime figure and says nothing about this |
-| `PRCP` absent from its datatype list | the station reports, but not rainfall — it could never have supplied it |
-| station current, `PRCP` maxdate old | it reports other elements but has stopped publishing rainfall |
+Running `diagnose_precip.py` across the matched stations settled it — **they
+were offline**, and `maxdate` correlates perfectly with whether data came back:
+
+| station | last report | data returned |
+|---|---|---|
+| `USC00042150` Crescent City | 27,364 days ago (1951) | — |
+| `US1CASZ0001` Santa Cruz | 6,240 days ago (2009) | none |
+| `US1CASD0092` Solana Beach | 4,353 days ago (2014) | none |
+| `USC00047916` Santa Cruz | 1,601 days ago (2022) | none |
+| `USC00046027` Muir Woods | 31 days ago | 366 days |
+| `USC00044422` Juncal Dam | 15 days ago | 366 days |
+| `US1CAMR0030` Bolinas | 3 days ago | 366 days |
+| `US1CASZ0028` Soquel | 2 days ago | 366 days |
+
+Every station reporting within a month returned a full year; every station
+silent for years returned nothing. `MAX_PRECIP_STALENESS_DAYS` in
+`find_candidate_sites.py` is what stops them being matched.
+
+Note that `datacoverage` was 1.0000 for three of the four dead stations. It is a
+lifetime figure and carries no information about whether a station still runs.
+
+**The script tests PRCP by requesting it**, not by reading metadata. An earlier
+version inferred availability from CDO's `/datatypes?stationid=` listing and
+reported "does not report PRCP" for all ten stations, including four that had
+just returned a year of rainfall each. `/datatypes/PRCP?stationid=` is worse: it
+ignores the station filter and returns the global 1781-to-present range for
+every station. Neither is usable.
 
 ### Known coverage gaps
 
