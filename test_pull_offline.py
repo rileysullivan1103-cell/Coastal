@@ -85,7 +85,27 @@ def check_wind_parsing():
     print("wind parsing OK")
 
 
+def check_station_id_canonicalisation():
+    """A CSV round-trip turns the integer station id 101 into 101.0, because
+    the column holds NaN for non-qualifying rows and becomes float64. Both
+    spellings must resolve to the same key or nothing matches."""
+    assert po.canonical_station_id(101) == "101"
+    assert po.canonical_station_id(101.0) == "101"
+    assert po.canonical_station_id("101") == "101"
+    assert po.canonical_station_id("101.0") == "101"
+    assert po.canonical_station_id(" 101 ") == "101"
+    # A genuinely non-integer or text id survives unmangled.
+    assert po.canonical_station_id("EH-130") == "EH-130"
+    assert po.canonical_station_id(101.5) == "101.5"
+
+    ids = pd.Series([101.0, 102.0, None])
+    wanted = {po.canonical_station_id(x) for x in ids.dropna()}
+    assert wanted == {"101", "102"}, wanted
+    print("station id canonicalisation OK")
+
+
 if __name__ == "__main__":
+    check_station_id_canonicalisation()
     check_rain_windows()
     check_tide_state()
     check_wind_parsing()

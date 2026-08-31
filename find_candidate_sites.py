@@ -56,6 +56,11 @@ MAX_PRECIP_DISTANCE_KM = 30
 # be effectively at the beach the camera watches, not merely in the same town.
 MAX_WQ_DISTANCE_KM = 2
 MIN_ACCEPTABLE_DATACOVERAGE = 0.90  # NOAA's own precomputed metric, 0-1
+# datacoverage is a lifetime figure: a station that stopped reporting in 2019
+# can still score 0.98 and be useless for a recent window. CDO's 'maxdate' is
+# the last day the station reported, so require it to be recent. Set to None to
+# disable the check.
+MAX_PRECIP_STALENESS_DAYS = 90
 TOP_N_SITES = 20
 
 # Rough California coastal bounding box — good enough to flag "use the CA
@@ -448,6 +453,15 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df=None):
     good_precip = precip_df[precip_df["datacoverage"] >= MIN_ACCEPTABLE_DATACOVERAGE]
     print(f"  {len(good_precip)}/{len(precip_df)} precip stations meet the "
           f"{MIN_ACCEPTABLE_DATACOVERAGE} datacoverage floor")
+
+    if MAX_PRECIP_STALENESS_DAYS is not None and "maxdate" in good_precip.columns:
+        cutoff = (pd.Timestamp.now().normalize()
+                  - pd.Timedelta(days=MAX_PRECIP_STALENESS_DAYS))
+        last_report = pd.to_datetime(good_precip["maxdate"], errors="coerce")
+        before = len(good_precip)
+        good_precip = good_precip[last_report >= cutoff]
+        print(f"  {len(good_precip)}/{before} of those reported within the last "
+              f"{MAX_PRECIP_STALENESS_DAYS} days")
 
     for _, cam in cameras_df.iterrows():
         lat, lon = cam.get("latitude"), cam.get("longitude")

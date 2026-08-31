@@ -67,6 +67,7 @@ def main():
     check_california_only_path()
     check_wq_radius()
     check_buoy_type_filter()
+    check_precip_staleness()
 
     print("\nAll offline assertions passed.")
 
@@ -145,6 +146,33 @@ def check_buoy_type_filter():
     assert list(kept["Station"]) == ["46236"], list(kept["Station"])
     assert f.BUOY_TYPES == ("buoy",), f.BUOY_TYPES
     print("\nBuoy type filter OK.")
+
+
+def check_precip_staleness():
+    """A station's datacoverage is a lifetime figure. One that stopped
+    reporting years ago still scores well and must not win on proximity."""
+    cams = pd.DataFrame([{"camera_name": "Santa Cruz, CA",
+                          "latitude": 36.96, "longitude": -122.02}])
+    buoys = pd.DataFrame([{"Station": "46236", "Lat": 36.79, "Lon": -122.40,
+                           "Name": "Monterey", "Type": "buoy"}])
+    now = pd.Timestamp.now().normalize()
+    precip = pd.DataFrame([
+        {"id": "GHCND:STALE", "latitude": 36.965, "longitude": -122.02,
+         "datacoverage": 1.00,
+         "maxdate": str((now - pd.Timedelta(days=2200)).date())},
+        {"id": "GHCND:LIVE", "latitude": 36.98, "longitude": -122.03,
+         "datacoverage": 0.97,
+         "maxdate": str((now - pd.Timedelta(days=3)).date())},
+    ])
+    ckan = pd.DataFrame([{"Station_id": 101, "Station_UpperLat": 36.955,
+                          "Station_UpperLon": -122.025, "Beach_Name": "Main Beach"}])
+    empty_wq = pd.DataFrame(
+        columns=["MonitoringLocationIdentifier", "LatitudeMeasure", "LongitudeMeasure"])
+
+    ranked = f.rank_candidate_sites(cams, buoys, precip, empty_wq, ca_wq_df=ckan)
+    assert ranked.iloc[0]["precip_station_id"] == "GHCND:LIVE", \
+        "the closer but long-dead station must not be chosen"
+    print("\nprecip staleness filter OK.")
 
 
 def check_wq_radius():

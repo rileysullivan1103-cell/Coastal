@@ -193,6 +193,23 @@ def add_rain_windows(df, start, end):
 # Tides and coastal wind — NOAA CO-OPS, 6-minute
 # ---------------------------------------------------------------------------
 
+def nearest_serving(lat, lon, stations, max_km, tries=3):
+    """The nearest stations by distance, closest first.
+
+    Being listed as offering a product type does not mean a station serves it
+    for the requested window -- Monterey is in the 'met' list but returns no
+    wind -- so the caller needs more than one candidate to try.
+    """
+    if stations is None or stations.empty:
+        return []
+    d = f.haversine_km(lat, lon,
+                       stations["lat"].to_numpy(dtype=float),
+                       stations["lon"].to_numpy(dtype=float))
+    ordered = stations.assign(_km=d).nsmallest(tries, "_km")
+    return [(row, row["_km"]) for _, row in ordered.iterrows()
+            if row["_km"] <= max_km]
+
+
 def coops_stations(station_type):
     """Every CO-OPS station offering a product type ('waterlevels', 'met')."""
     resp = requests.get(COOPS_MDAPI, params={"type": station_type}, timeout=120)
@@ -284,6 +301,17 @@ def _sql(query):
     return pd.DataFrame(resp.json()["result"]["records"])
 
 
+def canonical_station_id(value):
+    """CKAN numeric ids arrive as int, but a CSV round-trip through a column
+    that holds NaN for non-qualifying rows makes the column float64, turning
+    101 into 101.0. Compare both sides on one canonical form."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value).strip()
+    return str(int(number)) if number.is_integer() else str(number)
+
+
 def station_code_map(site_station_ids):
     """Station_id -> StationCode, via the coordinate-validated join."""
     stations = pd.DataFrame(_fetch_all(f.CA_CKAN_RESOURCE_ID))
@@ -295,10 +323,13 @@ def station_code_map(site_station_ids):
     joined, stats = ckan_join.join_stations_to_results(stations, distinct)
     print(f"    join kept {stats['kept']}/{stats['joined']} pairs")
 
-    wanted = {str(x) for x in site_station_ids}
-    subset = joined[joined[f.CA_CKAN_ID_COL].astype(str).isin(wanted)]
-    return dict(zip(subset[f.CA_CKAN_ID_COL].astype(str),
-                    subset[ckan_join.RESULT_KEY].astype(str)))
+    wanted = {canonical_station_id(x) for x in site_station_ids}
+    keys = joined[f.CA_CKAN_ID_COL].map(canonical_station_id)
+    subset = joined[keys.isin(wanted)]
+    if subset.empty and wanted:
+        print(f"    no match. wanted {sorted(wanted)[:5]}, "
+              f"join has {sorted(set(keys))[:5]}")
+    return dict(zip(keys[keys.isin(wanted)], subset[ckan_join.RESULT_KEY].astype(str)))
 
 
 def _fetch_all(resource_id):
@@ -371,53 +402,50 @@ def main():
     print("\nTides and coastal wind (CO-OPS, 6-minute)...")
     tide_stations = coops_stations("waterlevels")
     met_stations = coops_stations("met")
+    # Several sites share a gauge; pull each station/product once.
+    done = set()
+
+    def pull_once(station, product, transform, prefix):
+        key = (station["station_id"], product)
+        if key in done:
+            print(f"      {product} already pulled for {station['station_id']}")
+            return True
+        raw = pull_coops_series(station["station_id"], product, start, end)
+        if raw is None or raw.empty:
+            return False
+        done.add(key)
+        path = f"{OUT_DIR}/{prefix}_{station['station_id']}.csv"
+        out = transform(raw)
+        out.to_csv(path, index=False)
+        extra = ""
+        if prefix == "tide":
+            extra = f"  {out['tide_state'].value_counts().to_dict()}"
+        print(f"      {len(out)} readings -> {path}{extra}")
+        return True
+
+    def water_temp(raw):
+        out = raw[["time"]].copy()
+        out["water_temp_c"] = pd.to_numeric(raw["v"], errors="coerce")
+        return out
+
     for _, site in sites.iterrows():
         lat, lon = site["lat"], site["lon"]
         print(f"  {site['camera_name']}")
 
-        gauge, dist = f.nearest_with_min_distance(
-            lat, lon, tide_stations, "lat", "lon", MAX_TIDE_DISTANCE_KM)
-        if gauge is None:
-            print(f"    no water level gauge within {MAX_TIDE_DISTANCE_KM} km")
-        else:
-            print(f"    tide gauge {gauge['station_id']} {gauge['name']} "
-                  f"({dist:.1f} km)")
-            raw = pull_coops_series(gauge["station_id"], "water_level", start, end)
-            if raw is None or raw.empty:
-                print("      no water level data")
-            else:
-                tide = add_tide_state(raw)
-                path = f"{OUT_DIR}/tide_{gauge['station_id']}.csv"
-                tide.to_csv(path, index=False)
-                counts = tide["tide_state"].value_counts().to_dict()
-                print(f"      {len(tide)} readings -> {path}  {counts}")
-
-            # Coastal water temperature, as a companion to the buoy's WTMP.
-            # A gauge at the beach and a buoy 20-30 km offshore are measuring
-            # different water; for surf-zone bacteria the near one is likelier
-            # to be the relevant one.
-            wt = pull_coops_series(gauge["station_id"], "water_temperature",
-                                   start, end)
-            if wt is not None and not wt.empty:
-                wt_out = wt[["time"]].copy()
-                wt_out["water_temp_c"] = pd.to_numeric(wt["v"], errors="coerce")
-                path = f"{OUT_DIR}/watertemp_{gauge['station_id']}.csv"
-                wt_out.to_csv(path, index=False)
-                print(f"      {len(wt_out)} water temp readings -> {path}")
-
-        met, mdist = f.nearest_with_min_distance(
-            lat, lon, met_stations, "lat", "lon", MAX_TIDE_DISTANCE_KM)
-        if met is None:
-            print(f"    no met station within {MAX_TIDE_DISTANCE_KM} km")
-            continue
-        print(f"    met station {met['station_id']} {met['name']} ({mdist:.1f} km)")
-        raw = pull_coops_series(met["station_id"], "wind", start, end)
-        if raw is None or raw.empty:
-            print("      no wind data")
-        else:
-            path = f"{OUT_DIR}/wind_{met['station_id']}.csv"
-            add_wind(raw).to_csv(path, index=False)
-            print(f"      {len(raw)} readings -> {path}")
+        for product, source, transform, prefix in (
+                ("water_level", tide_stations, add_tide_state, "tide"),
+                ("water_temperature", tide_stations, water_temp, "watertemp"),
+                ("wind", met_stations, add_wind, "wind")):
+            served = False
+            for station, dist in nearest_serving(lat, lon, source,
+                                                 MAX_TIDE_DISTANCE_KM):
+                print(f"    {product}: trying {station['station_id']} "
+                      f"{station['name']} ({dist:.1f} km)")
+                if pull_once(station, product, transform, prefix):
+                    served = True
+                    break
+            if not served:
+                print(f"    no {product} within {MAX_TIDE_DISTANCE_KM} km")
 
     print("\nWater quality (bacteria samples)...")
     codes = station_code_map(sites["wq_station_id"].dropna())

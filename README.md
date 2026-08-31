@@ -205,6 +205,12 @@ over that:
 | CO-OPS `wind` | 6-minute | speed, direction, gust |
 | CO-OPS `water_temperature` | 6-minute | water temp at the coast, not offshore |
 | NOAA CDO GHCND | **daily** | precipitation, plus 24/48/72h rolling totals |
+
+A precipitation station must also have reported within
+`MAX_PRECIP_STALENESS_DAYS`. `datacoverage` is a lifetime figure, so a station
+that stopped reporting years ago still scores 0.98 and gets matched — three of
+the seven sites initially drew stations that returned no data at all for the
+past year.
 | data.ca.gov CKAN | irregular | bacteria samples, a few a week in swim season |
 
 **Hourly precipitation is not available.** GHCND publishes one PRCP total per
@@ -240,16 +246,37 @@ Coastal water temperature is pulled separately from CO-OPS. A tide gauge at the
 beach and a buoy 20-30 km offshore are measuring different water; for surf-zone
 bacteria the near one is likelier to be the relevant predictor, so both are kept.
 
+### Known coverage gaps
+
+Established by running the pull, not assumed:
+
+- **No buoy supplies wind.** `46236`, `46237` and `46274` all return `WDIR` and
+  `WSPD` as entirely empty columns. Wind has to come from CO-OPS.
+- **`46053` (Carpinteria) has sparse waves** — `MWD`/`WVHT` on ~9,560 of 26,459
+  rows, so swell direction is missing about two thirds of the time there.
+- **CO-OPS products vary by station even within a listed type.** Monterey
+  (`9413450`) is in the `met` list but serves no wind; La Jolla, San Francisco
+  and Santa Barbara serve wind but no water temperature. The pull tries the
+  three nearest stations for each product rather than only the closest, and
+  pulls each station/product combination once even when several sites share it.
+
 ## Reading the WebCOOS product catalogue
 
 `explore_webcoos_products.py` lists every feed, product and service per camera
 from the saved `webcoos_assets_raw.json`, so it costs nothing to re-run.
 
-It exists because **`pywebcoos` hardcodes `feed_name = 'raw-video-data'`** in
-`get_products()`, `get_inventory()` and `download()`. Any product published under
-a different feed — which is where a derived rip-detection output would most
-likely live — is invisible to that library and needs a direct API call. The
-script flags each feed accordingly.
+`pywebcoos` hardcodes `feed_name = 'raw-video-data'` in `get_products()`,
+`get_inventory()` and `download()`, so a product under any other feed would be
+invisible to it. Running the explorer settled that: **every product on all 86
+cameras is under `raw-video-data`**, so the library reaches everything.
+
+Derived products that exist: `rip-detection-results` (8 cameras),
+`object-detection-results` (14), `seal-detection-results` (1), plus
+`annotated-image` (22).
+
+**`rip-detection-results` in California exists on exactly one camera: Walton
+Lighthouse, Santa Cruz** — 35,158 elements — and that camera is one of the seven
+qualifying sites.
 
 ## Buoy station types
 
