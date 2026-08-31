@@ -38,8 +38,12 @@ WEBCOOS_API_BASE = "https://app.webcoos.org/webcoos/api/v1"
 CDO_PAGE_SIZE = 1000  # CDO's maximum
 CDO_REQUEST_INTERVAL_S = 0.25
 
-MAX_BUOY_DISTANCE_KM = 75
+MAX_BUOY_DISTANCE_KM = 50
 MAX_PRECIP_DISTANCE_KM = 30
+# Water quality gets its own, much tighter radius: a bacteria reading is only
+# representative of the stretch of water it was taken from, so a station has to
+# be effectively at the beach the camera watches, not merely in the same town.
+MAX_WQ_DISTANCE_KM = 2
 MIN_ACCEPTABLE_DATACOVERAGE = 0.90  # NOAA's own precomputed metric, 0-1
 TOP_N_SITES = 20
 
@@ -437,7 +441,7 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df=None):
         # NOTE: WQP field names (LatitudeMeasure/LongitudeMeasure) are the
         # documented convention but unverified live — check real response first
         wq_row, wq_dist = nearest_with_min_distance(
-            lat, lon, wq_df, "LatitudeMeasure", "LongitudeMeasure", MAX_PRECIP_DISTANCE_KM)
+            lat, lon, wq_df, "LatitudeMeasure", "LongitudeMeasure", MAX_WQ_DISTANCE_KM)
 
         # California sites use the dedicated data.ca.gov CKAN source in
         # preference to the generic national WQP search. If that source is
@@ -449,7 +453,7 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df=None):
         if ca_site and have_ckan:
             ca_row, ca_dist = nearest_with_min_distance(
                 lat, lon, ca_wq_df, CA_CKAN_LAT_COL, CA_CKAN_LON_COL,
-                MAX_PRECIP_DISTANCE_KM)
+                MAX_WQ_DISTANCE_KM)
             wq_row, wq_dist = ca_row, ca_dist
             wq_source = ca_row[CA_CKAN_ID_COL] if ca_row is not None else None
             if ca_row is not None and CA_CKAN_LABEL_COL in ca_wq_df.columns:

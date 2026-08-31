@@ -30,8 +30,9 @@ def main():
         {"id": "GHCND:USBADCOVER", "latitude": 32.79, "longitude": -79.93, "datacoverage": 0.42},
     ])
     wq = pd.DataFrame([
+        # ~0.7 km from the Charleston camera — inside MAX_WQ_DISTANCE_KM.
         {"MonitoringLocationIdentifier": "SCDHEC-MD-123",
-         "LatitudeMeasure": 32.80, "LongitudeMeasure": -79.90},
+         "LatitudeMeasure": 32.785, "LongitudeMeasure": -79.925},
     ])
 
     ranked = f.rank_candidate_sites(cams, buoys, precip, wq)
@@ -64,6 +65,7 @@ def main():
         "the non-qualifying site should sort last"
 
     check_california_only_path()
+    check_wq_radius()
 
     print("\nAll offline assertions passed.")
 
@@ -124,6 +126,42 @@ def check_california_only_path():
     assert f.in_region(37.8, -122.4, "california")
     assert not f.in_region(32.78, -79.92, "california")
     print("\nCalifornia assumed + measured paths and region helpers OK.")
+
+
+def check_wq_radius():
+    """Water quality uses its own radius, much tighter than the precip one: a
+    bacteria reading only speaks for the water it came from."""
+    cam = pd.DataFrame([
+        {"camera_name": "Radius Probe, CA", "latitude": 33.19, "longitude": -117.38},
+    ])
+    buoys = pd.DataFrame([{"Station": "46086", "Lat": 33.05, "Lon": -117.60}])
+    precip = pd.DataFrame([
+        {"id": "GHCND:X", "latitude": 33.21, "longitude": -117.35, "datacoverage": 0.99},
+    ])
+    empty_wq = pd.DataFrame(
+        columns=["MonitoringLocationIdentifier", "LatitudeMeasure", "LongitudeMeasure"])
+
+    def station_at(lat):
+        return pd.DataFrame([{"Station_id": 1, "Station_UpperLat": lat,
+                              "Station_UpperLon": -117.38, "Beach_Name": "Probe Beach"}])
+
+    # ~1.1 km away: inside the radius.
+    near = f.rank_candidate_sites(cam, buoys, precip, empty_wq,
+                                  ca_wq_df=station_at(33.20)).iloc[0]
+    assert near["wq_station_id"] == 1, near["wq_station_id"]
+    assert near["wq_distance_km"] < f.MAX_WQ_DISTANCE_KM
+    assert near["has_all_four"]
+
+    # ~3.0 km away: outside it, and must not be matched even though it is well
+    # inside the 30 km precip radius.
+    far = f.rank_candidate_sites(cam, buoys, precip, empty_wq,
+                                 ca_wq_df=station_at(33.217)).iloc[0]
+    assert far["wq_station_id"] is None, far["wq_station_id"]
+    assert not far["has_all_four"], "a station beyond the WQ radius must not qualify a site"
+
+    # The precip station stayed matched throughout — only WQ tightened.
+    assert far["precip_station_id"] == "GHCND:X"
+    print("\nWater quality radius boundary OK.")
 
 
 if __name__ == "__main__":

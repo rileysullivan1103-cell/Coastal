@@ -142,6 +142,18 @@ python verify_ca_ckan.py
 python verify_ca_ckan.py RESOURCE_ID [RESOURCE_ID ...]
 ```
 
+## Distance thresholds
+
+| source | radius | rationale |
+|---|---|---|
+| buoy | 50 km | offshore conditions generalise over distance |
+| precipitation | 30 km | rainfall is regional |
+| water quality | 2 km | a bacteria reading only speaks for the water it came from |
+
+Water quality previously shared the precipitation radius. It has its own
+constant, `MAX_WQ_DISTANCE_KM`, because 30 km was letting a station anywhere in
+the same town qualify a site.
+
 ## Scoring
 
 `combined_score` is `has_all_four` minus a distance term, so qualifying sites
