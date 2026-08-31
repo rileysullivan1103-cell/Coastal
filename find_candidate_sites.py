@@ -182,7 +182,14 @@ def get_all_cameras() -> pd.DataFrame:
                 continue
             rows.append({"camera_name": label, "latitude": lat, "longitude": lon})
 
-        url = payload.get("next")
+        # Top-level keys are ('pagination', 'results') — this API puts the
+        # cursor under 'pagination', and has no top-level 'count' or 'next'.
+        pagination = payload.get("pagination") or {}
+        url = (payload.get("next") or pagination.get("next")
+               or pagination.get("next_url") or pagination.get("next_page"))
+        if url is None and pagination:
+            print(f"  note: no next cursor found in pagination={pagination!r}; "
+                  "stopping after this page")
 
     if not rows:
         sys.exit(
@@ -226,10 +233,13 @@ def get_all_precip_stations(bounding_extent: str, token: str) -> pd.DataFrame:
         resp.raise_for_status()
 
         payload = resp.json()
-        # CDO returns an empty body (not an error) for an invalid token.
+        # CDO answers {} both for an invalid token and for an offset past the
+        # end of the resultset. Only the first page can distinguish them.
         if not payload:
-            sys.exit("NOAA CDO returned an empty response — usually an invalid token. "
-                     "Run check_tokens.py.")
+            if not all_stations:
+                sys.exit("NOAA CDO returned an empty response on the first page — "
+                         "usually an invalid token. Run check_tokens.py.")
+            break
 
         batch = payload.get("results", [])
         if not batch:
@@ -238,6 +248,10 @@ def get_all_precip_stations(bounding_extent: str, token: str) -> pd.DataFrame:
 
         total = payload.get("metadata", {}).get("resultset", {}).get("count")
         print(f"  fetched {len(all_stations)}" + (f"/{total}" if total else "") + " stations")
+
+        # Stop on the reported total rather than probing one page past the end.
+        if total is not None and len(all_stations) >= total:
+            break
 
         offset += CDO_PAGE_SIZE
         time.sleep(CDO_REQUEST_INTERVAL_S)
