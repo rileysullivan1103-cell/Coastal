@@ -144,6 +144,28 @@ python verify_ca_ckan.py RESOURCE_ID [RESOURCE_ID ...]
 
 ## Distance thresholds
 
+## Current results (California, 2026-08-31)
+
+86 WebCOOS cameras nationally, 10 in California, of which **7 qualify** on
+buoy + precipitation + water quality.
+
+| camera | buoy | km | beach | km |
+|---|---|---|---|---|
+| San Elijo State Beach | 46274 | 5.8 | Cardiff State Beach | 0.1 |
+| Stinson Beach | 46237 | 12.0 | Stinson Beach | 0.1 |
+| Sausalito - Galilee Harbor | 46237 | 15.1 | Schoonmaker Beach | 0.2 |
+| Walton Lighthouse, Santa Cruz | 46236 | 22.9 | Twin Lakes State Beach | 0.4 |
+| Santa Cruz Wharf | 46236 | 23.2 | Main Beach | 0.3 |
+| Capitola Wharf | 46236 | 23.6 | Capitola City Beach | 0.3 |
+| Carpinteria State Beach | 46053 | 33.7 | Carpinteria State | 0.3 |
+
+The three that do not qualify — Crescent City, Humboldt Bay/Arcata, and Point
+Reyes — all have a buoy and a precipitation station. They fail only on water
+quality: no active monitoring station within `MAX_WQ_DISTANCE_KM`.
+
+Beach names come from CKAN and camera coordinates from WebCOOS, so the two
+sources agreeing at 0.1-0.4 km is an independent check on the matching.
+
 ## Buoy station types
 
 `NdbcApi().stations()` returns 1351 stations nationally: 709 land-based
