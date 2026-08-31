@@ -20,8 +20,8 @@ def main():
         {"camera_name": "Middle Of Nowhere, ND", "latitude": 47.00, "longitude": -100.00},
     ])
     buoys = pd.DataFrame([
-        {"Station": "41004", "Lat": 32.70, "Lon": -79.50},   # ~40 km from Charleston
-        {"Station": "46086", "Lat": 33.05, "Lon": -117.60},  # ~26 km from Oceanside
+        {"Station": "41004", "Lat": 32.70, "Lon": -79.50, "Name": "Edisto", "Type": "buoy"},
+        {"Station": "46086", "Lat": 33.05, "Lon": -117.60, "Name": "San Clemente", "Type": "buoy"},
     ])
     precip = pd.DataFrame([
         {"id": "GHCND:USW00013880", "latitude": 32.90, "longitude": -80.04, "datacoverage": 1.00},
@@ -79,8 +79,8 @@ def check_california_only_path():
         {"camera_name": "Santa Cruz, CA", "latitude": 36.96, "longitude": -122.02},
     ])
     buoys = pd.DataFrame([
-        {"Station": "46086", "Lat": 33.05, "Lon": -117.60},
-        {"Station": "46042", "Lat": 36.79, "Lon": -122.40},
+        {"Station": "46086", "Lat": 33.05, "Lon": -117.60, "Name": "San Clemente", "Type": "buoy"},
+        {"Station": "46042", "Lat": 36.79, "Lon": -122.40, "Name": "Monterey", "Type": "buoy"},
     ])
     precip = pd.DataFrame([
         {"id": "GHCND:USW00093107", "latitude": 33.21, "longitude": -117.35, "datacoverage": 0.95},
@@ -134,7 +134,8 @@ def check_wq_radius():
     cam = pd.DataFrame([
         {"camera_name": "Radius Probe, CA", "latitude": 33.19, "longitude": -117.38},
     ])
-    buoys = pd.DataFrame([{"Station": "46086", "Lat": 33.05, "Lon": -117.60}])
+    buoys = pd.DataFrame([{"Station": "46086", "Lat": 33.05, "Lon": -117.60,
+                           "Name": "San Clemente", "Type": "buoy"}])
     precip = pd.DataFrame([
         {"id": "GHCND:X", "latitude": 33.21, "longitude": -117.35, "datacoverage": 0.99},
     ])

@@ -38,6 +38,15 @@ WEBCOOS_API_BASE = "https://app.webcoos.org/webcoos/api/v1"
 CDO_PAGE_SIZE = 1000  # CDO's maximum
 CDO_REQUEST_INTERVAL_S = 0.25
 
+# NdbcApi().stations() returns 709 land-based 'fixed' stations alongside 439
+# moored 'buoy's (plus dart/oilrig/tao/other). They are different instruments:
+# a moored buoy reports offshore conditions, a fixed station reports whatever
+# is bolted to a pier. Restrict to the types whose data suits the pipeline.
+# None keeps every type. Example: ("buoy",) for moored buoys only.
+BUOY_TYPES = None
+# NDBC's 'met' flag. Drops stations with no standard meteorological feed.
+BUOY_REQUIRE_METEOROLOGY = False
+
 MAX_BUOY_DISTANCE_KM = 50
 MAX_PRECIP_DISTANCE_KM = 30
 # Water quality gets its own, much tighter radius: a bacteria reading is only
@@ -223,9 +232,21 @@ def get_all_cameras() -> pd.DataFrame:
 
 
 def get_all_buoys() -> pd.DataFrame:
-    """Every NDBC station. Columns are 'Station', 'Lat', 'Lon', 'Name', ...
+    """NDBC stations. Columns are 'Station', 'Lat', 'Lon', 'Name', 'Type', ...
     (capitalized — see ndbc_api/api/parsers/http/active_stations.py)."""
-    return NdbcApi().stations()
+    df = NdbcApi().stations()
+
+    if BUOY_TYPES is not None and "Type" in df.columns:
+        before = len(df)
+        df = df[df["Type"].isin(BUOY_TYPES)]
+        print(f"  kept {len(df)}/{before} stations of type {tuple(BUOY_TYPES)}")
+
+    if BUOY_REQUIRE_METEOROLOGY and "Includes Meteorology" in df.columns:
+        before = len(df)
+        df = df[df["Includes Meteorology"]]
+        print(f"  kept {len(df)}/{before} stations with a meteorology feed")
+
+    return df.reset_index(drop=True)
 
 
 def get_all_precip_stations(bounding_extent: str, token: str) -> pd.DataFrame:
@@ -475,6 +496,8 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df=None):
             "camera_name": cam.get("camera_name", "unknown"),
             "lat": lat, "lon": lon,
             "buoy_id": buoy_row["Station"] if buoy_row is not None else None,
+            "buoy_name": buoy_row["Name"] if buoy_row is not None else None,
+            "buoy_type": buoy_row["Type"] if buoy_row is not None else None,
             "buoy_distance_km": _round_km(buoy_dist),
             "precip_station_id": precip_row["id"] if precip_row is not None else None,
             "precip_datacoverage": precip_row["datacoverage"] if precip_row is not None else None,
@@ -571,7 +594,6 @@ if __name__ == "__main__":
     top_sites = (qualified if len(qualified) >= TOP_N_SITES else ranked).head(TOP_N_SITES)
     top_sites.to_csv("candidate_sites_ranked.csv", index=False)
     print(f"Saved top {len(top_sites)} to candidate_sites_ranked.csv")
-    print(top_sites[["camera_name", "buoy_id", "buoy_distance_km",
-                     "precip_station_id", "precip_datacoverage",
-                     "wq_station_name", "wq_distance_km",
-                     "has_all_four"]].to_string(index=False))
+    print(top_sites[["camera_name", "buoy_id", "buoy_type", "buoy_distance_km",
+                     "precip_datacoverage", "wq_station_name",
+                     "wq_distance_km", "has_all_four"]].to_string(index=False))
