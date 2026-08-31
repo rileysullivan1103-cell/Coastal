@@ -28,11 +28,32 @@ Both are read from the environment. Never hardcode them — `.env` is gitignored
 
 NOAA CDO limits: 5 requests/second, 10,000 requests/day.
 
+## Run order
+
+Run these in order. Each one is cheap and catches a class of failure before the
+expensive bulk download.
+
+```bash
+python check_tokens.py           # 1. are both tokens actually accepted?
+python verify_webcoos_fields.py  # 2. where do camera coordinates really live?
+python verify_wqp_fields.py      # 3. are the WQP column names right?
+python test_matching_offline.py  # 4. matching logic sanity check (no network)
+python find_candidate_sites.py   # 5. the real run
+```
+
+Steps 2 and 3 may tell you to update field names in `find_candidate_sites.py`
+before step 5 will work. That is the point of running them.
+
 ## Scripts
 
+- **`check_tokens.py`** — one cheap authenticated request per service. Reports
+  "rejected" separately from "unreachable" so you can tell a bad token from a
+  network problem.
 - **`verify_webcoos_fields.py`** — probes `GET /webcoos/api/v1/assets/` and prints
   the full field map plus every coordinate-like path, and dumps the raw JSON.
-  Run this first; it is what confirms where camera coordinates actually live.
+  This is what confirms where camera coordinates actually live.
+- **`verify_wqp_fields.py`** — pulls a small bbox from the Water Quality Portal
+  and prints the real column names against the ones the pipeline expects.
 - **`find_candidate_sites.py`** — the pipeline. Bulk-downloads each source once,
   then matches locally.
 - **`test_matching_offline.py`** — exercises the matching/ranking logic against
@@ -56,8 +77,21 @@ Confirmed by reading the installed library sources:
 
 ## Still unverified
 
+Neither of these could be checked against a live response yet, so both have a
+probe script and both fail loudly rather than silently producing zero results.
+
 - The exact JSON path to camera coordinates in the WebCOOS asset record.
   `_GEOM_PATHS` in `find_candidate_sites.py` tries the plausible shapes and
-  raises loudly if none match — run `verify_webcoos_fields.py` and update it.
+  raises if none match — run `verify_webcoos_fields.py` and pin the real path.
 - Water Quality Portal field names (`LatitudeMeasure`, `LongitudeMeasure`,
-  `MonitoringLocationIdentifier`) and the `/data/Station/search` parameters.
+  `MonitoringLocationIdentifier`) and the `/data/Station/search` parameters —
+  run `verify_wqp_fields.py`.
+
+## Known scaling notes
+
+- The CDO pull paginates 1000 stations at a time over the whole US extent, which
+  is 100+ requests. CDO allows 5 req/sec and 10,000/day; the loop sleeps between
+  pages and backs off on HTTP 429.
+- The national WQP pull is large and can take several minutes. Narrow
+  `US_COASTAL_EXTENT` to your actual region of interest to cut both this and the
+  CDO pull down substantially.

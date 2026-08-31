@@ -14,9 +14,9 @@ Requires outbound access to app.webcoos.org, www.ncei.noaa.gov,
 www.ndbc.noaa.gov and www.waterqualitydata.us.
 """
 
-import math
 import os
 import sys
+import time
 from io import StringIO
 
 import numpy as np
@@ -33,6 +33,10 @@ WEBCOOS_TOKEN = os.environ.get("WEBCOOS_TOKEN")
 NOAA_CDO_TOKEN = os.environ.get("NOAA_CDO_TOKEN")
 
 WEBCOOS_API_BASE = "https://app.webcoos.org/webcoos/api/v1"
+
+# CDO permits 5 req/sec; 0.25s between pages keeps a safe margin.
+CDO_PAGE_SIZE = 1000  # CDO's maximum
+CDO_REQUEST_INTERVAL_S = 0.25
 
 MAX_BUOY_DISTANCE_KM = 75
 MAX_PRECIP_DISTANCE_KM = 30
@@ -168,15 +172,35 @@ def get_all_precip_stations(bounding_extent: str, token: str) -> pd.DataFrame:
     while True:
         resp = requests.get(url, headers={"token": token},
                             params={"extent": bounding_extent, "datasetid": "GHCND",
-                                    "limit": 1000, "offset": offset}, timeout=120)
+                                    "limit": CDO_PAGE_SIZE, "offset": offset}, timeout=120)
+
+        # CDO allows 5 requests/second and 10,000/day. A full US extent is well
+        # over a hundred pages, so back off rather than tripping the limiter.
+        if resp.status_code == 429:
+            print("  rate limited by CDO, backing off 10s...")
+            time.sleep(10)
+            continue
         if resp.status_code in (400, 401, 403):
             sys.exit(f"NOAA CDO rejected the request ({resp.status_code}): {resp.text[:300]}")
         resp.raise_for_status()
-        batch = resp.json().get("results", [])
+
+        payload = resp.json()
+        # CDO returns an empty body (not an error) for an invalid token.
+        if not payload:
+            sys.exit("NOAA CDO returned an empty response — usually an invalid token. "
+                     "Run check_tokens.py.")
+
+        batch = payload.get("results", [])
         if not batch:
             break
         all_stations.extend(batch)
-        offset += 1000
+
+        total = payload.get("metadata", {}).get("resultset", {}).get("count")
+        print(f"  fetched {len(all_stations)}" + (f"/{total}" if total else "") + " stations")
+
+        offset += CDO_PAGE_SIZE
+        time.sleep(CDO_REQUEST_INTERVAL_S)
+
     return pd.DataFrame(all_stations)  # includes 'datacoverage' field directly
 
 
@@ -193,9 +217,12 @@ def get_all_water_quality_stations(bounding_extent: str) -> pd.DataFrame:
         "bBox": bounding_extent,
         "characteristicName": "Escherichia coli;Enterococcus;Fecal Coliform",
         "mimeType": "csv",
+        "zip": "no",  # without this WQP can hand back a zip, which read_csv cannot parse
     }
     resp = requests.get(url, params=params, timeout=600)
     resp.raise_for_status()
+    if resp.content[:2] == b"PK":
+        sys.exit("WQP returned a zip archive despite zip=no — unpack it or adjust params.")
     return pd.read_csv(StringIO(resp.text))
 
 
