@@ -61,6 +61,8 @@ TIMEOUT = 60
 # thread pool with no sleep is both faster and gentler than one long serial
 # hammering.
 WORKERS = 6
+# Between pages of /elements/, which is a listing endpoint rather than a CDN.
+PAGE_PAUSE = 0.2
 
 
 def headers():
@@ -285,7 +287,7 @@ def fetch_elements(service_slug, start, end, interval_minutes=None):
         params = None  # the next URL already carries the query
         page += 1
         if url:
-            time.sleep(PAUSE)
+            time.sleep(PAGE_PAUSE)
 
     rows = []
     for element in out:
