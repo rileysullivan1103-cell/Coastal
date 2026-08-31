@@ -127,10 +127,43 @@ def check_gridded_rain_windows():
     print("gridded hourly rain windows OK")
 
 
+def check_wind_circular_maths():
+    """Direction is circular. Ordinary arithmetic on degrees is wrong in ways
+    that look plausible: 359 and 1 differ by 2, and their mean is 0, not 180."""
+    import numpy as np
+    import compare_wind_sources as w
+
+    assert abs(w.circular_diff(np.array([359.0]), np.array([1.0]))[0]) == 2.0
+    assert abs(w.circular_diff(np.array([1.0]), np.array([359.0]))[0]) == 2.0
+    assert abs(w.circular_diff(np.array([90.0]), np.array([270.0]))[0]) == 180.0
+
+    for speed, degrees in [(5.0, 0.0), (3.0, 90.0), (7.5, 187.0), (2.0, 359.0)]:
+        u, v = w.to_uv(np.array([speed]), np.array([degrees]))
+        speed_out, deg_out = w.from_uv(u, v)
+        assert abs(speed_out[0] - speed) < 1e-9
+        assert abs(w.circular_diff(deg_out, np.array([degrees]))[0]) < 1e-9
+
+    # Averaging 350 and 10 must give due north, not south.
+    u, v = w.to_uv(np.array([5.0, 5.0]), np.array([350.0, 10.0]))
+    _, mean_dir = w.from_uv(np.array([u.mean()]), np.array([v.mean()]))
+    assert abs(w.circular_diff(mean_dir, np.array([0.0]))[0]) < 1e-6, mean_dir
+
+    # Within an hour of reversing wind, scalar speed stays up but the vector
+    # speed cancels. Both are reported because they answer different questions.
+    times = pd.date_range("2026-01-01", periods=10, freq="6min", tz="UTC")
+    df = pd.DataFrame({"time": times, "wind_speed_m_s": [5.0] * 10,
+                       "wind_dir_deg": [0.0] * 5 + [180.0] * 5})
+    hourly = w.hourly_from_coops(df)
+    assert abs(hourly["speed"].iloc[0] - 5.0) < 1e-9
+    assert hourly["speed_vec"].iloc[0] < 0.01
+    print("wind circular maths OK")
+
+
 if __name__ == "__main__":
     check_station_id_canonicalisation()
     check_rain_windows()
     check_tide_state()
     check_wind_parsing()
     check_gridded_rain_windows()
+    check_wind_circular_maths()
     print("\nAll offline pull assertions passed.")

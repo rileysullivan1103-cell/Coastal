@@ -269,6 +269,31 @@ Requested variables are checked against the response — any that do not come
 back are reported rather than silently becoming a column of NaN — and the run
 prints the grid cell actually used, which is not the coordinate requested.
 
+## Is the wind any good
+
+`compare_wind_sources.py` answers this per site. Two things make wind harder
+than rainfall:
+
+**Three of the seven sites have no observed wind at all.** No buoy in the
+matched set publishes `WSPD`, and Monterey serves no CO-OPS wind, so Walton
+Lighthouse, Santa Cruz Wharf and Capitola have only the gridded source and
+nothing to validate it against. The script names them separately rather than
+quietly omitting them.
+
+**Direction is circular.** An ordinary mean or correlation on degrees treats
+359 and 1 as nearly opposite and averages them to 180 — due south for two
+readings that are both due north. Everything here goes through u/v components:
+the 6-minute CO-OPS readings are vector-averaged to hourly, and the comparison
+reports mean absolute circular difference rather than a correlation.
+
+`within45` — the share of blowing hours where the two sources agree to within
+45 degrees, about one compass octant — is the column to judge on for a surf
+zone, since onshore versus offshore is what matters. Calm hours are excluded,
+because a calm has no direction to compare.
+
+Both scalar and vector mean speed are kept. They differ whenever direction
+swings within the hour, and the gap is itself informative.
+
 ## Choosing between the gauge and the grid
 
 `compare_precip_sources.py` aggregates the hourly grid to daily, aligns it
