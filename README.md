@@ -675,10 +675,27 @@ rather than correlated; what remains analysable is how OFTEN the detector
 fires (`detections` per hour) and how confident it is (`score_max`,
 `bbox_area_max`).
 
-Getting true negatives would mean pulling the `one-minute-stills` feed for the
-same camera and treating every still with no matching detection element as an
-observed zero. That is a different and much larger pull -- the stills run to
-hundreds of thousands of elements -- and it has not been done.
+### Getting the zeros honestly
+
+    python pull_rip_detection.py --coverage --start 2025-06-01 --end 2025-09-01
+
+`--coverage` enumerates the stills product and writes an hourly count of
+images captured. It **downloads nothing**: element listing already returns a
+timestamp per element, which is all a denominator needs, so hundreds of
+thousands of JPEGs never move. Pagination is the only cost.
+
+`analyze_drivers.py` picks the coverage file up automatically. With it, an
+hour holding images and no detection becomes an **observed zero**, an hour
+with no images stays absent, and `detection_rate` becomes detections per image
+examined rather than the constant 1.0.
+
+Do NOT skip this and treat every missing hour as a zero. 123 of 823 daily bins
+are empty, and those are camera or pipeline outages, not days with no rips.
+Scoring an outage as "no rip" biases the target toward zero exactly when the
+camera was down — and cameras go down in bad weather, which is correlated with
+the very drivers being tested. That turns a data gap into a fake negative
+result. Without a coverage file the analysis says so and leaves those hours
+UNKNOWN.
 
 ## Seasonal confounding in the water quality analysis
 

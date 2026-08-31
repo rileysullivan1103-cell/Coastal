@@ -315,6 +315,46 @@ def test_degenerate_target_is_named():
           math.isnan(rho), rho)
 
 
+def test_coverage_creates_observed_zeros():
+    print("\napply_coverage")
+    tmp = tempfile.mkdtemp()
+    old_data = a.DATA_DIR
+    try:
+        a.DATA_DIR = tmp
+        hours = pd.date_range("2025-06-01 15:00", periods=10, freq="h", tz="UTC")
+        # The detector fired in only 3 of the 10 hours the camera was looking.
+        detections = pd.DataFrame({
+            "hour": hours[:3], "frames": [2, 2, 2],
+            "frames_with_detection": [2, 2, 2], "detections": [2, 3, 2],
+            "detection_rate": [1.0, 1.0, 1.0], "score_max": [0.7, 0.8, 0.6]})
+        # Coverage spans 10 hours; a further 5 hours have no imagery at all.
+        pd.DataFrame({"hour": hours, "images": [60] * 10}).to_csv(
+            f"{tmp}/coverage_test-beach_hourly.csv", index=False)
+
+        merged, ok = a.apply_coverage(detections, "test-beach")
+        check("coverage was found", ok)
+        check("every hour with imagery is present", len(merged) == 10, len(merged))
+        check("hours the camera did not see stay absent",
+              merged["hour"].max() == hours[-1], merged["hour"].max())
+        zeros = merged[merged["frames_with_detection"] == 0]
+        check("the quiet hours become observed zeros", len(zeros) == 7, len(zeros))
+        check("their detection_rate is 0, not NaN",
+              (zeros["detection_rate"] == 0).all(), zeros["detection_rate"].tolist())
+        check("the target now varies", merged["detection_rate"].nunique() > 1,
+              merged["detection_rate"].nunique())
+        # 2 detections in 60 images, not 2 in 2.
+        first = merged[merged["hour"] == hours[0]].iloc[0]
+        check("rate is against images examined, not elements published",
+              abs(first["detection_rate"] - 2 / 60) < 1e-9, first["detection_rate"])
+
+        missing, ok = a.apply_coverage(detections, "no-such-camera")
+        check("a missing coverage file is reported, not assumed", not ok)
+        check("and the frame is returned untouched", len(missing) == 3, len(missing))
+    finally:
+        a.DATA_DIR = old_data
+        shutil.rmtree(tmp)
+
+
 def test_analyte_key():
     print("\nanalyte_key")
     cases = {"Enterococcus": "ENT", "ENTEROCOCCUS": "ENT", "E. coli": "ECOLI",
@@ -330,6 +370,7 @@ if __name__ == "__main__":
     test_demean_by()
     test_standardized_ols()
     test_analyte_key()
+    test_coverage_creates_observed_zeros()
     test_regression_drops_identical_columns()
     test_regression_withholds_when_singular()
     test_degenerate_target_is_named()

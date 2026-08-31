@@ -23,6 +23,7 @@ parsing is attempted.
 
     python pull_rip_detection.py --list
     python pull_rip_detection.py --inventory
+    python pull_rip_detection.py --coverage --start 2025-06-01 --end 2025-09-01
     python pull_rip_detection.py --probe
     python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01
 
@@ -53,6 +54,12 @@ RAW_DUMP = "webcoos_assets_raw.json"
 # product whose slug contains "rip" is offered as a fallback.
 PRODUCT_SLUG = "rip-detection-results"
 DEFAULT_CAMERA = "Walton Lighthouse"
+# The imagery product used as the DENOMINATOR. The rip feed publishes an
+# element only when the detector fires, so on its own it cannot distinguish
+# "no rip" from "no image". Enumerating stills gives the hours the camera was
+# actually looking, which turns the gaps into observed zeros instead of
+# assumed ones.
+STILLS_SLUG = "one-minute-stills"
 PROBE_HOURS = 6
 
 TIMEOUT = 60
@@ -134,27 +141,41 @@ def find_camera(assets, name):
              "\n  ".join(l for _, l in hits))
 
 
-def find_rip_service(asset):
-    """The service slug for the rip product on this camera, or exit."""
+def find_service(asset, exact_slug, hint, label="product"):
+    """(service_slug, product_label) for a product on this camera, or exit.
+
+    Matched on the product SLUG, with `hint` as a substring fallback so a
+    renamed product is still found rather than silently missing.
+    """
     rows = camera_products(asset)
-    exact = [r for r in rows if (r[3] or "").lower() == PRODUCT_SLUG]
-    loose = [r for r in rows if "rip" in (r[3] or "").lower()]
+    exact = [r for r in rows if (r[3] or "").lower() == exact_slug]
+    loose = [r for r in rows if hint in (r[3] or "").lower()]
     chosen = exact or loose
     if not chosen:
-        print("Products on this camera:")
+        print(f"Products on this camera:")
         for _, _, plabel, pslug, _, count in rows:
             print(f"  {pslug}  ({plabel!r}, {count or 0:,} elements)")
-        sys.exit(f"No product matching {PRODUCT_SLUG!r} on this camera.")
+        sys.exit(f"No {label} matching {exact_slug!r} on this camera.")
     if not exact:
-        print(f"No exact {PRODUCT_SLUG!r}; using {chosen[0][3]!r}")
+        print(f"No exact {exact_slug!r}; using {chosen[0][3]!r}")
     feed_label, feed_slug, product_label, product_slug, service_slug, count = chosen[0]
     print(f"feed    {feed_slug!r}   (label {feed_label!r})")
-    print(f"product {product_slug!r}   (label {product_label!r})")
+    print(f"{label} {product_slug!r}   (label {product_label!r})")
     print(f"service {service_slug!r}   {count or 0:,} elements")
     if feed_label != "raw-video-data":
         print("  note: pywebcoos matches the feed LABEL against the literal string")
         print("        'raw-video-data', so its download() cannot reach this feed.")
     return service_slug, product_label
+
+
+def find_rip_service(asset):
+    return find_service(asset, PRODUCT_SLUG, "rip")
+
+
+def find_stills_service(asset, slug=None):
+    """The imagery product that says WHEN the camera was actually looking."""
+    return find_service(asset, (slug or STILLS_SLUG).lower(), "still",
+                        label="stills ")
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +373,34 @@ def download(rows, save_dir, workers=WORKERS):
         print("  re-run the same command to retry only those")
     got.sort(key=lambda r: r["timestamp"])
     return got
+
+
+# ---------------------------------------------------------------------------
+# Coverage -- when was the camera actually looking?
+# ---------------------------------------------------------------------------
+
+def build_coverage(rows, out_csv):
+    """Hourly count of images captured. Nothing is downloaded to produce it.
+
+    Element enumeration returns a timestamp per element, which is all a
+    denominator needs. Downloading the imagery itself would be hundreds of
+    thousands of files to answer a question the listing already answers.
+    """
+    if not rows:
+        print("  no stills in that range — no coverage to write")
+        return None
+    frame = pd.DataFrame({"timestamp": [r["timestamp"] for r in rows]})
+    frame["hour"] = pd.to_datetime(frame["timestamp"], utc=True).dt.floor("h")
+    hourly = (frame.groupby("hour").size().rename("images").reset_index())
+    hourly.to_csv(out_csv, index=False)
+    span = hourly["hour"].max() - hourly["hour"].min()
+    possible = int(span.total_seconds() // 3600) + 1
+    print(f"  wrote {out_csv}  ({len(hourly)} hours with imagery)")
+    print(f"  {len(hourly)} of {possible} hours in the span carry any image"
+          f" ({100 * len(hourly) / max(possible, 1):.0f}%)")
+    print(f"  median {int(hourly['images'].median())} images/hour,"
+          f" max {int(hourly['images'].max())}")
+    return hourly
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +696,11 @@ def main():
     ap.add_argument("--refresh", action="store_true", help="re-fetch the asset catalogue")
     ap.add_argument("--inventory", action="store_true",
                     help="report when this product has data, and download nothing")
+    ap.add_argument("--coverage", action="store_true",
+                    help="enumerate the stills product to find the hours the "
+                         "camera was looking; downloads nothing")
+    ap.add_argument("--stills-product", default=None,
+                    help=f"product slug to use as denominator (default {STILLS_SLUG})")
     ap.add_argument("--via-pywebcoos", action="store_true",
                     help="use the library's download() instead of /elements/")
     ap.add_argument("--workers", type=int, default=WORKERS,
@@ -657,12 +711,16 @@ def main():
     if args.list:
         list_cameras(assets)
         return
-    if not (args.probe or args.pull or args.via_pywebcoos or args.inventory):
-        ap.error("choose one of --list, --inventory, --probe, --pull")
+    if not (args.probe or args.pull or args.via_pywebcoos or args.inventory
+            or args.coverage):
+        ap.error("choose one of --list, --inventory, --coverage, --probe, --pull")
 
     asset = find_camera(assets, args.camera)
     camera_label = dig(asset, "data", "common", "label")
-    service_slug, product_label = find_rip_service(asset)
+    if args.coverage:
+        service_slug, product_label = find_stills_service(asset, args.stills_product)
+    else:
+        service_slug, product_label = find_rip_service(asset)
     save_dir = os.path.join(OUT_DIR, slugify(camera_label))
 
     # The catalogue's element count says how much data exists, never when.
@@ -697,6 +755,8 @@ def main():
                       args.interval or 30, save_dir)
         return
 
+    if args.coverage:
+        print("  enumerating stills (no downloads); this is the slow part")
     rows = fetch_elements(service_slug, start, end, args.interval)
     if not rows:
         print("\nNo elements in that range.")
@@ -709,6 +769,11 @@ def main():
         return
     print(f"  first {rows[0]['timestamp']:%Y-%m-%d %H:%M}"
           f"  last {rows[-1]['timestamp']:%Y-%m-%d %H:%M} UTC")
+
+    if args.coverage:
+        build_coverage(rows, os.path.join(
+            OUT_DIR, f"coverage_{slugify(camera_label)}_hourly.csv"))
+        return
 
     got = download(rows, save_dir, args.workers)
     if args.probe:

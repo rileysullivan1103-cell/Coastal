@@ -381,6 +381,41 @@ def assemble_rip(sites):
     return merged, name
 
 
+def apply_coverage(frame, stem):
+    """Add hours the camera was looking but the detector never fired.
+
+    Without this the rip feed has no negatives, because it publishes an
+    element only on a detection. With it, an hour holding images and no
+    detection is an OBSERVED zero, and an hour with no images at all stays
+    absent -- which is the distinction that makes presence/absence analysable
+    at all. Assuming every missing hour is a zero would instead score every
+    camera outage as "no rip", and outages cluster in bad weather, which is
+    correlated with the drivers being tested.
+    """
+    paths = glob.glob(f"{DATA_DIR}/**/coverage_{stem}_hourly.csv", recursive=True)
+    if not paths:
+        print("  no coverage file — hours without a detection stay UNKNOWN, not"
+              " zero.\n    run: pull_rip_detection.py --coverage --start ... --end ...")
+        return frame, False
+    coverage = pd.read_csv(paths[0])
+    coverage["hour"] = to_hour(coverage["hour"])
+    before = len(frame)
+
+    merged = coverage.merge(frame, on="hour", how="left")
+    for column, fill in (("frames", 0), ("frames_with_detection", 0),
+                         ("detections", 0)):
+        if column in merged.columns:
+            merged[column] = merged[column].fillna(0)
+    # Rate against images examined, not against elements published.
+    merged["detection_rate"] = (merged["frames_with_detection"]
+                                / merged["images"].replace(0, np.nan))
+    merged["hour_of_day"] = merged["hour"].dt.hour
+    zeros = int((merged["frames_with_detection"] == 0).sum())
+    print(f"  coverage: {len(merged)} hours with imagery "
+          f"({before} had detections, {zeros} are observed zeros)")
+    return merged, True
+
+
 # Candidate targets, in preference order. Whichever have real variance get
 # analysed; a constant one is reported as constant rather than correlated.
 RIP_TARGETS = ["detection_rate", "detections", "score_max", "bbox_area_max"]
@@ -390,14 +425,16 @@ def analyze_rip(sites):
     frame, name = assemble_rip(sites)
     if frame is None:
         return
-    observed = frame[frame.get("frames", 0) > 0].copy()
-    print(f"\n{len(observed)} hours with frames")
+    frame, has_coverage = apply_coverage(frame, rip_slug(name))
+    observed = (frame.copy() if has_coverage
+                else frame[frame.get("frames", 0) > 0].copy())
+    print(f"\n{len(observed)} hours analysed")
 
     hours = sorted(observed["hour_of_day"].unique())
     print(f"  frames occur in hours {hours[0]}-{hours[-1]} UTC only "
           f"({len(hours)} distinct hours of day)")
 
-    if "detection_rate" in observed.columns:
+    if "detection_rate" in observed.columns and not has_coverage:
         share = float((observed["detection_rate"] >= 1.0).mean())
         if share > 0.999:
             print("\n  EVERY hour with frames has detection_rate 1.0.")
@@ -437,6 +474,9 @@ def analyze_rip(sites):
     print("    which compare_wind_sources.py could not validate at this site.")
     print("  - Daylight only, so any driver with a daily cycle is confounded;")
     print("    that is what the rho_ctrl column is for.")
+    if not has_coverage:
+        print("  - No stills denominator, so there are no observed zeros and")
+        print("    detection_rate carries no information. Run --coverage.")
 
 
 # ---------------------------------------------------------------------------
