@@ -197,14 +197,15 @@ def get_all_cameras() -> pd.DataFrame:
                 continue
             rows.append({"camera_name": label, "latitude": lat, "longitude": lon})
 
-        # Top-level keys are ('pagination', 'results') — this API puts the
-        # cursor under 'pagination', and has no top-level 'count' or 'next'.
+        # Paging lives under 'pagination', not at the top level:
+        # {'next', 'previous', 'count', 'page', 'total_pages', ...}
         pagination = payload.get("pagination") or {}
-        url = (payload.get("next") or pagination.get("next")
-               or pagination.get("next_url") or pagination.get("next_page"))
-        if url is None and pagination:
-            print(f"  note: no next cursor found in pagination={pagination!r}; "
-                  "stopping after this page")
+        url = pagination.get("next")
+        page, total_pages = pagination.get("page"), pagination.get("total_pages")
+        if url is None and page is not None and total_pages is not None \
+                and page < total_pages:
+            print(f"  warning: on page {page} of {total_pages} but the response "
+                  "carries no next link; results are incomplete")
 
     if not rows:
         sys.exit(
@@ -556,6 +557,10 @@ if __name__ == "__main__":
     print("Matching locally...")
     ranked = rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df)
 
+    # Default pandas width truncates this table to "[10 rows x 8 columns]".
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.width", 250)
+
     qualified = ranked[ranked["has_all_four"]]
     print(f"Cameras with buoy + precip + water quality all qualifying: {len(qualified)}")
 
@@ -564,4 +569,5 @@ if __name__ == "__main__":
     print(f"Saved top {len(top_sites)} to candidate_sites_ranked.csv")
     print(top_sites[["camera_name", "buoy_id", "buoy_distance_km",
                      "precip_station_id", "precip_datacoverage",
-                     "wq_station_id", "wq_station_name", "wq_distance_km"]])
+                     "wq_station_name", "wq_distance_km",
+                     "has_all_four"]].to_string(index=False))
