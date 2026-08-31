@@ -21,7 +21,6 @@ The output format of the rip product is not assumed. Run --probe first: it
 downloads a short window and reports what actually came down before any
 parsing is attempted.
 
-    export $(grep -v '^#' .env | xargs)
     python pull_rip_detection.py --list
     python pull_rip_detection.py --probe
     python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01
@@ -29,6 +28,8 @@ parsing is attempted.
 Writes files under data/rip_detection/<camera-slug>/ and, when the payload is
 tabular, a combined CSV alongside them.
 """
+
+import env  # noqa: F401  -- loads .env into os.environ
 
 import argparse
 import json

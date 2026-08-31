@@ -11,6 +11,8 @@ Then set CA_CKAN_RESOURCE_ID / CA_CKAN_LAT_COL / CA_CKAN_LON_COL /
 CA_CKAN_ID_COL in find_candidate_sites.py.
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import sys
 
 import requests

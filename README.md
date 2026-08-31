@@ -9,9 +9,34 @@ and a water-quality station.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env       # fill in both tokens
-export $(grep -v '^#' .env | xargs)
+cp .env.example .env
 ```
+
+Then put both tokens in `.env`. Nothing needs exporting — every script does
+`import env`, which reads `.env` straight into `os.environ`.
+
+## Coming back to this after closing the terminal
+
+Two things do not survive a closed window: the activated virtualenv, and
+anything exported into the shell. The `.env` loader takes care of the second,
+but the venv still has to be re-activated each time:
+
+```bash
+cd /path/to/Coastal && source .venv/bin/activate
+```
+
+If a script fails and it is not obvious why, run the doctor first:
+
+```bash
+python doctor.py
+```
+
+It reports which python is running, whether it is this project's `.venv`,
+which of the five packages import, whether both tokens are readable, and which
+intermediate files exist — then prints the exact commands to fix whatever is
+missing. It imports nothing outside the standard library, so it still runs on
+a bare system python where `pandas` is absent, which is one of the things it
+is there to detect.
 
 `pywebcoos` is **not on PyPI** — `pip install pywebcoos` fails. It installs from
 GitHub only, which `requirements.txt` handles:
@@ -34,6 +59,7 @@ Run these in order. Each one is cheap and catches a class of failure before the
 expensive bulk download.
 
 ```bash
+python doctor.py                 # 0. is this checkout runnable at all?
 python check_tokens.py           # 1. are both tokens actually accepted?
 python verify_webcoos_fields.py  # 2. where do camera coordinates really live?
 python verify_ca_ckan.py         # 3. find the CA water quality resource id
@@ -63,6 +89,13 @@ see Region scoping below.
   then matches locally.
 - **`test_matching_offline.py`** — exercises the matching/ranking logic against
   synthetic fixtures, no network needed.
+- **`env.py`** — loads `.env` into `os.environ` on import. An already-set
+  variable always wins, and `.env` is looked up beside the script rather than
+  in the current directory, so running from anywhere works.
+- **`doctor.py`** — standard library only. Diagnoses a checkout that will not
+  run and prints the commands to fix it.
+- **`test_env_offline.py`** — edge cases for the loader: quoting, `export`
+  prefixes, and not clobbering a variable the shell already set.
 - **`pull_rip_detection.py`** — downloads WebCOOS's own rip-detection product
   for Walton Lighthouse. Resolves feed and product by slug, so it is not
   subject to the pywebcoos label bug described below.

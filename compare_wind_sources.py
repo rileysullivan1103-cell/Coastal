@@ -12,9 +12,10 @@ treats 359 and 1 as almost opposite, so this uses vector components throughout:
 6-minute readings are averaged as u/v, and the comparison reports mean absolute
 circular difference rather than a correlation coefficient.
 
-    export $(grep -v '^#' .env | xargs)
     python compare_wind_sources.py
 """
+
+import env  # noqa: F401  -- loads .env into os.environ
 
 import os
 import sys

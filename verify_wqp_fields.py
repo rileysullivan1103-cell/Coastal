@@ -8,6 +8,8 @@ bbox so it returns in seconds, then prints the real columns.
     python verify_wqp_fields.py
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import sys
 from io import StringIO
 

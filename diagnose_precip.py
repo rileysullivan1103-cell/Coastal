@@ -12,10 +12,11 @@ reading station metadata. CDO's /datatypes?stationid= listing omits PRCP for
 stations that demonstrably serve it, and /datatypes/PRCP?stationid= ignores the
 station filter entirely, so both give confidently wrong answers.
 
-    export $(grep -v '^#' .env | xargs)
     python diagnose_precip.py
     python diagnose_precip.py GHCND:US1CASD0092 GHCND:USC00047916
 """
+
+import env  # noqa: F401  -- loads .env into os.environ
 
 import os
 import sys

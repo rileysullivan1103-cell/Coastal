@@ -19,6 +19,8 @@ No API key. Free for non-commercial use.
     python pull_gridded_weather.py --probe    one site, print the raw schema
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import os
 import sys
 from datetime import datetime, timedelta

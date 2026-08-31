@@ -15,6 +15,8 @@ tables independently recording where the station is. Pairs that disagree are
 dropped, not silently kept.
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import pandas as pd
 
 import find_candidate_sites as f

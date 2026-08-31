@@ -12,6 +12,8 @@ Endpoint and auth header below are taken from the pywebcoos source
 (pywebcoos/API.py::_make_api_request), so they are confirmed, not guessed.
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import json
 import os
 import sys

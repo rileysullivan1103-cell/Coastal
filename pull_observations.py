@@ -10,11 +10,12 @@ pretend otherwise:
   water quality  irregular data.ca.gov bacteria samples, a few per week in
                            swim season
 
-    export $(grep -v '^#' .env | xargs)
     python pull_observations.py
 
 Writes one CSV per site per source into data/.
 """
+
+import env  # noqa: F401  -- loads .env into os.environ
 
 import os
 import sys

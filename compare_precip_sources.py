@@ -11,6 +11,8 @@ wet-day agreement, correlation and bias per site.
     python compare_precip_sources.py
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import os
 import sys
 

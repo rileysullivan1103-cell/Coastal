@@ -4,9 +4,10 @@ Run this first on any machine before the full pipeline — it takes seconds and
 tells you whether a token is actually accepted, rather than failing 20 minutes
 into a bulk download.
 
-    export $(grep -v '^#' .env | xargs)
     python check_tokens.py
 """
+
+import env  # noqa: F401  -- loads .env into os.environ
 
 import os
 import sys

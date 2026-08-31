@@ -15,6 +15,8 @@ it costs nothing to re-run. Pass --fetch to refresh it from the API first.
     python explore_webcoos_products.py --all-states
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import json
 import os
 import sys

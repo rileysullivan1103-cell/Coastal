@@ -7,12 +7,13 @@ actual data records.
 Setup:
     pip install -r requirements.txt
     cp .env.example .env   # then fill in both tokens
-    export $(grep -v '^#' .env | xargs)
     python find_candidate_sites.py
 
 Requires outbound access to app.webcoos.org, www.ncei.noaa.gov,
 www.ndbc.noaa.gov and www.waterqualitydata.us.
 """
+
+import env  # noqa: F401  -- loads .env into os.environ
 
 import os
 import sys

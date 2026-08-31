@@ -14,6 +14,8 @@ silently joins every station to every result. This checks it three ways:
     python verify_ckan_join.py
 """
 
+import env  # noqa: F401  -- loads .env into os.environ
+
 import sys
 
 import pandas as pd
