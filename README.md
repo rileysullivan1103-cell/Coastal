@@ -166,6 +166,32 @@ quality: no active monitoring station within `MAX_WQ_DISTANCE_KM`.
 Beach names come from CKAN and camera coordinates from WebCOOS, so the two
 sources agreeing at 0.1-0.4 km is an independent check on the matching.
 
+## The stations-to-results join
+
+`verify_ckan_join.py` confirmed that `stations.Station_Name` <-> `results.StationCode`
+is the correct key: 1041 x 2705 rows join to 636, median coordinate gap 0.03 km,
+97% of pairs within 1 km.
+
+The remaining 3% matters. Use `ckan_join.join_stations_to_results()` rather than
+a raw merge, because three separate problems live in that tail:
+
+| symptom | cause |
+|---|---|
+| `1100` -> Rincon Beach vs Crescent City, 963 km, names disagree | short agency-local codes are not unique statewide |
+| `EH-130`, `BC-010`, `BC-020` ~13,400 km, names agree | one side carries the `(0,0)` placeholder |
+| `BNB25` 29.7 km, Laguna Beach 13.8 km, names agree | a coordinate is simply wrong in one table |
+
+Only the first is a true mis-join, and it is the dangerous one: it would
+attribute Crescent City bacteria readings to a Rincon Beach camera with nothing
+in the output looking wrong. The helper validates every pair against the one
+thing the key cannot fake -- both tables independently recording the station's
+location -- and drops disagreements past `MAX_JOIN_DISAGREEMENT_KM`.
+
+Also worth knowing about the overlap: 633 keys are in both tables, 404 stations
+have no results in the 2020-present resource (check the 2010-2020 one), and
+2063 results stations are not beaches at all -- the results resource is
+statewide surface water, so codes like `514SAC011` are Sacramento River sites.
+
 ## Buoy station types
 
 `NdbcApi().stations()` returns 1351 stations nationally: 709 land-based
