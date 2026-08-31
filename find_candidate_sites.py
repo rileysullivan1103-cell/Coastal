@@ -42,8 +42,10 @@ CDO_REQUEST_INTERVAL_S = 0.25
 # moored 'buoy's (plus dart/oilrig/tao/other). They are different instruments:
 # a moored buoy reports offshore conditions, a fixed station reports whatever
 # is bolted to a pier. Restrict to the types whose data suits the pipeline.
-# None keeps every type. Example: ("buoy",) for moored buoys only.
-BUOY_TYPES = None
+# None keeps every type. Restricted to moored buoys: the pipeline wants genuine
+# offshore conditions (waves, sea-surface temperature), which a tide gauge or a
+# pier-mounted sensor does not measure.
+BUOY_TYPES = ("buoy",)
 # NDBC's 'met' flag. Drops stations with no standard meteorological feed.
 BUOY_REQUIRE_METEOROLOGY = False
 

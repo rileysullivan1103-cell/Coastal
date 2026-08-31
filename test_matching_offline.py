@@ -66,6 +66,7 @@ def main():
 
     check_california_only_path()
     check_wq_radius()
+    check_buoy_type_filter()
 
     print("\nAll offline assertions passed.")
 
@@ -126,6 +127,24 @@ def check_california_only_path():
     assert f.in_region(37.8, -122.4, "california")
     assert not f.in_region(32.78, -79.92, "california")
     print("\nCalifornia assumed + measured paths and region helpers OK.")
+
+
+def check_buoy_type_filter():
+    """Only moored buoys should survive get_all_buoys()' type filter. Guards
+    against a fixed shore station (a tide gauge, or a pond in a slough) being
+    matched to an open-coast camera."""
+    stations = pd.DataFrame([
+        {"Station": "46236", "Lat": 36.8, "Lon": -122.4, "Name": "Monterey Canyon Outer",
+         "Type": "buoy", "Includes Meteorology": True},
+        {"Station": "eazc1", "Lat": 36.8, "Lon": -121.8, "Name": "Azevedo Pond",
+         "Type": "fixed", "Includes Meteorology": False},
+        {"Station": "pryc1", "Lat": 38.0, "Lon": -123.0, "Name": "Point Reyes tide gauge",
+         "Type": "fixed", "Includes Meteorology": True},
+    ])
+    kept = stations[stations["Type"].isin(f.BUOY_TYPES)]
+    assert list(kept["Station"]) == ["46236"], list(kept["Station"])
+    assert f.BUOY_TYPES == ("buoy",), f.BUOY_TYPES
+    print("\nBuoy type filter OK.")
 
 
 def check_wq_radius():

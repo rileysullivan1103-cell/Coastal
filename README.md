@@ -144,6 +144,29 @@ python verify_ca_ckan.py RESOURCE_ID [RESOURCE_ID ...]
 
 ## Distance thresholds
 
+## Buoy station types
+
+`NdbcApi().stations()` returns 1351 stations nationally: 709 land-based
+`fixed`, 439 moored `buoy`, plus `dart`/`oilrig`/`tao`/`other`/`usv`. These are
+different instruments — a moored buoy measures offshore waves and sea-surface
+temperature, while a `fixed` station measures whatever is bolted to a pier.
+
+`BUOY_TYPES` is set to `("buoy",)` so only moored buoys match. Without it, four
+of the seven qualifying California sites matched a `fixed` station: three NOAA
+tide gauges, and — for Capitola Wharf, an open-coast site — Azevedo Pond in the
+Elkhorn Slough Reserve, 22.5 km inland, with no meteorology feed at all.
+
+Filtering re-matches rather than drops: a site keeps whatever buoy is nearest
+within `MAX_BUOY_DISTANCE_KM`.
+
+`BUOY_REQUIRE_METEOROLOGY` additionally drops stations with no standard met
+feed (NDBC's `met` flag). It is off by default, because some wave buoys report
+waves without a met feed — `46237` San Francisco Bar is one.
+
+`buoy_name` and `buoy_type` are in the output so a questionable match is
+visible rather than hidden behind a station code.
+
+
 | source | radius | rationale |
 |---|---|---|
 | buoy | 50 km | offshore conditions generalise over distance |
