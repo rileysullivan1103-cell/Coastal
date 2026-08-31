@@ -4,8 +4,8 @@ find_candidate_sites.py can match California sites against real monitoring
 stations, but it needs a CKAN resource id and the resource's coordinate/id
 column names. This finds both.
 
-    python verify_ca_ckan.py                 # search the catalog
-    python verify_ca_ckan.py <resource_id>   # dump one resource's columns
+    python verify_ca_ckan.py                     search the catalog
+    python verify_ca_ckan.py ID [ID ...]         dump each resource's columns
 
 Then set CA_CKAN_RESOURCE_ID / CA_CKAN_LAT_COL / CA_CKAN_LON_COL /
 CA_CKAN_ID_COL in find_candidate_sites.py.
@@ -76,6 +76,13 @@ def describe(resource_id):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        describe(sys.argv[1])
+        for i, rid in enumerate(sys.argv[1:]):
+            if i:
+                print("\n" + "=" * 70)
+            print(f"### resource {rid}\n")
+            try:
+                describe(rid)
+            except requests.HTTPError as exc:
+                print(f"  failed: {exc}")
     else:
         search()
