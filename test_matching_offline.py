@@ -97,22 +97,23 @@ def check_california_only_path():
         "an assumed site has no measured distance"
 
     # --- measured path: real CKAN stations ---
+    # Shaped like the real CKAN stations resource.
     ckan = pd.DataFrame([
-        {"StationCode": "CA-SD-001", "TargetLatitude": 33.20, "TargetLongitude": -117.39},
-        {"StationCode": "CA-SC-002", "TargetLatitude": 36.95, "TargetLongitude": -122.03},
+        {"Station_id": 101, "Station_UpperLat": 33.20, "Station_UpperLon": -117.39,
+         "Beach_Name": "Oceanside Harbor Beach"},
+        {"Station_id": 102, "Station_UpperLat": 36.95, "Station_UpperLon": -122.03,
+         "Beach_Name": "Cowell Beach"},
         # Far from every camera — must not be matched to either.
-        {"StationCode": "CA-FAR-003", "TargetLatitude": 40.80, "TargetLongitude": -124.16},
+        {"Station_id": 103, "Station_UpperLat": 40.80, "Station_UpperLon": -124.16,
+         "Beach_Name": "Eureka"},
     ])
-    f.CA_CKAN_LAT_COL, f.CA_CKAN_LON_COL, f.CA_CKAN_ID_COL = (
-        "TargetLatitude", "TargetLongitude", "StationCode")
-    try:
-        ranked = f.rank_candidate_sites(cams, buoys, precip, empty_wq, ca_wq_df=ckan)
-    finally:
-        f.CA_CKAN_LAT_COL = f.CA_CKAN_LON_COL = f.CA_CKAN_ID_COL = None
+    ranked = f.rank_candidate_sites(cams, buoys, precip, empty_wq, ca_wq_df=ckan)
 
     by_name = {r["camera_name"]: r for _, r in ranked.iterrows()}
-    assert by_name["Oceanside Pier, CA"]["wq_station_id"] == "CA-SD-001"
-    assert by_name["Santa Cruz, CA"]["wq_station_id"] == "CA-SC-002"
+    assert by_name["Oceanside Pier, CA"]["wq_station_id"] == 101
+    assert by_name["Santa Cruz, CA"]["wq_station_id"] == 102
+    assert by_name["Santa Cruz, CA"]["wq_station_name"] == "Cowell Beach", \
+        "the beach label should reach the output"
     assert ranked["wq_source_confirmed"].all(), "measured sites should be confirmed"
     assert (ranked["wq_distance_km"] > 0).all(), "measured sites need a real distance"
     assert ranked["has_all_four"].all()

@@ -63,10 +63,25 @@ REGION = "california"
 # quality coverage — it does not verify it. Run verify_ca_ckan.py to find the
 # resource id and its column names, then fill these in.
 CA_CKAN_BASE = "https://data.ca.gov/api/3/action"
-CA_CKAN_RESOURCE_ID = None
-CA_CKAN_LAT_COL = None
-CA_CKAN_LON_COL = None
-CA_CKAN_ID_COL = None
+
+# "Beach Water Quality Monitoring Stations" from the Beach Advisories dataset:
+# 1041 rows, one per monitoring station. The sibling Fecal Indicator Bacteria
+# results table has coordinates too, but it is ~627k sample rows — the wrong
+# shape and far too slow for site discovery.
+CA_CKAN_RESOURCE_ID = "98e628ff-d012-4982-ad32-b9f9ad8ab524"
+# Stations carry Upper and Lower coordinate pairs, identical for point
+# stations. Upper is the reference point.
+CA_CKAN_LAT_COL = "Station_UpperLat"
+CA_CKAN_LON_COL = "Station_UpperLon"
+# Station_id is the only reliable key: Station_Name and
+# AgencyStationIdentifier are both literally "0" on many rows.
+CA_CKAN_ID_COL = "Station_id"
+# Carried into the output so a row names a beach rather than a bare number.
+CA_CKAN_LABEL_COL = "Beach_Name"
+# Decommissioned stations would otherwise match cameras and imply coverage
+# that no longer exists.
+CA_CKAN_STATUS_COL = "Status"
+CA_CKAN_ACTIVE_ONLY = True
 CA_CKAN_PAGE_SIZE = 1000
 
 # If no CKAN resource is configured, still treat California sites as having
@@ -331,12 +346,30 @@ def get_ca_wq_stations() -> pd.DataFrame:
             sys.exit(f"Column {col!r} not in the CKAN resource. "
                      f"Available: {list(df.columns)}")
 
-    # These are usually sample results (many rows per station), so collapse to
-    # one row per monitoring location before distance matching.
-    df = df[[CA_CKAN_ID_COL, CA_CKAN_LAT_COL, CA_CKAN_LON_COL]].copy()
+    if CA_CKAN_ACTIVE_ONLY and CA_CKAN_STATUS_COL in df.columns:
+        before = len(df)
+        df = df[df[CA_CKAN_STATUS_COL].astype(str).str.strip().str.lower() == "active"]
+        if before != len(df):
+            print(f"  dropped {before - len(df)} non-active stations")
+
+    keep = [CA_CKAN_ID_COL, CA_CKAN_LAT_COL, CA_CKAN_LON_COL]
+    if CA_CKAN_LABEL_COL and CA_CKAN_LABEL_COL in df.columns:
+        keep.append(CA_CKAN_LABEL_COL)
+    df = df[keep].copy()
+
     df[CA_CKAN_LAT_COL] = pd.to_numeric(df[CA_CKAN_LAT_COL], errors="coerce")
     df[CA_CKAN_LON_COL] = pd.to_numeric(df[CA_CKAN_LON_COL], errors="coerce")
     df = df.dropna(subset=[CA_CKAN_LAT_COL, CA_CKAN_LON_COL])
+
+    # 0.0 is this dataset's stand-in for a missing coordinate, not a location
+    # off West Africa.
+    before = len(df)
+    df = df[(df[CA_CKAN_LAT_COL] != 0) & (df[CA_CKAN_LON_COL] != 0)]
+    if before != len(df):
+        print(f"  dropped {before - len(df)} stations with zero coordinates")
+
+    # The resource is denormalised (station joined to beach and agency), so the
+    # same station can appear more than once.
     df = df.drop_duplicates(subset=[CA_CKAN_ID_COL]).reset_index(drop=True)
     return df
 
@@ -411,12 +444,15 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df=None):
         # distance; if it is not, we fall back to merely ASSUMING coverage,
         # which is recorded honestly via wq_source_confirmed below.
         ca_site = is_california(lat, lon)
+        wq_name = None
         if ca_site and have_ckan:
             ca_row, ca_dist = nearest_with_min_distance(
                 lat, lon, ca_wq_df, CA_CKAN_LAT_COL, CA_CKAN_LON_COL,
                 MAX_PRECIP_DISTANCE_KM)
             wq_row, wq_dist = ca_row, ca_dist
             wq_source = ca_row[CA_CKAN_ID_COL] if ca_row is not None else None
+            if ca_row is not None and CA_CKAN_LABEL_COL in ca_wq_df.columns:
+                wq_name = ca_row[CA_CKAN_LABEL_COL]
             wq_measured = ca_row is not None
             wq_satisfied = ca_row is not None
         elif ca_site:
@@ -439,6 +475,7 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df=None):
             "precip_datacoverage": precip_row["datacoverage"] if precip_row is not None else None,
             "precip_distance_km": _round_km(precip_dist),
             "wq_station_id": wq_source,
+            "wq_station_name": wq_name,
             "wq_distance_km": _round_km(wq_dist),
             # True only when an actual station was matched. An assumed CA site
             # is False — nothing was checked.
@@ -527,4 +564,4 @@ if __name__ == "__main__":
     print(f"Saved top {len(top_sites)} to candidate_sites_ranked.csv")
     print(top_sites[["camera_name", "buoy_id", "buoy_distance_km",
                      "precip_station_id", "precip_datacoverage",
-                     "wq_station_id", "wq_distance_km"]])
+                     "wq_station_id", "wq_station_name", "wq_distance_km"]])

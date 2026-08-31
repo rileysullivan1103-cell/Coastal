@@ -107,31 +107,40 @@ formats use opposite coordinate order — `region_extent()` emits
 dedicated `data.ca.gov` source instead. That also means `verify_wqp_fields.py`
 is not on the critical path for a CA-only run.
 
-## California water quality: configure this or it is only assumed
+## California water quality
 
-`CA_CKAN_RESOURCE_ID` is `None` by default. Until you set it, California sites
-are **assumed** to have water quality coverage — nothing is fetched and nothing
-is checked. Those rows are reported honestly:
+Configured to the **Beach Water Quality Monitoring Stations** resource on
+data.ca.gov (`98e628ff-d012-4982-ad32-b9f9ad8ab524`), 1041 rows, one per
+monitoring station.
 
-| | assumed | measured |
+| config | value | why |
 |---|---|---|
-| `wq_station_id` | `CA_CKAN_ASSUMED` | the real station code |
-| `wq_distance_km` | `NaN` | real distance |
-| `wq_source_confirmed` | `False` | `True` |
+| `CA_CKAN_LAT_COL` / `CA_CKAN_LON_COL` | `Station_UpperLat` / `Station_UpperLon` | stations carry Upper and Lower pairs, identical for point stations |
+| `CA_CKAN_ID_COL` | `Station_id` | `Station_Name` and `AgencyStationIdentifier` are both literally `"0"` on many rows |
+| `CA_CKAN_LABEL_COL` | `Beach_Name` | so output names a beach, not a bare number |
+| `CA_CKAN_ACTIVE_ONLY` | `True` | a decommissioned station would imply coverage that no longer exists |
 
-The run prints a warning when it is in the assumed state.
+Rows with `0.0` coordinates are dropped — that is this dataset's stand-in for a
+missing location, not a point off West Africa. The resource is denormalised
+(station joined to beach and agency), so rows are deduplicated on `Station_id`.
 
-To measure it properly:
+The sibling **Fecal Indicator Bacteria Monitoring Results** resource
+(`15a63495-8d9f-4a49-b43a-3092ef3106b9`) has coordinates too, but it is ~627k
+sample rows — the wrong shape for site discovery. It is the right source for
+the *measurements* once sites are chosen, and it carries precomputed
+`30DayGeoMean` / `6WeekGeoMean` columns.
 
-```bash
-python verify_ca_ckan.py               # list candidate datasets + resource ids
-python verify_ca_ckan.py <resource_id>  # show that resource's columns
+If `CA_CKAN_RESOURCE_ID` is set to `None`, California sites fall back to being
+**assumed** to have coverage rather than checked. Those rows are reported
+honestly — `wq_station_id` is `CA_CKAN_ASSUMED`, `wq_distance_km` is `NaN`,
+`wq_source_confirmed` is `False` — and the run prints a warning.
+
+To re-explore the catalog:
+
 ```
-
-Then set `CA_CKAN_RESOURCE_ID`, `CA_CKAN_LAT_COL`, `CA_CKAN_LON_COL` and
-`CA_CKAN_ID_COL` in `find_candidate_sites.py`. The fetch itself uses CKAN's
-standard `datastore_search` action, which is a fixed spec — only the resource
-id and column names are dataset-specific.
+python verify_ca_ckan.py
+python verify_ca_ckan.py RESOURCE_ID [RESOURCE_ID ...]
+```
 
 ## Scoring
 
