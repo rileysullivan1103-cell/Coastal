@@ -36,8 +36,9 @@ expensive bulk download.
 ```bash
 python check_tokens.py           # 1. are both tokens actually accepted?
 python verify_webcoos_fields.py  # 2. where do camera coordinates really live?
-python test_matching_offline.py  # 3. matching logic sanity check (no network)
-python find_candidate_sites.py   # 4. the real run
+python verify_ca_ckan.py         # 3. find the CA water quality resource id
+python test_matching_offline.py  # 4. matching logic sanity check (no network)
+python find_candidate_sites.py   # 5. the real run
 ```
 
 Step 2 may tell you to update `_GEOM_PATHS` in `find_candidate_sites.py` before
@@ -56,6 +57,8 @@ see Region scoping below.
   This is what confirms where camera coordinates actually live.
 - **`verify_wqp_fields.py`** — pulls a small bbox from the Water Quality Portal
   and prints the real column names against the ones the pipeline expects.
+- **`verify_ca_ckan.py`** — searches data.ca.gov for the California water
+  quality dataset and dumps a resource's column names.
 - **`find_candidate_sites.py`** — the pipeline. Bulk-downloads each source once,
   then matches locally.
 - **`test_matching_offline.py`** — exercises the matching/ranking logic against
@@ -100,11 +103,46 @@ formats use opposite coordinate order — `region_extent()` emits
 `min_lat,min_lon,max_lat,max_lon` for CDO, `region_bbox()` emits
 `min_lon,min_lat,max_lon,max_lat` for WQP.
 
-**The California region skips the Water Quality Portal entirely.** The CA
-override already marks every California site as water-quality-covered via the
-`data.ca.gov` CKAN source, so a WQP pull cannot change any result. When every
-in-region camera is in California the pipeline says so and skips it. That also
-means `verify_wqp_fields.py` is not on the critical path for a CA-only run.
+**The California region skips the national Water Quality Portal**, using the
+dedicated `data.ca.gov` source instead. That also means `verify_wqp_fields.py`
+is not on the critical path for a CA-only run.
+
+## California water quality: configure this or it is only assumed
+
+`CA_CKAN_RESOURCE_ID` is `None` by default. Until you set it, California sites
+are **assumed** to have water quality coverage — nothing is fetched and nothing
+is checked. Those rows are reported honestly:
+
+| | assumed | measured |
+|---|---|---|
+| `wq_station_id` | `CA_CKAN_ASSUMED` | the real station code |
+| `wq_distance_km` | `NaN` | real distance |
+| `wq_source_confirmed` | `False` | `True` |
+
+The run prints a warning when it is in the assumed state.
+
+To measure it properly:
+
+```bash
+python verify_ca_ckan.py               # list candidate datasets + resource ids
+python verify_ca_ckan.py <resource_id>  # show that resource's columns
+```
+
+Then set `CA_CKAN_RESOURCE_ID`, `CA_CKAN_LAT_COL`, `CA_CKAN_LON_COL` and
+`CA_CKAN_ID_COL` in `find_candidate_sites.py`. The fetch itself uses CKAN's
+standard `datastore_search` action, which is a fixed spec — only the resource
+id and column names are dataset-specific.
+
+## Scoring
+
+`combined_score` is `has_all_four` minus a distance term, so qualifying sites
+sort above non-qualifying ones and closer sites sort first within each group.
+
+The distance term uses the **mean** of the measured distances rather than the
+sum. A site with assumed water quality coverage has no `wq_distance_km`;
+summing would treat that gap as either 0 km (flattering it) or a 999 km penalty
+(sinking it below sites that qualify no better than it does). The mean scores
+each site on what is actually known about it.
 
 ## Known scaling notes
 

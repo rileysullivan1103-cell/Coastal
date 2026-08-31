@@ -50,8 +50,12 @@ def main():
     assert sc["has_all_four"]
 
     ca = by_name["Oceanside Pier, CA"]
-    assert ca["wq_station_id"] == "CA_CKAN", "CA override should supply the WQ source"
-    assert ca["wq_source_confirmed"] and ca["has_all_four"]
+    assert ca["wq_station_id"] == "CA_CKAN_ASSUMED", "CA fallback should mark the source"
+    assert not ca["wq_source_confirmed"], "an assumed site is not a confirmed one"
+    assert ca["has_all_four"]
+    # An assumed site must not be pushed below a fully-measured qualifying site
+    # just because one distance is unknown.
+    assert ca["combined_score"] > by_name["Middle Of Nowhere, ND"]["combined_score"]
 
     nd = by_name["Middle Of Nowhere, ND"]
     assert nd["buoy_id"] is None and not nd["has_all_four"], "inland site must not qualify"
@@ -65,8 +69,9 @@ def main():
 
 
 def check_california_only_path():
-    """When every camera is in California the pipeline skips the WQP pull and
-    passes an empty frame. Make sure that path still ranks normally."""
+    """California has two paths: an assumed one (no CKAN resource configured)
+    and a measured one. Both must rank; only the second may claim confirmation.
+    """
     cams = pd.DataFrame([
         {"camera_name": "Oceanside Pier, CA", "latitude": 33.19, "longitude": -117.38},
         {"camera_name": "Santa Cruz, CA", "latitude": 36.96, "longitude": -122.02},
@@ -82,16 +87,42 @@ def check_california_only_path():
     empty_wq = pd.DataFrame(
         columns=["MonitoringLocationIdentifier", "LatitudeMeasure", "LongitudeMeasure"])
 
-    ranked = f.rank_candidate_sites(cams, buoys, precip, empty_wq)
-    assert ranked["has_all_four"].all(), "CA sites must qualify with an empty WQP frame"
-    assert (ranked["wq_station_id"] == "CA_CKAN").all()
+    # --- assumed path: no CKAN data ---
+    ranked = f.rank_candidate_sites(cams, buoys, precip, empty_wq, ca_wq_df=None)
+    assert ranked["has_all_four"].all(), "assumed CA sites should still qualify"
+    assert (ranked["wq_station_id"] == "CA_CKAN_ASSUMED").all()
+    assert not ranked["wq_source_confirmed"].any(), \
+        "an assumed site must NOT be reported as confirmed"
+    assert ranked["wq_distance_km"].isna().all(), \
+        "an assumed site has no measured distance"
+
+    # --- measured path: real CKAN stations ---
+    ckan = pd.DataFrame([
+        {"StationCode": "CA-SD-001", "TargetLatitude": 33.20, "TargetLongitude": -117.39},
+        {"StationCode": "CA-SC-002", "TargetLatitude": 36.95, "TargetLongitude": -122.03},
+        # Far from every camera — must not be matched to either.
+        {"StationCode": "CA-FAR-003", "TargetLatitude": 40.80, "TargetLongitude": -124.16},
+    ])
+    f.CA_CKAN_LAT_COL, f.CA_CKAN_LON_COL, f.CA_CKAN_ID_COL = (
+        "TargetLatitude", "TargetLongitude", "StationCode")
+    try:
+        ranked = f.rank_candidate_sites(cams, buoys, precip, empty_wq, ca_wq_df=ckan)
+    finally:
+        f.CA_CKAN_LAT_COL = f.CA_CKAN_LON_COL = f.CA_CKAN_ID_COL = None
+
+    by_name = {r["camera_name"]: r for _, r in ranked.iterrows()}
+    assert by_name["Oceanside Pier, CA"]["wq_station_id"] == "CA-SD-001"
+    assert by_name["Santa Cruz, CA"]["wq_station_id"] == "CA-SC-002"
+    assert ranked["wq_source_confirmed"].all(), "measured sites should be confirmed"
+    assert (ranked["wq_distance_km"] > 0).all(), "measured sites need a real distance"
+    assert ranked["has_all_four"].all()
 
     # Region helpers: the two extent formats have opposite coordinate order.
     assert f.region_extent("california") == "32.5,-124.5,42.0,-117.0"
     assert f.region_bbox("california") == "-124.5,32.5,-117.0,42.0"
     assert f.in_region(37.8, -122.4, "california")
     assert not f.in_region(32.78, -79.92, "california")
-    print("\nCalifornia-only path and region helpers OK.")
+    print("\nCalifornia assumed + measured paths and region helpers OK.")
 
 
 if __name__ == "__main__":

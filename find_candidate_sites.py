@@ -57,6 +57,23 @@ REGIONS = {
 }
 REGION = "california"
 
+# California water quality via the data.ca.gov CKAN datastore.
+# Set CA_CKAN_RESOURCE_ID to a real resource UUID to actually pull stations.
+# While it is None the pipeline only ASSUMES California sites have water
+# quality coverage — it does not verify it. Run verify_ca_ckan.py to find the
+# resource id and its column names, then fill these in.
+CA_CKAN_BASE = "https://data.ca.gov/api/3/action"
+CA_CKAN_RESOURCE_ID = None
+CA_CKAN_LAT_COL = None
+CA_CKAN_LON_COL = None
+CA_CKAN_ID_COL = None
+CA_CKAN_PAGE_SIZE = 1000
+
+# If no CKAN resource is configured, still treat California sites as having
+# water quality coverage (the original behaviour). Such rows are reported with
+# wq_source_confirmed=False, because nothing was actually checked.
+ASSUME_CA_WATER_QUALITY = True
+
 
 def region_extent(region=REGION):
     """CDO 'extent' string: 'min_lat,min_lon,max_lat,max_lon'."""
@@ -250,6 +267,66 @@ def get_all_water_quality_stations(bounding_extent: str) -> pd.DataFrame:
     return pd.read_csv(StringIO(resp.text))
 
 
+def get_ca_wq_stations() -> pd.DataFrame:
+    """Unique monitoring stations from the data.ca.gov CKAN datastore.
+
+    Uses CKAN's standard datastore_search action, which is a fixed spec:
+    result.records / result.fields / result.total. The resource id and the
+    column names are dataset-specific — run verify_ca_ckan.py to find them.
+
+    Returns an empty frame when nothing is configured.
+    """
+    if not CA_CKAN_RESOURCE_ID:
+        return pd.DataFrame()
+
+    missing = [n for n, v in (("CA_CKAN_LAT_COL", CA_CKAN_LAT_COL),
+                              ("CA_CKAN_LON_COL", CA_CKAN_LON_COL),
+                              ("CA_CKAN_ID_COL", CA_CKAN_ID_COL)) if not v]
+    if missing:
+        sys.exit(f"CA_CKAN_RESOURCE_ID is set but {', '.join(missing)} are not. "
+                 "Run verify_ca_ckan.py to see the resource's column names.")
+
+    records, offset = [], 0
+    while True:
+        resp = requests.get(f"{CA_CKAN_BASE}/datastore_search",
+                            params={"resource_id": CA_CKAN_RESOURCE_ID,
+                                    "limit": CA_CKAN_PAGE_SIZE, "offset": offset},
+                            timeout=120)
+        resp.raise_for_status()
+        payload = resp.json()
+        if not payload.get("success"):
+            sys.exit(f"CKAN request failed: {str(payload.get('error'))[:300]}")
+
+        batch = payload.get("result", {}).get("records", [])
+        if not batch:
+            break
+        records.extend(batch)
+
+        total = payload.get("result", {}).get("total")
+        print(f"  fetched {len(records)}" + (f"/{total}" if total else "") + " CKAN records")
+        if total is not None and len(records) >= total:
+            break
+        offset += CA_CKAN_PAGE_SIZE
+
+    if not records:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+    for col in (CA_CKAN_LAT_COL, CA_CKAN_LON_COL, CA_CKAN_ID_COL):
+        if col not in df.columns:
+            sys.exit(f"Column {col!r} not in the CKAN resource. "
+                     f"Available: {list(df.columns)}")
+
+    # These are usually sample results (many rows per station), so collapse to
+    # one row per monitoring location before distance matching.
+    df = df[[CA_CKAN_ID_COL, CA_CKAN_LAT_COL, CA_CKAN_LON_COL]].copy()
+    df[CA_CKAN_LAT_COL] = pd.to_numeric(df[CA_CKAN_LAT_COL], errors="coerce")
+    df[CA_CKAN_LON_COL] = pd.to_numeric(df[CA_CKAN_LON_COL], errors="coerce")
+    df = df.dropna(subset=[CA_CKAN_LAT_COL, CA_CKAN_LON_COL])
+    df = df.drop_duplicates(subset=[CA_CKAN_ID_COL]).reset_index(drop=True)
+    return df
+
+
 # ---------------------------------------------------------------------------
 # STEP 2 — Match locally (no further API calls needed)
 # ---------------------------------------------------------------------------
@@ -286,8 +363,13 @@ def _round_km(value):
     return round(value, 1) if value is not None else None
 
 
-def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df):
+def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df=None):
     results = []
+    have_ckan = ca_wq_df is not None and not ca_wq_df.empty
+    if not have_ckan and ASSUME_CA_WATER_QUALITY:
+        print("  WARNING: no CKAN resource configured — California sites are being "
+              "ASSUMED to have water quality coverage, not verified. Those rows "
+              "carry wq_source_confirmed=False and wq_distance_km=NaN.")
     good_precip = precip_df[precip_df["datacoverage"] >= MIN_ACCEPTABLE_DATACOVERAGE]
     print(f"  {len(good_precip)}/{len(precip_df)} precip stations meet the "
           f"{MIN_ACCEPTABLE_DATACOVERAGE} datacoverage floor")
@@ -309,15 +391,30 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df):
         wq_row, wq_dist = nearest_with_min_distance(
             lat, lon, wq_df, "LatitudeMeasure", "LongitudeMeasure", MAX_PRECIP_DISTANCE_KM)
 
-        # Override: California sites always count as having water quality
-        # coverage, regardless of what the national WQP search finds — we
-        # already have a confirmed, working, openly-licensed source for CA
-        # specifically (data.ca.gov CKAN API), so don't let an unverified
-        # generic search disqualify or deprioritize a CA site.
+        # California sites use the dedicated data.ca.gov CKAN source in
+        # preference to the generic national WQP search. If that source is
+        # actually configured we match against it and get a real station id and
+        # distance; if it is not, we fall back to merely ASSUMING coverage,
+        # which is recorded honestly via wq_source_confirmed below.
         ca_site = is_california(lat, lon)
-        wq_satisfied = ca_site or (wq_row is not None)
-        wq_source = "CA_CKAN" if ca_site else (
-            wq_row["MonitoringLocationIdentifier"] if wq_row is not None else None)
+        if ca_site and have_ckan:
+            ca_row, ca_dist = nearest_with_min_distance(
+                lat, lon, ca_wq_df, CA_CKAN_LAT_COL, CA_CKAN_LON_COL,
+                MAX_PRECIP_DISTANCE_KM)
+            wq_row, wq_dist = ca_row, ca_dist
+            wq_source = ca_row[CA_CKAN_ID_COL] if ca_row is not None else None
+            wq_measured = ca_row is not None
+            wq_satisfied = ca_row is not None
+        elif ca_site:
+            wq_source = "CA_CKAN_ASSUMED"
+            wq_dist = None
+            wq_measured = False
+            wq_satisfied = ASSUME_CA_WATER_QUALITY
+        else:
+            wq_source = (wq_row["MonitoringLocationIdentifier"]
+                         if wq_row is not None else None)
+            wq_measured = wq_row is not None
+            wq_satisfied = wq_row is not None
 
         results.append({
             "camera_name": cam.get("camera_name", "unknown"),
@@ -328,8 +425,10 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df):
             "precip_datacoverage": precip_row["datacoverage"] if precip_row is not None else None,
             "precip_distance_km": _round_km(precip_dist),
             "wq_station_id": wq_source,
-            "wq_distance_km": 0 if ca_site else _round_km(wq_dist),
-            "wq_source_confirmed": ca_site,  # True = data.ca.gov, tested; False = WQP, unverified
+            "wq_distance_km": _round_km(wq_dist),
+            # True only when an actual station was matched. An assumed CA site
+            # is False — nothing was checked.
+            "wq_source_confirmed": wq_measured,
             "has_all_four": all([buoy_row is not None, precip_row is not None, wq_satisfied]),
         })
 
@@ -339,9 +438,17 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df):
     df = pd.DataFrame(results)
     dist_cols = ["buoy_distance_km", "precip_distance_km", "wq_distance_km"]
     # These columns hold None alongside floats, so they arrive as object dtype;
-    # coerce to numeric before fillna or pandas downcasts with a FutureWarning.
-    dists = df[dist_cols].apply(pd.to_numeric, errors="coerce").fillna(999)
-    df["combined_score"] = df["has_all_four"].astype(int) - dists.sum(axis=1) / 1000
+    # coerce to numeric explicitly rather than letting fillna downcast.
+    dists = df[dist_cols].apply(pd.to_numeric, errors="coerce")
+
+    # Score on the MEAN of the measured distances, not the sum. A site whose
+    # water quality coverage is assumed rather than measured has no wq distance;
+    # summing would treat that gap as either 0 km (flattering it) or a 999 km
+    # penalty (sinking it below sites that qualify no better). The mean scores
+    # each site on what is actually known about it. Rows with nothing measured
+    # fall back to the full penalty.
+    mean_dist = dists.mean(axis=1).fillna(999)
+    df["combined_score"] = df["has_all_four"].astype(int) - mean_dist * len(dist_cols) / 1000
     return df.sort_values("combined_score", ascending=False)
 
 
@@ -376,9 +483,18 @@ if __name__ == "__main__":
     # least-verified source for nothing.
     all_ca = cameras_df.apply(lambda c: is_california(c["latitude"], c["longitude"]),
                               axis=1).all()
+
+    print("Pulling California water quality stations (data.ca.gov CKAN)...")
+    ca_wq_df = get_ca_wq_stations()
+    if ca_wq_df.empty:
+        print("  none — CA_CKAN_RESOURCE_ID is not configured "
+              "(run verify_ca_ckan.py to find it)")
+    else:
+        print(f"  {len(ca_wq_df)} unique CA monitoring stations found")
+
     if all_ca:
-        print("All cameras in region are in California; the CA_CKAN override "
-              "covers water quality, so skipping the Water Quality Portal pull.")
+        print("All cameras in region are in California; skipping the national "
+              "Water Quality Portal pull.")
         wq_df = pd.DataFrame(columns=["MonitoringLocationIdentifier",
                                       "LatitudeMeasure", "LongitudeMeasure"])
     else:
@@ -387,7 +503,7 @@ if __name__ == "__main__":
         print(f"  {len(wq_df)} water quality stations found")
 
     print("Matching locally...")
-    ranked = rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df)
+    ranked = rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df, ca_wq_df)
 
     qualified = ranked[ranked["has_all_four"]]
     print(f"Cameras with buoy + precip + water quality all qualifying: {len(qualified)}")
