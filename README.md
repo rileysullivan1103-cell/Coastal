@@ -63,6 +63,11 @@ see Region scoping below.
   then matches locally.
 - **`test_matching_offline.py`** — exercises the matching/ranking logic against
   synthetic fixtures, no network needed.
+- **`pull_rip_detection.py`** — downloads WebCOOS's own rip-detection product
+  for Walton Lighthouse. Resolves feed and product by slug, so it is not
+  subject to the pywebcoos label bug described below.
+- **`test_rip_offline.py`** — synthetic-fixture checks for the rip pull: slug
+  matching, camera resolution, and payload-to-table conversion.
 
 ## Verified field names
 
@@ -294,6 +299,39 @@ because a calm has no direction to compare.
 Both scalar and vector mean speed are kept. They differ whenever direction
 swings within the hour, and the gap is itself informative.
 
+### What the comparison found
+
+                            site station   km  hours  obs_ms  grid_ms  spd_corr  dir_err  dir_med  within45
+       San Elijo State Beach 9410230 16.9   8623    2.19     2.00     0.683     26.6     18.7        83
+    Stinson Beach (nw view)  9414290 18.3   8638    3.69     3.10     0.457     46.4     38.5        58
+      Sausalito - Galilee    9414290  6.5   8638    3.69     2.58     0.459     29.4     20.4        82
+      Carpinteria State Bch  9411340 16.1   8640    2.42     1.45     0.532     33.7     23.5        75
+
+**Direction is usable, speed is not.** `within45` is 83/82/75 at three of the
+four sites — good enough to call onshore versus offshore. Speed correlations of
+0.46–0.68 are too weak to trust an individual hour's value.
+
+**The grid reads low at every site**, worst at Carpinteria (1.45 against 2.42,
+a 0.60x ratio). That is a consistent bias, not noise — ERA5's footprint smooths
+away the coastal sea breeze. Correctable with a per-site scale factor if you
+ever need absolute speed.
+
+**Exposure beats distance.** Stinson and Sausalito share station 9414290 —
+identical `obs_ms` of 3.69 over the same 8638 hours — yet score 58 and 82.
+Same observation, two grid cells. Sausalito sits inside the Bay beside the
+station; Stinson is over the headlands on the open coast, where the station
+simply does not see the same wind. Distance alone explains nothing: San Elijo
+is 16.9 km out and scores 83.
+
+`dir_med` is below `dir_err` at every site, so typical agreement is better than
+the means suggest — a minority of badly wrong hours drags the mean up, which is
+what light-wind hours do when direction is barely defined.
+
+The consequence that matters: the three sites with no observed wind include
+**Walton Lighthouse, the only rip-detection camera**. Its nearest analogues,
+Santa Cruz Wharf and Capitola, are equally blind. Treat Walton's gridded
+direction as plausible but unproven, and its speed as indicative only.
+
 ## Choosing between the gauge and the grid
 
 `compare_precip_sources.py` aggregates the hourly grid to daily, aligns it
@@ -376,7 +414,9 @@ from the saved `webcoos_assets_raw.json`, so it costs nothing to re-run.
 `pywebcoos` hardcodes `feed_name = 'raw-video-data'` in `get_products()`,
 `get_inventory()` and `download()`, so a product under any other feed would be
 invisible to it. Running the explorer settled that: **every product on all 86
-cameras is under `raw-video-data`**, so the library reaches everything.
+cameras is under the `raw-video-data` feed slug**, so nothing is hidden behind
+a second feed. Whether the library can actually reach them is a separate
+question — see the label bug below.
 
 Derived products that exist: `rip-detection-results` (8 cameras),
 `object-detection-results` (14), `seal-detection-results` (1), plus
@@ -385,6 +425,39 @@ Derived products that exist: `rip-detection-results` (8 cameras),
 **`rip-detection-results` in California exists on exactly one camera: Walton
 Lighthouse, Santa Cruz** — 35,158 elements — and that camera is one of the seven
 qualifying sites.
+
+## Pulling the rip-detection product
+
+    python pull_rip_detection.py --list
+    python pull_rip_detection.py --probe
+    python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01 --interval 30
+
+`--probe` downloads six hours and reports what actually came down — file
+extensions, sizes, the first 2 KB, and the JSON key structure if it parses.
+Run it before `--pull`. The output format of this product has not been
+observed yet, so nothing downstream assumes one: `build_table()` flattens JSON
+or CSV payloads into a single table, and if the payloads turn out to be
+imagery it writes only the element index (filename, timestamp, url) rather
+than inventing columns. The index is what you need to join frames to the
+observation tables either way.
+
+### Why this does not go through pywebcoos
+
+`API._get_camera_products` matches on the feed **label**:
+
+    if feed['data']['common']['label'] == 'raw-video-data':
+
+That is a label compared against a slug. WebCOOS's slug is `raw-video-data`;
+if the label is anything else (`Raw Video Data`, say), the loop never matches,
+the local `products` is never assigned, and the library raises
+`UnboundLocalError` from inside `download()` — not a clear "not found". The
+same label matching applies to product names, so `get_products()` returns
+labels where the catalogue shows slugs, and `download()` wants the label.
+
+`pull_rip_detection.py` therefore resolves feed, product and service by slug
+and calls `/elements/` directly. `--via-pywebcoos` runs the library path
+instead, so you can see for yourself which one works against the live API.
+Both write to the same directory.
 
 ## Buoy station types
 
