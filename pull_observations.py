@@ -73,8 +73,42 @@ def load_sites():
 # Buoy — hourly
 # ---------------------------------------------------------------------------
 
+# NDBC stdmet columns, named as in NDBC's own file header. Water temperature
+# and mean wave direction are already part of this feed -- no extra source
+# needed. MWD is only published by buoys with a directional wave sensor, so its
+# absence is reported rather than passing silently.
+STDMET_WANTED = {
+    "WTMP": "water temperature",
+    "MWD": "mean wave direction (swell direction)",
+    "WVHT": "significant wave height",
+    "DPD": "dominant wave period",
+    "APD": "average wave period",
+    "WDIR": "wind direction",
+    "WSPD": "wind speed",
+    "ATMP": "air temperature",
+}
+
+
+def report_stdmet_coverage(df, station_id):
+    """Say which of the wanted measurements this buoy actually publishes."""
+    for col, label in STDMET_WANTED.items():
+        if col not in df.columns:
+            print(f"      {col} ({label}): column absent")
+            continue
+        present = df[col].notna().sum()
+        if present == 0:
+            print(f"      {col} ({label}): column present but entirely empty")
+        elif present < len(df) * 0.5:
+            print(f"      {col} ({label}): only {present}/{len(df)} rows")
+
+
 def pull_buoy(station_id, start, end):
-    """Hourly standard meteorological data: wind, waves, air/water temp."""
+    """Hourly standard meteorological data.
+
+    Includes WTMP (water temperature) and MWD (mean wave direction) alongside
+    wind and wave height, so swell direction and water temp need no separate
+    source. All columns are kept; nothing is filtered out here.
+    """
     try:
         df = NdbcApi().get_data(station_id=str(station_id), mode="stdmet",
                                 start_time=start, end_time=end, as_df=True)
@@ -320,6 +354,7 @@ def main():
             path = f"{OUT_DIR}/buoy_{buoy_id}.csv"
             df.to_csv(path)
             print(f"    {len(df)} rows -> {path}")
+            report_stdmet_coverage(df, buoy_id)
 
     print("\nPrecipitation (daily GHCND + rolling windows)...")
     for station_id in sorted(set(sites["precip_station_id"].dropna())):
@@ -356,6 +391,19 @@ def main():
                 tide.to_csv(path, index=False)
                 counts = tide["tide_state"].value_counts().to_dict()
                 print(f"      {len(tide)} readings -> {path}  {counts}")
+
+            # Coastal water temperature, as a companion to the buoy's WTMP.
+            # A gauge at the beach and a buoy 20-30 km offshore are measuring
+            # different water; for surf-zone bacteria the near one is likelier
+            # to be the relevant one.
+            wt = pull_coops_series(gauge["station_id"], "water_temperature",
+                                   start, end)
+            if wt is not None and not wt.empty:
+                wt_out = wt[["time"]].copy()
+                wt_out["water_temp_c"] = pd.to_numeric(wt["v"], errors="coerce")
+                path = f"{OUT_DIR}/watertemp_{gauge['station_id']}.csv"
+                wt_out.to_csv(path, index=False)
+                print(f"      {len(wt_out)} water temp readings -> {path}")
 
         met, mdist = f.nearest_with_min_distance(
             lat, lon, met_stations, "lat", "lon", MAX_TIDE_DISTANCE_KM)

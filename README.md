@@ -200,9 +200,10 @@ over that:
 
 | source | resolution | what you get |
 |---|---|---|
-| NDBC `stdmet` | hourly | wind, waves, air and water temperature |
+| NDBC `stdmet` | hourly | wind, waves, water temp (`WTMP`), mean wave direction (`MWD`) |
 | CO-OPS `water_level` | 6-minute | level, rate of change, rising/falling/slack |
 | CO-OPS `wind` | 6-minute | speed, direction, gust |
+| CO-OPS `water_temperature` | 6-minute | water temp at the coast, not offshore |
 | NOAA CDO GHCND | **daily** | precipitation, plus 24/48/72h rolling totals |
 | data.ca.gov CKAN | irregular | bacteria samples, a few a week in swim season |
 
@@ -227,6 +228,33 @@ the script checks the body.
 
 `test_pull_offline.py` exercises the rolling sums, tide direction and wind
 parsing against fixtures, with no network.
+
+### Water temperature and swell direction
+
+Both already arrive in the NDBC `stdmet` feed — `WTMP` and `MWD` — so neither
+needs a separate source. `MWD` is only published by buoys carrying a directional
+wave sensor, so the run reports per buoy which of `WTMP`/`MWD`/`WVHT`/`DPD` are
+actually populated rather than letting an all-empty column pass unnoticed.
+
+Coastal water temperature is pulled separately from CO-OPS. A tide gauge at the
+beach and a buoy 20-30 km offshore are measuring different water; for surf-zone
+bacteria the near one is likelier to be the relevant predictor, so both are kept.
+
+## Public discharge data (SFPUC)
+
+`probe_sfpuc.py` finds the data endpoint behind
+`webapps.sfpuc.org/sapps/beachesandbay.html`. That URL is a rendered page, not
+an API, so the client has to be written against whatever backend it actually
+calls — the probe extracts endpoint-like URLs from the page, scans its linked
+scripts, and can fetch each candidate to show the real response shape.
+
+**Note the geography.** SFPUC's combined sewer discharge monitoring covers the
+San Francisco shoreline, and none of the seven qualifying sites are in San
+Francisco — they are in San Diego, Marin, Santa Cruz and Santa Barbara
+counties. Sausalito is the nearest, across the Golden Gate in Marin. So this
+source has no site to attach to yet unless San Francisco cameras are added, or
+unless Bay discharges are taken to influence Sausalito, which is a modelling
+assumption rather than a given.
 
 ## Reading the WebCOOS product catalogue
 
