@@ -660,3 +660,45 @@ The shore normal used to turn wind and swell direction into onshore
 components is an **assumption** (`SHORE_NORMAL_DEG`, 180 degrees for the Santa
 Cruz sites, which face south across Monterey Bay). Any onshore/offshore result
 is conditional on it.
+
+## What the rip feed does and does not contain
+
+The June-August 2025 pull returned 2,795 elements and **every one of them has
+`detected: true`**. The feed publishes an element when the detector fires, not
+one per frame examined, so it contains no negatives at all.
+
+The consequence is not a tuning problem, it is a limit on the question. Absence
+of a file means either "no rip" or "no image", and nothing in the feed
+separates them. Presence/absence cannot be modelled from this source alone.
+`detection_rate` is therefore constant at 1.0 and is reported as constant
+rather than correlated; what remains analysable is how OFTEN the detector
+fires (`detections` per hour) and how confident it is (`score_max`,
+`bbox_area_max`).
+
+Getting true negatives would mean pulling the `one-minute-stills` feed for the
+same camera and treating every still with no matching detection element as an
+observed zero. That is a different and much larger pull -- the stills run to
+hundreds of thousands of elements -- and it has not been done.
+
+## Seasonal confounding in the water quality analysis
+
+California rainfall is concentrated in winter and beach sampling is
+concentrated in the dry swim season. Rain and bacteria can therefore correlate
+in either direction purely through the calendar, with no mechanism between
+them. Every water quality correlation is reported twice, `rho` raw and
+`rho_ctrl` after removing per-month means from both sides -- the same guard the
+rip analysis applies for hour-of-day. Judge on `rho_ctrl`.
+
+## Why the regression withholds coefficients
+
+`precip_mm` and `rain_24h_mm` are the same series whenever
+`RAIN_INCLUDE_SAME_DAY` is on: a one-day rolling sum IS the daily total. Left
+in the design matrix they make it exactly singular, and `lstsq` responds with a
+minimum-norm solution that splits one variable's effect arbitrarily across the
+copies -- which is how a first run reported condition numbers around 1e17 and
+sign-flipped rainfall coefficients that looked like findings.
+
+Exact and near-duplicate columns are now dropped before fitting, with a line
+saying which. Above `MAX_REPORTABLE_CONDITION` the coefficients are withheld
+entirely rather than printed, because a number nobody can trust is worse than
+no number.

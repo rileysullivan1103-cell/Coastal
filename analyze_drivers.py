@@ -107,22 +107,74 @@ def standardized_ols(frame, target, predictors):
         return None
     y = subset[target].to_numpy(float)
     X = subset[usable].to_numpy(float)
+
     keep = X.std(axis=0) > 0
     if not keep.any():
         return None
     usable = [name for name, k in zip(usable, keep) if k]
     X = X[:, keep]
     X = (X - X.mean(axis=0)) / X.std(axis=0)
-    y = (y - y.mean()) / (y.std() or 1.0)
-    X = np.column_stack([np.ones(len(X)), X])
-    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
-    fitted = X @ beta
-    ss_res = float(((y - fitted) ** 2).sum())
-    ss_tot = float(((y - y.mean()) ** 2).sum())
+
+    # Drop columns that duplicate an earlier one. precip_mm and rain_24h_mm are
+    # the same series whenever RAIN_INCLUDE_SAME_DAY is on -- a 1-day rolling
+    # sum IS the daily total -- which makes the design matrix exactly singular.
+    # Left in, lstsq returns a minimum-norm solution that splits one variable's
+    # effect arbitrarily across the copies and reports both halves as findings.
+    unique, dropped = [], []
+    for index, name in enumerate(usable):
+        twin = next((usable[j] for j in unique
+                     if abs(float(np.corrcoef(X[:, index], X[:, j])[0, 1])) > 0.9999),
+                    None)
+        if twin is None:
+            unique.append(index)
+        else:
+            dropped.append((name, twin))
+    if dropped:
+        for name, twin in dropped:
+            print(f"  dropping {name}: identical to {twin}")
+        usable = [usable[i] for i in unique]
+        X = X[:, unique]
+
+    if not np.isfinite(X).all():
+        return None
+    design = np.column_stack([np.ones(len(X)), X])
+    condition = float(np.linalg.cond(design))
+    beta, *_ = np.linalg.lstsq(design, y_scaled := (y - y.mean()) / (y.std() or 1.0),
+                               rcond=None)
+    fitted = design @ beta
+    if not np.isfinite(fitted).all():
+        return {"names": usable, "beta": None, "r2": np.nan, "n": len(subset),
+                "condition": condition}
+    ss_res = float(((y_scaled - fitted) ** 2).sum())
+    ss_tot = float(((y_scaled - y_scaled.mean()) ** 2).sum())
     r2 = 1 - ss_res / ss_tot if ss_tot else np.nan
-    condition = float(np.linalg.cond(X))
     return {"names": usable, "beta": beta[1:], "r2": r2, "n": len(subset),
             "condition": condition}
+
+
+# Above this, the design matrix is numerically singular and individual
+# coefficients are arbitrary. Printing them anyway is how collinearity turns
+# into a confident, invented finding -- so they are withheld instead.
+MAX_REPORTABLE_CONDITION = 1e6
+
+
+def report_regression(frame, target, predictors):
+    """Print standardized coefficients, or say why they cannot be trusted."""
+    print("\n--- standardized regression (all predictors at once) ---")
+    fit = standardized_ols(frame, target, predictors)
+    if fit is None:
+        print("  too few complete rows across all predictors to fit")
+        return None
+    if fit["beta"] is None or fit["condition"] > MAX_REPORTABLE_CONDITION:
+        print(f"  condition number {fit['condition']:.3g} — the predictors are")
+        print("  collinear enough that individual coefficients are arbitrary.")
+        print("  Withholding them; read the rank correlations instead.")
+        return fit
+    table = pd.DataFrame({"predictor": fit["names"], "beta": fit["beta"]})
+    table = table.reindex(table["beta"].abs().sort_values(ascending=False).index)
+    print(table.round(4).to_string(index=False))
+    print(f"  n={fit['n']}  R2={fit['r2']:.3f}  condition={fit['condition']:.1f}")
+    return fit
 
 
 def report_correlations(frame, target, predictors, control=None, title=""):
@@ -276,7 +328,9 @@ RIP_PREDICTORS = [
 
 
 def assemble_rip(sites):
-    paths = sorted(glob.glob(f"{DATA_DIR}/rip_*_hourly.csv"))
+    # pull_rip_detection writes into data/rip_detection/, so a flat glob on
+    # data/ finds nothing and the whole rip half silently reports "not pulled".
+    paths = sorted(glob.glob(f"{DATA_DIR}/**/rip_*_hourly.csv", recursive=True))
     if not paths:
         print("No data/rip_*_hourly.csv — run pull_rip_detection.py --pull first.")
         return None, None
@@ -327,49 +381,58 @@ def assemble_rip(sites):
     return merged, name
 
 
+# Candidate targets, in preference order. Whichever have real variance get
+# analysed; a constant one is reported as constant rather than correlated.
+RIP_TARGETS = ["detection_rate", "detections", "score_max", "bbox_area_max"]
+
+
 def analyze_rip(sites):
     frame, name = assemble_rip(sites)
     if frame is None:
         return
-    target = "detection_rate"
-    if target not in frame.columns:
-        print(f"  {target} missing from the hourly file")
-        return
+    observed = frame[frame.get("frames", 0) > 0].copy()
+    print(f"\n{len(observed)} hours with frames")
 
-    observed = frame[frame.get("frames", 0) > 0]
-    print(f"\n{len(observed)} hours with frames; "
-          f"detection rate mean {observed[target].mean():.3f}, "
-          f"{int((observed[target] > 0).sum())} hours with any detection")
     hours = sorted(observed["hour_of_day"].unique())
     print(f"  frames occur in hours {hours[0]}-{hours[-1]} UTC only "
           f"({len(hours)} distinct hours of day)")
 
-    report_correlations(
-        observed, target, RIP_PREDICTORS, control=observed["hour_of_day"],
-        title=f"=== WHAT TRACKS RIP DETECTION RATE at {name} ===\n"
-              "rho = raw rank correlation; rho_ctrl = after removing "
-              "hour-of-day means from both sides")
+    if "detection_rate" in observed.columns:
+        share = float((observed["detection_rate"] >= 1.0).mean())
+        if share > 0.999:
+            print("\n  EVERY hour with frames has detection_rate 1.0.")
+            print("  This feed publishes an element only when the detector fires,")
+            print("  so it contains no negatives. Absence of a file means either")
+            print("  'no rip' or 'no image', and nothing here can tell them apart.")
+            print("  Presence/absence is therefore not analysable; what remains is")
+            print("  how OFTEN it fires and how confident it is.")
 
-    print("\n--- standardized regression (all predictors at once) ---")
-    fit = standardized_ols(observed, target, RIP_PREDICTORS)
-    if fit is None:
-        print("  too few complete rows across all predictors to fit")
-    else:
-        coefficients = pd.DataFrame({"predictor": fit["names"],
-                                     "beta": fit["beta"]})
-        coefficients = coefficients.reindex(
-            coefficients["beta"].abs().sort_values(ascending=False).index)
-        print(coefficients.round(4).to_string(index=False))
-        print(f"  n={fit['n']}  R2={fit['r2']:.3f}")
-        if fit["condition"] > 30:
-            print(f"  condition number {fit['condition']:.0f} — predictors are "
-                  "collinear, so individual betas are unstable")
+    usable = []
+    for target in RIP_TARGETS:
+        if target not in observed.columns:
+            continue
+        series = pd.to_numeric(observed[target], errors="coerce")
+        if series.nunique(dropna=True) < 3:
+            print(f"  {target}: constant ({series.dropna().unique()[:3]}), skipped")
+            continue
+        usable.append(target)
+    if not usable:
+        print("  no target with any variance; nothing to correlate")
+        return
+
+    for target in usable:
+        report_correlations(
+            observed, target, RIP_PREDICTORS, control=observed["hour_of_day"],
+            title=f"=== WHAT TRACKS {target} at {name} ===\n"
+                  "rho = raw rank correlation; rho_ctrl = after removing "
+                  "hour-of-day means from both sides")
+        report_regression(observed, target, RIP_PREDICTORS)
 
     print("\nCaveats specific to this target:")
     print("  - One camera. Nothing here generalizes to another beach.")
-    print("  - detection_rate is a YOLOv8 model's confidence, not a verified")
-    print("    rip. A driver of the DETECTOR (glare, swell texture, contrast)")
-    print("    is indistinguishable here from a driver of the rip.")
+    print("  - The score is a YOLOv8 model's confidence, not a verified rip.")
+    print("    A driver of the DETECTOR (glare, swell texture, contrast) is")
+    print("    indistinguishable here from a driver of the rip.")
     print("  - Walton has no observed wind, so every wind column is ERA5 grid,")
     print("    which compare_wind_sources.py could not validate at this site.")
     print("  - Daylight only, so any driver with a daily cycle is confounded;")
@@ -525,18 +588,15 @@ def analyze_wq(sites):
               f"median {subset['value'].median():.0f}"
               + (f", {exceed:.1f}% over the {threshold} single-sample standard"
                  if threshold else ""))
-        report_correlations(subset, "log_value", WQ_PREDICTORS)
-        fit = standardized_ols(subset, "log_value", WQ_PREDICTORS)
-        if fit is not None:
-            coefficients = pd.DataFrame({"predictor": fit["names"],
-                                         "beta": fit["beta"]})
-            coefficients = coefficients.reindex(
-                coefficients["beta"].abs().sort_values(ascending=False).index)
-            print("\n--- standardized regression ---")
-            print(coefficients.round(4).to_string(index=False))
-            print(f"  n={fit['n']}  R2={fit['r2']:.3f}")
-            if fit["condition"] > 30:
-                print(f"  condition number {fit['condition']:.0f} — collinear")
+        # California rainfall is strongly seasonal and beach sampling is
+        # concentrated in the dry swim season, so month is a confound of exactly
+        # the same shape as hour-of-day is for the rip camera: rain and bacteria
+        # can correlate, in either direction, purely through the calendar.
+        report_correlations(subset, "log_value", WQ_PREDICTORS,
+                            control=subset["date"].dt.month,
+                            title="rho = raw; rho_ctrl = after removing "
+                                  "per-month means from both sides")
+        report_regression(subset, "log_value", WQ_PREDICTORS)
 
     print("\nCaveats specific to this target:")
     print("  - Samples are not random: agencies sample in swim season, on")
@@ -545,6 +605,8 @@ def analyze_wq(sites):
     print("  - Non-detects were dropped, not imputed. If low results are")
     print("    disproportionately censored, the low end is under-represented.")
     print("  - rain_24/48/72h are nested sums; treat them as one family.")
+    print("  - Rainfall in California is seasonal and sampling is concentrated")
+    print("    in the dry swim season, so judge on rho_ctrl, not rho.")
     print("  - Conditions are daily means, because SampleDate carries no time.")
     print("    A tide or wind value on the sample day is not the value at the")
     print("    moment of sampling.")

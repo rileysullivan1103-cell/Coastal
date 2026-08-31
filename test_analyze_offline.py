@@ -89,11 +89,14 @@ def test_standardized_ols():
           betas["noise"])
     check("R2 is high for a well-specified fit", fit["r2"] > 0.9, fit["r2"])
 
-    # Collinearity must be flagged, not silently produce unstable betas.
+    # A near-copy is removed rather than left to destabilise the fit, so the
+    # design stays well conditioned and the original keeps its full effect.
     frame["copy"] = frame["strong"] + RNG.normal(scale=1e-6, size=n)
     fit = a.standardized_ols(frame, "y", ["strong", "copy", "weak"])
-    check("collinear predictors raise the condition number",
-          fit["condition"] > 30, fit["condition"])
+    check("a near-duplicate predictor is dropped", "copy" not in fit["names"],
+          fit["names"])
+    check("so the design stays well conditioned", fit["condition"] < 30,
+          fit["condition"])
 
 
 def write_rip_fixture(tmp, planted="WVHT"):
@@ -263,6 +266,55 @@ def test_wq_recovers_planted_driver():
         shutil.rmtree(tmp)
 
 
+def test_regression_drops_identical_columns():
+    print("\nstandardized_ols on an exactly duplicated predictor")
+    n = 300
+    rain = RNG.exponential(2.0, n)
+    frame = pd.DataFrame({
+        "rain_24h_mm": rain,
+        # RAIN_INCLUDE_SAME_DAY makes a 1-day rolling sum identical to the
+        # daily total, which is exactly what the real CSVs contain.
+        "precip_mm": rain,
+        "other": RNG.normal(size=n)})
+    frame["y"] = 2 * rain + RNG.normal(scale=0.5, size=n)
+    fit = a.standardized_ols(frame, "y", ["rain_24h_mm", "precip_mm", "other"])
+    check("the duplicate column is dropped",
+          "precip_mm" not in fit["names"], fit["names"])
+    check("the original is kept", "rain_24h_mm" in fit["names"], fit["names"])
+    check("the fit is now well conditioned", fit["condition"] < 100,
+          fit["condition"])
+    betas = dict(zip(fit["names"], fit["beta"]))
+    check("the real driver keeps its whole effect rather than splitting it",
+          betas["rain_24h_mm"] > 0.8, betas)
+
+
+def test_regression_withholds_when_singular():
+    print("\nreport_regression on a singular design")
+    n = 200
+    base = RNG.normal(size=n)
+    frame = pd.DataFrame({"a": base, "b": base * 2 + 1e-12,
+                          "c": base * 3, "y": base + RNG.normal(scale=0.1, size=n)})
+    fit = a.report_regression(frame, "y", ["a", "b", "c"])
+    # Perfect copies are removed, so this one becomes well conditioned; the
+    # guard matters for near-copies that survive the exact-duplicate filter.
+    check("a degenerate design does not produce printed betas with a huge cond",
+          fit is None or fit["beta"] is None
+          or fit["condition"] <= a.MAX_REPORTABLE_CONDITION,
+          None if fit is None else fit["condition"])
+
+
+def test_degenerate_target_is_named():
+    print("\na target with no variance")
+    frame = pd.DataFrame({"detection_rate": [1.0] * 100,
+                          "WVHT": RNG.normal(size=100)})
+    series = pd.to_numeric(frame["detection_rate"])
+    check("a constant target has under 3 distinct values",
+          series.nunique() < 3, series.nunique())
+    rho, n, p = a.spearman(frame["WVHT"], frame["detection_rate"])
+    check("correlating against it yields NaN, not a number",
+          math.isnan(rho), rho)
+
+
 def test_analyte_key():
     print("\nanalyte_key")
     cases = {"Enterococcus": "ENT", "ENTEROCOCCUS": "ENT", "E. coli": "ECOLI",
@@ -278,6 +330,9 @@ if __name__ == "__main__":
     test_demean_by()
     test_standardized_ols()
     test_analyte_key()
+    test_regression_drops_identical_columns()
+    test_regression_withholds_when_singular()
+    test_degenerate_target_is_named()
     test_rip_recovers_planted_driver()
     test_wq_recovers_planted_driver()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
