@@ -169,6 +169,41 @@ def test_build_table_mixed():
         shutil.rmtree(tmp)
 
 
+def test_inventory_range():
+    print("\ninventory_range")
+    rows = [
+        ["2024-01-01T00:00:00Z", True, "2024-02-01T00:00:00Z", 120, 9,
+         "2024-01-03T04:00:00Z", "2024-01-28T22:00:00Z"],
+        ["2024-02-01T00:00:00Z", False, "2024-03-01T00:00:00Z", 0, 0, None, None],
+        ["2024-03-01T00:00:00Z", True, "2024-04-01T00:00:00Z", 80, 7,
+         "2024-03-02T01:00:00Z", "2024-03-30T18:00:00Z"],
+    ]
+    frame = pd.DataFrame(rows, columns=r.INVENTORY_COLUMNS)
+    first, last = r.inventory_range(frame)
+    check("first is the earliest populated bin's data start",
+          str(first).startswith("2024-01-03"), first)
+    check("last is the latest populated bin's data end",
+          str(last).startswith("2024-03-30"), last)
+
+    # An empty bin must not stretch the range: its Bin Start/End are real
+    # dates even though it holds nothing.
+    only_empty = pd.DataFrame([rows[1]], columns=r.INVENTORY_COLUMNS)
+    first2, last2 = r.inventory_range(only_empty)
+    check("a wholly empty inventory falls back rather than lying",
+          first2 is None or str(first2).startswith("2024-02"), first2)
+
+    check("empty frame is handled",
+          r.inventory_range(pd.DataFrame()) == (None, None))
+    check("None is handled", r.inventory_range(None) == (None, None))
+
+    # Unknown schema: no named columns, but timestamps still recoverable.
+    positional = pd.DataFrame([["2025-05-01T00:00:00Z", "2025-05-09T00:00:00Z", 5]],
+                              columns=["col0", "col1", "col2"])
+    first3, last3 = r.inventory_range(positional)
+    check("an unrecognised schema still yields a range",
+          first3 is not None and str(last3).startswith("2025-05-09"), (first3, last3))
+
+
 def test_describe_json():
     print("\ndescribe_json")
     try:
@@ -188,6 +223,7 @@ if __name__ == "__main__":
     test_build_table_json()
     test_build_table_binary()
     test_build_table_mixed()
+    test_inventory_range()
     test_describe_json()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     raise SystemExit(1 if FAILURES else 0)

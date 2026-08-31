@@ -462,8 +462,17 @@ qualifying sites.
 ## Pulling the rip-detection product
 
     python pull_rip_detection.py --list
+    python pull_rip_detection.py --inventory
     python pull_rip_detection.py --probe
     python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01 --interval 30
+
+`--inventory` asks the service when it actually has data and downloads
+nothing. Run it first. The catalogue's element count (35,158 for Walton) says
+how much data exists but never *when* — the first probe against "the last six
+hours" came back with zero elements, which looks like a broken product and is
+really just an empty window. The script now consults the inventory before
+choosing a range, and defaults both `--probe` and `--pull` to the end of the
+covered period rather than to now.
 
 `--probe` downloads six hours and reports what actually came down — file
 extensions, sizes, the first 2 KB, and the JSON key structure if it parses.

@@ -22,6 +22,7 @@ downloads a short window and reports what actually came down before any
 parsing is attempted.
 
     python pull_rip_detection.py --list
+    python pull_rip_detection.py --inventory
     python pull_rip_detection.py --probe
     python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01
 
@@ -147,6 +148,106 @@ def find_rip_service(asset):
         print("  note: pywebcoos matches the feed LABEL against the literal string")
         print("        'raw-video-data', so its download() cannot reach this feed.")
     return service_slug, product_label
+
+
+# ---------------------------------------------------------------------------
+# Inventory -- WHEN does this product have data?
+# ---------------------------------------------------------------------------
+
+# The column names pywebcoos assigns to the inventory rows. Used only when the
+# row width matches; otherwise the columns are left unnamed and the range is
+# recovered by scanning for parseable timestamps, so a schema change degrades
+# into a weaker answer rather than a wrong one.
+INVENTORY_COLUMNS = ["Bin Start", "Has Data?", "Bin End", "Count", "Bytes",
+                     "Data Start", "Data End"]
+
+
+def fetch_inventory(service_slug):
+    """The service's data inventory as a DataFrame, or None."""
+    url = f"{API_BASE}/services/{service_slug}/inventory/"
+    resp = requests.get(url, headers=headers(), timeout=TIMEOUT)
+    if resp.status_code != 200:
+        print(f"  inventory returned {resp.status_code}: {resp.text[:200]}")
+        return None
+    results = resp.json().get("results") or []
+    if not results:
+        print("  inventory is empty")
+        return None
+    values = results[0].get("values") or []
+    if not values:
+        print("  inventory has no bins")
+        return None
+    width = len(values[0])
+    if width == len(INVENTORY_COLUMNS):
+        return pd.DataFrame(values, columns=INVENTORY_COLUMNS)
+    print(f"  inventory rows have {width} columns, not {len(INVENTORY_COLUMNS)};"
+          " reading them positionally")
+    print(f"  first row: {values[0]}")
+    return pd.DataFrame(values, columns=[f"col{i}" for i in range(width)])
+
+
+def _timestamps(frame, *preferred):
+    """Parseable timestamps, trying the named columns in order.
+
+    `preferred` is a fallback chain, not a set: "Data Start" is the real
+    coverage bound and "Bin Start" only the bin the data sits in, so the
+    second is consulted only when the first yields nothing. Taking both would
+    stretch the reported range out to the bin edges.
+    """
+    for column in preferred:
+        if column not in frame.columns:
+            continue
+        parsed = pd.to_datetime(frame[column], errors="coerce", utc=True).dropna()
+        if not parsed.empty:
+            return parsed.tolist()
+
+    # Unrecognised schema: scan, but skip numeric columns. A bare integer is
+    # a valid epoch to pd.to_datetime, so a row count would otherwise parse
+    # as 1970 and become the earliest date in the range.
+    stamps = []
+    for column in frame.columns:
+        series = frame[column]
+        if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+            continue
+        parsed = pd.to_datetime(series, errors="coerce", utc=True).dropna()
+        stamps.extend(parsed.tolist())
+    return stamps
+
+
+def inventory_range(frame):
+    """(first, last) datetimes actually covered, or (None, None)."""
+    if frame is None or frame.empty:
+        return None, None
+    with_data = frame
+    if "Has Data?" in frame.columns:
+        flag = frame["Has Data?"]
+        truthy = flag.astype(str).str.lower().isin(["true", "1", "yes"])
+        if truthy.any():
+            with_data = frame[truthy]
+    starts = _timestamps(with_data, "Data Start", "Bin Start")
+    ends = _timestamps(with_data, "Data End", "Bin End")
+    if not starts or not ends:
+        return None, None
+    return min(starts), max(ends)
+
+
+def report_inventory(service_slug):
+    """Print what the inventory says, and return its (first, last)."""
+    frame = fetch_inventory(service_slug)
+    first, last = inventory_range(frame)
+    if first is None:
+        print("  inventory gave no usable date range")
+        return None, None
+    print(f"  data runs {first:%Y-%m-%d %H:%M} to {last:%Y-%m-%d %H:%M} UTC")
+    if "Count" in frame.columns:
+        counts = pd.to_numeric(frame["Count"], errors="coerce").fillna(0)
+        populated = int((counts > 0).sum())
+        print(f"  {int(counts.sum()):,} elements across {populated} populated"
+              f" bins of {len(frame)}")
+    stale = (pd.Timestamp.now(tz="UTC") - last).days
+    if stale > 1:
+        print(f"  last data is {stale} days old — this product is not live")
+    return first, last
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +477,8 @@ def main():
                     help=f"download {PROBE_HOURS}h and describe the payload")
     ap.add_argument("--pull", action="store_true", help="download the full range")
     ap.add_argument("--refresh", action="store_true", help="re-fetch the asset catalogue")
+    ap.add_argument("--inventory", action="store_true",
+                    help="report when this product has data, and download nothing")
     ap.add_argument("--via-pywebcoos", action="store_true",
                     help="use the library's download() instead of /elements/")
     args = ap.parse_args()
@@ -384,23 +487,40 @@ def main():
     if args.list:
         list_cameras(assets)
         return
-    if not (args.probe or args.pull or args.via_pywebcoos):
-        ap.error("choose one of --list, --probe, --pull")
+    if not (args.probe or args.pull or args.via_pywebcoos or args.inventory):
+        ap.error("choose one of --list, --inventory, --probe, --pull")
 
     asset = find_camera(assets, args.camera)
     camera_label = dig(asset, "data", "common", "label")
     service_slug, product_label = find_rip_service(asset)
     save_dir = os.path.join(OUT_DIR, slugify(camera_label))
 
+    # The catalogue's element count says how much data exists, never when.
+    # Asking the inventory first is what stops a probe from silently landing
+    # on an empty window and reading as "the product is broken".
+    print("\ninventory")
+    first, last = report_inventory(service_slug)
+    if args.inventory:
+        return
+
     end = (datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-           if args.end else datetime.now(timezone.utc))
-    if args.start:
-        start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    elif args.probe:
-        start = end - timedelta(hours=PROBE_HOURS)
-    else:
-        start = end - timedelta(days=365)
+           if args.end else None)
+    start = (datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+             if args.start else None)
+
+    if start is None or end is None:
+        # Default to where the data actually is, not to now.
+        if last is not None:
+            end = end or last + timedelta(minutes=1)
+            start = start or (end - timedelta(hours=PROBE_HOURS) if args.probe
+                              else max(first, end - timedelta(days=365)))
+        else:
+            end = end or datetime.now(timezone.utc)
+            start = start or (end - timedelta(hours=PROBE_HOURS) if args.probe
+                              else end - timedelta(days=365))
     print(f"\nrange {start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC")
+    if first is not None and (end < first or start > last):
+        print("  that range lies outside the inventory above — expect nothing back.")
 
     if args.via_pywebcoos:
         via_pywebcoos(camera_label, product_label, start, end,
@@ -409,8 +529,13 @@ def main():
 
     rows = fetch_elements(service_slug, start, end, args.interval)
     if not rows:
-        print("\nNo elements in that range. The product may not cover it —")
-        print("widen --start/--end, or check the element count printed above.")
+        print("\nNo elements in that range.")
+        if first is not None:
+            print(f"The inventory says data runs {first:%Y-%m-%d} to {last:%Y-%m-%d};")
+            print("pick --start and --end inside that.")
+        else:
+            print("The inventory gave no range either, so this product may be")
+            print("catalogued but not actually served on this token.")
         return
     print(f"  first {rows[0]['timestamp']:%Y-%m-%d %H:%M}"
           f"  last {rows[-1]['timestamp']:%Y-%m-%d %H:%M} UTC")
