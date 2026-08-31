@@ -104,9 +104,33 @@ def check_station_id_canonicalisation():
     print("station id canonicalisation OK")
 
 
+def check_gridded_rain_windows():
+    """With hourly data a 24h window is 24 clock hours, not a calendar day."""
+    import pull_gridded_weather as g
+
+    times = pd.date_range("2026-01-01", periods=80, freq="h", tz="UTC")
+    rain = [0.0] * 80
+    rain[10], rain[20], rain[70] = 5.0, 3.0, 1.0
+    df = pd.DataFrame({"time": times, "precipitation": rain,
+                       "wind_speed_10m": [2.0] * 80})
+    out = g.add_rain_windows(df).set_index("time")
+
+    assert out["rain_24h_mm"].iloc[23] == 8.0, "both events fall inside 24h"
+    assert out["rain_24h_mm"].iloc[35] == 3.0, "the first event has aged out"
+    assert out["rain_48h_mm"].iloc[47] == 8.0
+    assert pd.isna(out["rain_72h_mm"].iloc[10]), "not enough history yet"
+
+    # Same rule as the daily path: a gap poisons the windows spanning it.
+    holed = df.drop(index=range(30, 40))
+    out2 = g.add_rain_windows(holed).set_index("time")
+    assert pd.isna(out2["rain_24h_mm"].iloc[45]), "window over a gap must be NaN"
+    print("gridded hourly rain windows OK")
+
+
 if __name__ == "__main__":
     check_station_id_canonicalisation()
     check_rain_windows()
     check_tide_state()
     check_wind_parsing()
+    check_gridded_rain_windows()
     print("\nAll offline pull assertions passed.")

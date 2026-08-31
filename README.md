@@ -246,6 +246,42 @@ Coastal water temperature is pulled separately from CO-OPS. A tide gauge at the
 beach and a buoy 20-30 km offshore are measuring different water; for surf-zone
 bacteria the near one is likelier to be the relevant predictor, so both are kept.
 
+## Gridded hourly weather (Open-Meteo)
+
+`pull_gridded_weather.py` fetches hourly precipitation and wind per site from
+Open-Meteo's ERA5 archive. No API key, free for non-commercial use.
+
+It exists because two station-data gaps cannot be closed by picking a better
+station:
+
+- **GHCND is daily**, so "rainfall in the 24 hours before this sample" is not
+  computable from it. From an hourly source it is, and `rain_24h_mm` becomes 24
+  clock hours rather than a calendar day.
+- **No buoy in the matched set publishes wind**, and CO-OPS wind is absent at
+  some gauges. A gridded product has no station gaps at all.
+
+The trade-off is real: this is ERA5 reanalysis, a model reconstruction on a
+roughly 9-25 km grid, not a rain gauge reading. For antecedent rainfall it is
+usually a better input than a gauge 20 km away, but it is not an observation.
+Both pulls write to `data/`, so compare them before choosing.
+
+Requested variables are checked against the response — any that do not come
+back are reported rather than silently becoming a column of NaN — and the run
+prints the grid cell actually used, which is not the coordinate requested.
+
+## Why a precipitation station returns nothing
+
+`diagnose_precip.py` answers this per station. An empty PRCP response never
+means "it did not rain": GHCND records `PRCP = 0` on dry days at a reporting
+station, so empty means nothing was published. Three things cause that, and the
+script tells them apart:
+
+| finding | meaning |
+|---|---|
+| `maxdate` is old | the station stopped reporting; `datacoverage` is a lifetime figure and says nothing about this |
+| `PRCP` absent from its datatype list | the station reports, but not rainfall — it could never have supplied it |
+| station current, `PRCP` maxdate old | it reports other elements but has stopped publishing rainfall |
+
 ### Known coverage gaps
 
 Established by running the pull, not assumed:
