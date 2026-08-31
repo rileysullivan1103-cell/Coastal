@@ -59,7 +59,39 @@ def main():
     assert ranked.iloc[-1]["camera_name"] == "Middle Of Nowhere, ND", \
         "the non-qualifying site should sort last"
 
+    check_california_only_path()
+
     print("\nAll offline assertions passed.")
+
+
+def check_california_only_path():
+    """When every camera is in California the pipeline skips the WQP pull and
+    passes an empty frame. Make sure that path still ranks normally."""
+    cams = pd.DataFrame([
+        {"camera_name": "Oceanside Pier, CA", "latitude": 33.19, "longitude": -117.38},
+        {"camera_name": "Santa Cruz, CA", "latitude": 36.96, "longitude": -122.02},
+    ])
+    buoys = pd.DataFrame([
+        {"Station": "46086", "Lat": 33.05, "Lon": -117.60},
+        {"Station": "46042", "Lat": 36.79, "Lon": -122.40},
+    ])
+    precip = pd.DataFrame([
+        {"id": "GHCND:USW00093107", "latitude": 33.21, "longitude": -117.35, "datacoverage": 0.95},
+        {"id": "GHCND:USW00023277", "latitude": 36.98, "longitude": -122.03, "datacoverage": 0.99},
+    ])
+    empty_wq = pd.DataFrame(
+        columns=["MonitoringLocationIdentifier", "LatitudeMeasure", "LongitudeMeasure"])
+
+    ranked = f.rank_candidate_sites(cams, buoys, precip, empty_wq)
+    assert ranked["has_all_four"].all(), "CA sites must qualify with an empty WQP frame"
+    assert (ranked["wq_station_id"] == "CA_CKAN").all()
+
+    # Region helpers: the two extent formats have opposite coordinate order.
+    assert f.region_extent("california") == "32.5,-124.5,42.0,-117.0"
+    assert f.region_bbox("california") == "-124.5,32.5,-117.0,42.0"
+    assert f.in_region(37.8, -122.4, "california")
+    assert not f.in_region(32.78, -79.92, "california")
+    print("\nCalifornia-only path and region helpers OK.")
 
 
 if __name__ == "__main__":

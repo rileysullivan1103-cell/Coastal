@@ -49,6 +49,30 @@ TOP_N_SITES = 20
 CA_LAT_RANGE = (32.5, 42.0)
 CA_LON_RANGE = (-124.5, -117.0)
 
+# Region to search. Cameras outside it are dropped, and the NOAA/WQP pulls are
+# scoped to it — which is most of the runtime, so keep it as tight as you can.
+REGIONS = {
+    "california": (CA_LAT_RANGE[0], CA_LON_RANGE[0], CA_LAT_RANGE[1], CA_LON_RANGE[1]),
+    "us_coastal": (24.0, -125.0, 49.0, -66.0),
+}
+REGION = "california"
+
+
+def region_extent(region=REGION):
+    """CDO 'extent' string: 'min_lat,min_lon,max_lat,max_lon'."""
+    return ",".join(str(v) for v in REGIONS[region])
+
+
+def region_bbox(region=REGION):
+    """WQP 'bBox' string: 'min_lon,min_lat,max_lon,max_lat' — lon first."""
+    min_lat, min_lon, max_lat, max_lon = REGIONS[region]
+    return f"{min_lon},{min_lat},{max_lon},{max_lat}"
+
+
+def in_region(lat, lon, region=REGION):
+    min_lat, min_lon, max_lat, max_lon = REGIONS[region]
+    return min_lat <= lat <= max_lat and min_lon <= lon <= max_lon
+
 
 def is_california(lat, lon):
     return CA_LAT_RANGE[0] <= lat <= CA_LAT_RANGE[1] and CA_LON_RANGE[0] <= lon <= CA_LON_RANGE[1]
@@ -326,26 +350,41 @@ def rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    US_COASTAL_EXTENT = "24.0,-125.0,49.0,-66.0"
+    print(f"Region: {REGION} ({region_extent()})\n")
 
     print("Pulling camera list...")
     cameras_df = get_all_cameras()
-    print(f"  {len(cameras_df)} cameras found")
+    print(f"  {len(cameras_df)} cameras found nationally")
+    cameras_df = cameras_df[
+        cameras_df.apply(lambda c: in_region(c["latitude"], c["longitude"]), axis=1)
+    ].reset_index(drop=True)
+    print(f"  {len(cameras_df)} inside the {REGION} region")
+    if cameras_df.empty:
+        sys.exit(f"No cameras inside the {REGION} region — widen REGION and retry.")
 
     print("Pulling buoy list...")
     buoys_df = get_all_buoys()
     print(f"  {len(buoys_df)} buoys found")
 
-    print("Pulling precipitation station list (one bulk call, paginated)...")
-    precip_df = get_all_precip_stations(US_COASTAL_EXTENT, NOAA_CDO_TOKEN)
+    print("Pulling precipitation station list (paginated)...")
+    precip_df = get_all_precip_stations(region_extent(), NOAA_CDO_TOKEN)
     print(f"  {len(precip_df)} precip stations found")
 
-    print("Pulling water quality station list (Water Quality Portal, national)...")
-    # WQP wants lon,lat order — converting from the lat,lon extent above
-    min_lat, min_lon, max_lat, max_lon = [float(x) for x in US_COASTAL_EXTENT.split(",")]
-    wq_bbox = f"{min_lon},{min_lat},{max_lon},{max_lat}"
-    wq_df = get_all_water_quality_stations(wq_bbox)
-    print(f"  {len(wq_df)} water quality stations found")
+    # The California override already satisfies water quality for any CA site,
+    # so if every camera in the region is in California the WQP pull cannot
+    # change a single result. Skip it rather than spend minutes on the slowest,
+    # least-verified source for nothing.
+    all_ca = cameras_df.apply(lambda c: is_california(c["latitude"], c["longitude"]),
+                              axis=1).all()
+    if all_ca:
+        print("All cameras in region are in California; the CA_CKAN override "
+              "covers water quality, so skipping the Water Quality Portal pull.")
+        wq_df = pd.DataFrame(columns=["MonitoringLocationIdentifier",
+                                      "LatitudeMeasure", "LongitudeMeasure"])
+    else:
+        print("Pulling water quality station list (Water Quality Portal)...")
+        wq_df = get_all_water_quality_stations(region_bbox())
+        print(f"  {len(wq_df)} water quality stations found")
 
     print("Matching locally...")
     ranked = rank_candidate_sites(cameras_df, buoys_df, precip_df, wq_df)

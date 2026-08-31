@@ -36,13 +36,15 @@ expensive bulk download.
 ```bash
 python check_tokens.py           # 1. are both tokens actually accepted?
 python verify_webcoos_fields.py  # 2. where do camera coordinates really live?
-python verify_wqp_fields.py      # 3. are the WQP column names right?
-python test_matching_offline.py  # 4. matching logic sanity check (no network)
-python find_candidate_sites.py   # 5. the real run
+python test_matching_offline.py  # 3. matching logic sanity check (no network)
+python find_candidate_sites.py   # 4. the real run
 ```
 
-Steps 2 and 3 may tell you to update field names in `find_candidate_sites.py`
-before step 5 will work. That is the point of running them.
+Step 2 may tell you to update `_GEOM_PATHS` in `find_candidate_sites.py` before
+step 4 will work. That is the point of running it.
+
+`verify_wqp_fields.py` is only needed if you widen `REGION` beyond California —
+see Region scoping below.
 
 ## Scripts
 
@@ -87,11 +89,27 @@ probe script and both fail loudly rather than silently producing zero results.
   `MonitoringLocationIdentifier`) and the `/data/Station/search` parameters —
   run `verify_wqp_fields.py`.
 
+## Region scoping
+
+`REGION` in `find_candidate_sites.py` selects the search area. It currently
+defaults to `"california"`; `"us_coastal"` is the original nationwide box.
+
+The region drives three things: cameras outside it are dropped, the NOAA CDO
+`extent` is scoped to it, and the WQP `bBox` is scoped to it. Note the two
+formats use opposite coordinate order — `region_extent()` emits
+`min_lat,min_lon,max_lat,max_lon` for CDO, `region_bbox()` emits
+`min_lon,min_lat,max_lon,max_lat` for WQP.
+
+**The California region skips the Water Quality Portal entirely.** The CA
+override already marks every California site as water-quality-covered via the
+`data.ca.gov` CKAN source, so a WQP pull cannot change any result. When every
+in-region camera is in California the pipeline says so and skips it. That also
+means `verify_wqp_fields.py` is not on the critical path for a CA-only run.
+
 ## Known scaling notes
 
-- The CDO pull paginates 1000 stations at a time over the whole US extent, which
-  is 100+ requests. CDO allows 5 req/sec and 10,000/day; the loop sleeps between
-  pages and backs off on HTTP 429.
-- The national WQP pull is large and can take several minutes. Narrow
-  `US_COASTAL_EXTENT` to your actual region of interest to cut both this and the
-  CDO pull down substantially.
+- The CDO pull paginates 1000 stations at a time. CDO allows 5 req/sec and
+  10,000/day; the loop sleeps between pages and backs off on HTTP 429. A
+  California extent is a small fraction of the nationwide request count.
+- The nationwide WQP pull is large and can take several minutes. Scoping
+  `REGION` avoids it entirely for California.
