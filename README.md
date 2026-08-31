@@ -464,7 +464,7 @@ qualifying sites.
     python pull_rip_detection.py --list
     python pull_rip_detection.py --inventory
     python pull_rip_detection.py --probe
-    python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01 --interval 30
+    python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01
 
 `--inventory` asks the service when it actually has data and downloads
 nothing. Run it first. The catalogue's element count (35,158 for Walton) says
@@ -482,6 +482,60 @@ or CSV payloads into a single table, and if the payloads turn out to be
 imagery it writes only the element index (filename, timestamp, url) rather
 than inventing columns. The index is what you need to join frames to the
 observation tables either way.
+
+### What the product actually contains
+
+Probed against Walton on 2026-08-31. The elements are **`.jsonl`**, about 800
+bytes each, one JSON object per line:
+
+```json
+{"time":"2026-08-31T14:05:10Z",
+ "annotated_image_url":"http://stage-webcoos-rip-detector-api.srv.axds.co/outputs/...jpg",
+ "classification_result":{
+   "classification_model_name":"ripdetect_walton",
+   "classification_model_version":"yolov8x_1.1",
+   "detected":true,"detection_count":1,
+   "classification_scores":[{"rip_current":0.7011650204658508}],
+   "classification_bboxes":[[{"x":1853,"y":974},{"x":2255,"y":1123}]]},
+ "original_image_reference":"walton_lighthouse-2026-08-31-140451Z.jpg"}
+```
+
+So it is a YOLOv8 detector's output, not a hand-labelled record: a confidence
+score and a pixel bounding box per detection. `classification_scores` is a list
+of single-key dicts, so the class name (`rip_current`) is data rather than
+schema — the parser reads it generically and a second class would need no code
+change.
+
+Two CSVs come out of a pull:
+
+- `rip_<camera>.csv` — one row per frame: `detected`, `detection_count`,
+  `score_max`, `score_mean`, `score_classes`, `bbox_count`, `bbox_area_max`,
+  `bbox_x`, `bbox_y`, model name and version, image references.
+- `rip_<camera>_hourly.csv` — collapsed to hourly, which is the resolution
+  everything else in the pipeline uses: `frames`, `frames_with_detection`,
+  `detections`, `detection_rate`, `score_max`, `score_mean`, `bbox_area_max`.
+
+An hour with frames but no detection is kept as an observed zero. Dropping it
+would turn "the camera looked and saw nothing" into "the camera was not
+looking", and those mean opposite things when you regress rips on rainfall.
+
+Both `time` (the model's stamp) and `element_time` are kept — they differ by
+seconds, and the image filename carries a third, slightly earlier stamp
+(`140451Z` against `14:05:10`), which is the frame capture.
+
+### Coverage
+
+    data runs 2024-05-31 21:28 to 2026-08-31 14:41 UTC
+    35,158 elements across 700 populated bins of 823
+
+The product is live — 27 months, still publishing. 123 of 823 daily bins are
+empty, so roughly 15% of days have nothing at all: absence of a detection is
+not the same as absence of a rip, and the frame count per hour is what
+distinguishes them.
+
+At ~50 elements a day the frames are roughly 20 minutes apart across daylight
+hours, not continuous. `--interval 30` would discard a real fraction of them,
+so the full pull takes everything and thins later.
 
 ### Why this does not go through pywebcoos
 

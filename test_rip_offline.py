@@ -112,23 +112,174 @@ def write_rows(tmp, payloads):
     return rows
 
 
+# A verbatim record from the probe against Walton Lighthouse on 2026-08-31.
+# Kept exactly as served so the parser is tested against the real shape rather
+# than against what I assumed the shape would be.
+REAL_RECORD = {
+    "time": "2026-08-31T14:05:10Z",
+    "annotated_image_url": "http://stage-webcoos-rip-detector-api.srv.axds.co/outputs/x.jpg",
+    "classification_result": {
+        "classification_model_framework": "ULTRALYTICS",
+        "classification_model_name": "ripdetect_walton",
+        "classification_model_version": "yolov8x_1.1",
+        "detected": True,
+        "detection_count": 1,
+        "classification_scores": [{"rip_current": 0.7011650204658508}],
+        "classification_bboxes": [[{"x": 1853, "y": 974}, {"x": 2255, "y": 1123}]],
+    },
+    "original_image_reference": "walton_lighthouse-2026-08-31-140451Z.jpg",
+    "annotated_image_reference": "annotated.ripdetect_walton.walton-140451Z.jpg",
+}
+
+
+def test_flatten_real_record():
+    print("\nflatten_record on the real payload")
+    row = r.flatten_record(REAL_RECORD, source_file="probe.jsonl")
+    check("time is read from the payload",
+          str(row["timestamp"]).startswith("2026-08-31 14:05:10"), row["timestamp"])
+    check("detected is a bool", row["detected"] is True)
+    check("detection_count carried", row["detection_count"] == 1)
+    check("score extracted", abs(row["score_max"] - 0.70116502) < 1e-6, row["score_max"])
+    check("class name captured as data", row["score_classes"] == "rip_current",
+          row["score_classes"])
+    check("one box", row["bbox_count"] == 1)
+    # (2255-1853) * (1123-974) = 402 * 149
+    check("box area in pixels", row["bbox_area_max"] == 402 * 149, row["bbox_area_max"])
+    check("box centroid x", row["bbox_x"] == (1853 + 2255) / 2, row["bbox_x"])
+    check("box centroid y", row["bbox_y"] == (974 + 1123) / 2, row["bbox_y"])
+    check("model version kept", row["model_version"] == "yolov8x_1.1")
+
+
+def test_flatten_no_detection():
+    print("\nflatten_record on an empty frame")
+    empty = {"time": "2026-08-31T15:00:00Z",
+             "classification_result": {"detected": False, "detection_count": 0,
+                                       "classification_scores": [],
+                                       "classification_bboxes": []}}
+    row = r.flatten_record(empty)
+    check("detected False survives", row["detected"] is False)
+    check("no score rather than a zero", row["score_max"] is None, row["score_max"])
+    check("no bbox area rather than a zero", row["bbox_area_max"] is None)
+    check("bbox_count is a real zero", row["bbox_count"] == 0)
+
+    # A second class must not need a code change.
+    two = {"time": "2026-08-31T15:00:00Z", "classification_result": {
+        "detected": True, "detection_count": 2,
+        "classification_scores": [{"rip_current": 0.4}, {"shorebreak": 0.9}],
+        "classification_bboxes": [[{"x": 0, "y": 0}, {"x": 10, "y": 10}],
+                                  [{"x": 0, "y": 0}, {"x": 5, "y": 4}]]}}
+    row = r.flatten_record(two)
+    check("max is across all classes", row["score_max"] == 0.9, row["score_max"])
+    check("both class names recorded",
+          row["score_classes"] == "rip_current,shorebreak", row["score_classes"])
+    check("largest box wins", row["bbox_area_max"] == 100, row["bbox_area_max"])
+
+    broken = {"time": "not a date", "classification_result": {}}
+    row = r.flatten_record(broken, element_time=pd.Timestamp("2026-01-01", tz="UTC"))
+    check("an unparseable time falls back to the element time",
+          str(row["timestamp"]).startswith("2026-01-01"), row["timestamp"])
+
+
+def test_read_records_jsonl():
+    print("\nread_records on .jsonl")
+    tmp = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmp, "many.jsonl")
+        with open(path, "w") as fh:
+            fh.write(json.dumps(REAL_RECORD) + "\n")
+            fh.write("\n")
+            fh.write(json.dumps(REAL_RECORD) + "\n")
+        check("every line is a record", len(r.read_records(path)) == 2,
+              len(r.read_records(path)))
+
+        bad = os.path.join(tmp, "bad.jsonl")
+        with open(bad, "w") as fh:
+            fh.write(json.dumps(REAL_RECORD) + "\n{ truncated\n")
+        check("a bad line is skipped, the good one kept",
+              len(r.read_records(bad)) == 1, len(r.read_records(bad)))
+
+        empty = os.path.join(tmp, "empty.jsonl")
+        open(empty, "w").close()
+        check("an empty file yields nothing", r.read_records(empty) == [])
+
+        as_list = os.path.join(tmp, "list.json")
+        with open(as_list, "w") as fh:
+            json.dump([REAL_RECORD, REAL_RECORD], fh)
+        check("a .json array is read as many records",
+              len(r.read_records(as_list)) == 2)
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_build_table_jsonl():
+    print("\nbuild_table on the real format")
+    tmp = tempfile.mkdtemp()
+    try:
+        rows = write_rows(tmp, [
+            (f"frame_{i}.jsonl", (json.dumps(REAL_RECORD) + "\n").encode())
+            for i in range(3)])
+        out = os.path.join(tmp, "rip.csv")
+        table = r.build_table(rows, out)
+        check("jsonl is parsed, not skipped", table is not None)
+        check("one row per frame", len(table) == 3, None if table is None else len(table))
+        check("detection columns present",
+              {"detected", "score_max", "bbox_area_max"} <= set(table.columns))
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_hourly_summary():
+    print("\nhourly_summary")
+    tmp = tempfile.mkdtemp()
+    try:
+        base = pd.Timestamp("2026-08-31T14:00:00Z")
+        frames = pd.DataFrame([
+            {"timestamp": base, "detected": True, "detection_count": 1,
+             "score_max": 0.7, "bbox_area_max": 100},
+            {"timestamp": base + pd.Timedelta(minutes=20), "detected": False,
+             "detection_count": 0, "score_max": None, "bbox_area_max": None},
+            {"timestamp": base + pd.Timedelta(minutes=40), "detected": True,
+             "detection_count": 2, "score_max": 0.9, "bbox_area_max": 400},
+            {"timestamp": base + pd.Timedelta(hours=1), "detected": False,
+             "detection_count": 0, "score_max": None, "bbox_area_max": None},
+        ])
+        out = os.path.join(tmp, "hourly.csv")
+        hourly = r.hourly_summary(frames, out)
+        check("one row per hour", len(hourly) == 2, len(hourly))
+        first = hourly.iloc[0]
+        check("frames counted", first["frames"] == 3, first["frames"])
+        check("detections summed across frames", first["detections"] == 3,
+              first["detections"])
+        check("rate is frames-with-detection over frames, not detections over frames",
+              abs(first["detection_rate"] - 2 / 3) < 5e-5, first["detection_rate"])
+        check("score_max is the hour's peak", first["score_max"] == 0.9)
+        check("score_mean averages the detected frames only",
+              abs(first["score_mean"] - 0.8) < 1e-9, first["score_mean"])
+
+        # The hour with frames but no detection is an observed zero.
+        second = hourly.iloc[1]
+        check("an all-clear hour survives rather than vanishing",
+              second["frames"] == 1 and second["detection_rate"] == 0.0)
+        check("its score is blank, not zero", pd.isna(second["score_max"]),
+              second["score_max"])
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_build_table_json():
     print("\nbuild_table on JSON payloads")
     tmp = tempfile.mkdtemp()
     try:
-        rows = write_rows(tmp, [
-            (f"frame_{i}.json",
-             json.dumps({"rip_probability": 0.1 * i,
-                         "detections": {"count": i}}).encode())
-            for i in range(3)])
+        rows = write_rows(tmp, [(f"frame_{i}.json", json.dumps(REAL_RECORD).encode())
+                                for i in range(3)])
         out = os.path.join(tmp, "rip.csv")
         table = r.build_table(rows, out)
         check("a table is produced", table is not None)
         check("one row per payload", len(table) == 3, len(table))
-        check("nested keys are flattened",
-              "detections.count" in table.columns, list(table.columns))
-        check("element time is carried onto every row",
-              table["timestamp"].nunique() == 3)
+        check("a .json payload goes through the same flattener as .jsonl",
+              {"detected", "score_max"} <= set(table.columns), list(table.columns))
+        check("element time is kept alongside the payload time",
+              table["element_time"].nunique() == 3)
         check("the index is written too", os.path.exists(out.replace(".csv", "_index.csv")))
         index = pd.read_csv(out.replace(".csv", "_index.csv"))
         check("index has one line per element", len(index) == 3, len(index))
@@ -220,6 +371,11 @@ if __name__ == "__main__":
     test_slugify()
     test_find_camera()
     test_find_rip_service()
+    test_flatten_real_record()
+    test_flatten_no_detection()
+    test_read_records_jsonl()
+    test_build_table_jsonl()
+    test_hourly_summary()
     test_build_table_json()
     test_build_table_binary()
     test_build_table_mixed()

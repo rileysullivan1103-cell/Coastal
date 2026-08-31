@@ -33,6 +33,7 @@ tabular, a combined CSV alongside them.
 import env  # noqa: F401  -- loads .env into os.environ
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -55,7 +56,11 @@ DEFAULT_CAMERA = "Walton Lighthouse"
 PROBE_HOURS = 6
 
 TIMEOUT = 60
-PAUSE = 0.2  # between downloads, to stay a polite client
+# Payloads are ~800 bytes each and there are 35k of them, so a per-request
+# sleep dominates the runtime: 0.2s each is two hours of pure waiting. A small
+# thread pool with no sleep is both faster and gentler than one long serial
+# hammering.
+WORKERS = 6
 
 
 def headers():
@@ -299,31 +304,51 @@ def fetch_elements(service_slug, start, end, interval_minutes=None):
     return rows
 
 
-def download(rows, save_dir):
-    """Fetch each element to save_dir, skipping files already present."""
+def _fetch_one(row, save_dir):
+    """Download one element. Returns the row on success, None on failure."""
+    path = os.path.join(save_dir, row["filename"].replace(":", ""))
+    row["path"] = path
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        row["cached"] = True
+        return row
+    try:
+        resp = requests.get(row["url"], timeout=TIMEOUT)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        row["error"] = str(exc)
+        return None
+    with open(path, "wb") as fh:
+        fh.write(resp.content)
+    row["cached"] = False
+    return row
+
+
+def download(rows, save_dir, workers=WORKERS):
+    """Fetch every element into save_dir, skipping files already present.
+
+    Re-running is cheap: anything already on disk is kept, so an interrupted
+    pull resumes rather than starting over.
+    """
     os.makedirs(save_dir, exist_ok=True)
-    got, skipped = [], 0
-    for i, row in enumerate(rows, 1):
-        path = os.path.join(save_dir, row["filename"].replace(":", ""))
-        row["path"] = path
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            skipped += 1
-            got.append(row)
-            continue
-        try:
-            resp = requests.get(row["url"], stream=True, timeout=TIMEOUT)
-            resp.raise_for_status()
-        except requests.RequestException as exc:
-            print(f"  failed {row['filename']}: {exc}")
-            continue
-        with open(path, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=1 << 16):
-                fh.write(chunk)
-        got.append(row)
-        if i % 50 == 0:
-            print(f"  downloaded {i}/{len(rows)}")
-        time.sleep(PAUSE)
-    print(f"  {len(got)} files in {save_dir} ({skipped} already there)")
+    got, failed = [], []
+    done = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_fetch_one, row, save_dir): row for row in rows}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            done += 1
+            if result is None:
+                failed.append(futures[future])
+            else:
+                got.append(result)
+            if done % 500 == 0 or done == len(rows):
+                print(f"  {done}/{len(rows)}")
+    cached = sum(1 for r in got if r.get("cached"))
+    print(f"  {len(got)} files in {save_dir} ({cached} already there)")
+    if failed:
+        print(f"  {len(failed)} failed, e.g. {failed[0].get('error', '?')[:120]}")
+        print("  re-run the same command to retry only those")
+    got.sort(key=lambda r: r["timestamp"])
     return got
 
 
@@ -389,12 +414,111 @@ def describe_json(node, prefix="", depth=0):
 # Table
 # ---------------------------------------------------------------------------
 
-def build_table(rows, out_csv):
-    """Turn tabular payloads into one CSV. Always writes the element index.
+def read_records(path):
+    """Every JSON record in a file.
 
-    JSON and CSV payloads are flattened and stamped with the element time.
-    Anything binary gets an index only -- filename and timestamp -- which is
-    still what you need to join frames to the observation table.
+    The rip product ships .jsonl -- one JSON object per line -- so a plain
+    json.load() on the file would fail the moment a file carries more than one
+    frame. A malformed line is reported and skipped rather than losing the
+    whole file.
+    """
+    with open(path) as fh:
+        text = fh.read()
+    if not text.strip():
+        return []
+    if os.path.splitext(path)[1].lower() == ".jsonl":
+        records = []
+        for number, line in enumerate(text.splitlines(), 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                print(f"  {os.path.basename(path)} line {number}: {exc}")
+        return records
+    payload = json.loads(text)
+    return payload if isinstance(payload, list) else [payload]
+
+
+def _scores(entries):
+    """Flat list of confidence values, and the class names they belong to.
+
+    classification_scores is a list of single-key dicts, [{'rip_current': 0.7}],
+    so the class name is data rather than schema. Read generically: a second
+    class appearing later must not need a code change.
+    """
+    values, names = [], []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        for name, value in entry.items():
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+            names.append(name)
+    return values, names
+
+
+def _boxes(entries):
+    """(areas, centroids) in pixels for each [{x,y},{x,y}] corner pair."""
+    areas, centroids = [], []
+    for box in entries or []:
+        points = [(point.get("x"), point.get("y")) for point in box or []
+                  if isinstance(point, dict)]
+        points = [(x, y) for x, y in points if x is not None and y is not None]
+        if len(points) < 2:
+            continue
+        xs = [x for x, _ in points]
+        ys = [y for _, y in points]
+        areas.append(abs(max(xs) - min(xs)) * abs(max(ys) - min(ys)))
+        centroids.append(((max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2))
+    return areas, centroids
+
+
+def flatten_record(record, element_time=None, source_file=None):
+    """One frame's detection result as a flat row.
+
+    `time` inside the payload is the model's own stamp and is what the row is
+    keyed on; the element's time is kept beside it because they differ by
+    seconds and only one of them is the actual frame capture.
+    """
+    result = record.get("classification_result") or {}
+    values, names = _scores(result.get("classification_scores"))
+    areas, centroids = _boxes(result.get("classification_bboxes"))
+    largest = areas.index(max(areas)) if areas else None
+
+    stamp = record.get("time")
+    row = {
+        "timestamp": pd.to_datetime(stamp, utc=True, errors="coerce") if stamp
+                     else pd.NaT,
+        "element_time": element_time,
+        "detected": bool(result.get("detected")),
+        "detection_count": result.get("detection_count"),
+        "score_max": max(values) if values else None,
+        "score_mean": sum(values) / len(values) if values else None,
+        "score_classes": ",".join(sorted(set(names))) or None,
+        "bbox_count": len(areas),
+        "bbox_area_max": max(areas) if areas else None,
+        "bbox_x": centroids[largest][0] if largest is not None else None,
+        "bbox_y": centroids[largest][1] if largest is not None else None,
+        "model_name": result.get("classification_model_name"),
+        "model_version": result.get("classification_model_version"),
+        "original_image": record.get("original_image_reference"),
+        "annotated_image_url": record.get("annotated_image_url"),
+        "source_file": source_file,
+    }
+    if pd.isna(row["timestamp"]) and element_time is not None:
+        row["timestamp"] = element_time
+    return row
+
+
+def build_table(rows, out_csv):
+    """Turn the downloaded payloads into one frame-level CSV, plus an index.
+
+    Anything non-tabular gets the index only -- filename, timestamp, url --
+    rather than invented columns.
     """
     index = pd.DataFrame([{"timestamp": r["timestamp"], "filename": r["filename"],
                            "path": r["path"], "url": r["url"]} for r in rows])
@@ -402,33 +526,75 @@ def build_table(rows, out_csv):
     index.to_csv(index_path, index=False)
     print(f"  wrote {index_path}  ({len(index)} elements)")
 
-    frames = []
+    parsed = []
     for row in rows:
         ext = os.path.splitext(row["path"])[1].lower()
         try:
-            if ext == ".json":
-                with open(row["path"]) as fh:
-                    payload = json.load(fh)
-                frame = pd.json_normalize(payload)
+            if ext in (".json", ".jsonl"):
+                for record in read_records(row["path"]):
+                    parsed.append(flatten_record(record, row["timestamp"],
+                                                 row["filename"]))
             elif ext == ".csv":
                 frame = pd.read_csv(row["path"])
+                frame["timestamp"] = row["timestamp"]
+                frame["source_file"] = row["filename"]
+                parsed.append(frame)
             else:
                 continue
-        except (ValueError, json.JSONDecodeError) as exc:
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
             print(f"  skipped {row['filename']}: {exc}")
-            continue
-        frame["timestamp"] = row["timestamp"]
-        frame["source_file"] = row["filename"]
-        frames.append(frame)
 
-    if not frames:
+    if not parsed:
         print("  payloads are not tabular — the index is the whole table.")
         return None
-    table = pd.concat(frames, ignore_index=True).sort_values("timestamp")
+    if isinstance(parsed[0], pd.DataFrame):
+        table = pd.concat(parsed, ignore_index=True)
+    else:
+        table = pd.DataFrame(parsed)
+    table = table.sort_values("timestamp").reset_index(drop=True)
     table.to_csv(out_csv, index=False)
-    print(f"  wrote {out_csv}  ({len(table)} rows, {len(table.columns)} columns)")
-    print("  columns: " + ", ".join(map(str, table.columns[:20])))
+    print(f"  wrote {out_csv}  ({len(table)} frames, {len(table.columns)} columns)")
+    if "detected" in table.columns:
+        hits = int(table["detected"].sum())
+        print(f"  {hits:,} frames with a detection of {len(table):,}"
+              f" ({100 * hits / max(len(table), 1):.1f}%)")
     return table
+
+
+def hourly_summary(table, out_csv):
+    """Collapse frames to hourly rows, to join against the observation CSVs.
+
+    Everything else in this pipeline is hourly, so this is the form the rip
+    signal has to be in to sit beside tide, wind and rainfall. Both the rate
+    and the raw counts are kept: an hour with one detection in two frames is
+    not the same as one with fifty in a hundred, and a rate alone hides that.
+    """
+    if table is None or table.empty or "detected" not in table.columns:
+        return None
+    frame = table.dropna(subset=["timestamp"]).copy()
+    if frame.empty:
+        return None
+    frame["hour"] = pd.to_datetime(frame["timestamp"], utc=True).dt.floor("h")
+    detected = frame[frame["detected"]]
+
+    hourly = frame.groupby("hour").agg(
+        frames=("detected", "size"),
+        frames_with_detection=("detected", "sum"),
+        detections=("detection_count", "sum"),
+    )
+    hourly["detection_rate"] = (hourly["frames_with_detection"]
+                                / hourly["frames"]).round(4)
+    scores = detected.groupby("hour").agg(
+        score_max=("score_max", "max"),
+        score_mean=("score_max", "mean"),
+        bbox_area_max=("bbox_area_max", "max"),
+    )
+    # Left join: an hour with frames but no detection is a real observed zero,
+    # not a gap, and must survive rather than being dropped.
+    hourly = hourly.join(scores, how="left").reset_index()
+    hourly.to_csv(out_csv, index=False)
+    print(f"  wrote {out_csv}  ({len(hourly)} hours)")
+    return hourly
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +647,8 @@ def main():
                     help="report when this product has data, and download nothing")
     ap.add_argument("--via-pywebcoos", action="store_true",
                     help="use the library's download() instead of /elements/")
+    ap.add_argument("--workers", type=int, default=WORKERS,
+                    help=f"parallel downloads (default {WORKERS})")
     args = ap.parse_args()
 
     assets = load_assets(args.refresh)
@@ -540,12 +708,12 @@ def main():
     print(f"  first {rows[0]['timestamp']:%Y-%m-%d %H:%M}"
           f"  last {rows[-1]['timestamp']:%Y-%m-%d %H:%M} UTC")
 
-    got = download(rows, save_dir)
+    got = download(rows, save_dir, args.workers)
     if args.probe:
         probe(got)
-        print("\nOnce the format above is clear, re-run with --pull and a real range.")
-    else:
-        build_table(got, os.path.join(OUT_DIR, f"rip_{slugify(camera_label)}.csv"))
+    stem = os.path.join(OUT_DIR, f"rip_{slugify(camera_label)}")
+    table = build_table(got, stem + ".csv")
+    hourly_summary(table, stem + "_hourly.csv")
 
 
 if __name__ == "__main__":
