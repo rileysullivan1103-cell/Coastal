@@ -269,6 +269,30 @@ Requested variables are checked against the response — any that do not come
 back are reported rather than silently becoming a column of NaN — and the run
 prints the grid cell actually used, which is not the coordinate requested.
 
+## Choosing between the gauge and the grid
+
+`compare_precip_sources.py` aggregates the hourly grid to daily totals, aligns
+it against the GHCND gauge for the sites where both exist, and reports totals,
+wet-day agreement, daily correlation and bias. ERA5 is a model reconstruction
+and is known to spread light precipitation, so the thing to look for is a wet
+bias against a working gauge.
+
+The verdict it prints follows the numbers: close agreement means take the grid
+(same signal, hourly, no station-liveness problem); good correlation with a
+poor ratio means the timing is right and only the magnitude is off, which is
+fine for antecedent-rainfall features but means the mm are not gauge mm.
+
+Two things the probe established about the gridded source:
+
+- **Wind comes back in km/h by default.** NDBC `WSPD` and CO-OPS wind are both
+  m/s, so the request now asks for `wind_speed_unit=ms` and warns if the
+  response says otherwise. Two wind sources in different units is exactly the
+  kind of thing that merges silently and wrongly.
+- **Nearby sites share a grid cell.** Walton Lighthouse and Santa Cruz Wharf
+  return identical series — they are about a kilometre apart and the grid is
+  9-25 km. Gridded weather cannot distinguish sites at that spacing; the gauge
+  can, in principle, though in practice those two now share a gauge as well.
+
 ## Why a precipitation station returns nothing
 
 An empty PRCP response never means "it did not rain": GHCND records `PRCP = 0`

@@ -50,7 +50,11 @@ def fetch(lat, lon, start, end, probe=False):
               "start_date": start.strftime("%Y-%m-%d"),
               "end_date": end.strftime("%Y-%m-%d"),
               "hourly": ",".join(HOURLY_VARS),
-              "timezone": "UTC"}
+              "timezone": "UTC",
+              # Open-Meteo defaults to km/h. NDBC stdmet WSPD and CO-OPS wind
+              # are both m/s, so ask for m/s rather than leaving two wind
+              # sources in different units for something downstream to mix.
+              "wind_speed_unit": "ms"}
     resp = requests.get(ARCHIVE, params=params, timeout=300)
     if resp.status_code != 200:
         print(f"    HTTP {resp.status_code}: {resp.text[:300]}")
@@ -65,6 +69,13 @@ def fetch(lat, lon, start, end, probe=False):
         print(f"    unexpected response shape, top-level keys: "
               f"{list(payload.keys())}")
         return None
+
+    units = payload.get("hourly_units") or {}
+    for var in ("wind_speed_10m", "wind_gusts_10m"):
+        if units.get(var) not in (None, "m/s"):
+            print(f"    WARNING: {var} came back in {units[var]}, not m/s. "
+                  "The wind_speed_unit request was not honoured; do not mix "
+                  "this with the CO-OPS or NDBC wind without converting.")
 
     if probe:
         print(f"    top-level keys : {list(payload.keys())}")
