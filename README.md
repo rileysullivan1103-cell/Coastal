@@ -96,6 +96,10 @@ see Region scoping below.
   run and prints the commands to fix it.
 - **`test_env_offline.py`** — edge cases for the loader: quoting, `export`
   prefixes, and not clobbering a variable the shell already set.
+- **`analyze_drivers.py`** — ranks what tracks rip detections and bacteria
+  counts across the CSVs in `data/`.
+- **`test_analyze_offline.py`** — plants a known driver in synthetic data and
+  checks the analysis recovers it, and that a pure clock variable is demoted.
 - **`pull_rip_detection.py`** — downloads WebCOOS's own rip-detection product
   for Walton Lighthouse. Resolves feed and product by slug, so it is not
   subject to the pywebcoos label bug described below.
@@ -606,3 +610,50 @@ each site on what is actually known about it.
   California extent is a small fraction of the nationwide request count.
 - The nationwide WQP pull is large and can take several minutes. Scoping
   `REGION` avoids it entirely for California.
+
+## Ranking the drivers
+
+    python analyze_drivers.py
+    python analyze_drivers.py --target rip
+    python analyze_drivers.py --target wq
+
+Spearman rank correlation throughout. None of these variables is close to
+normal — rainfall is zero-inflated, bacteria counts are log-distributed with
+censored non-detects, detection rate is a bounded proportion — and rank
+correlation is unbothered by all three. The p-value uses a Fisher z
+approximation, so scipy is not required. Nothing under `MIN_N = 30` paired
+observations is reported at all.
+
+Two traps the output is built to avoid:
+
+**Diurnal confounding.** The rip detector only sees daylight, and tide, sea
+breeze and air temperature all cycle daily, so a raw correlation can be pure
+clock. Every rip correlation is reported twice: `rho` raw, and `rho_ctrl`
+after subtracting each hour-of-day's own mean from both sides. In the test
+fixture a deliberately planted clock variable scores **rho 0.44 and rho_ctrl
+0.0001** — it looks like a strong driver until controlled. Judge on
+`rho_ctrl`.
+
+**Nested predictors.** `rain_24h`, `rain_48h` and `rain_72h` are sums of one
+another and will always rank together. They are one family, not three
+findings. The standardized regression prints a condition number and warns
+above 30, where individual coefficients stop being interpretable.
+
+### What it cannot tell you
+
+`detection_rate` is a YOLOv8 model's confidence, not a verified rip. Anything
+that drives the *detector* — glare, swell texture, contrast, water colour — is
+indistinguishable here from something that drives the *rip*. Rip data exists
+at one camera only, so nothing generalizes to another beach, and Walton has no
+observed wind, so every wind column there is unvalidated ERA5.
+
+Bacteria samples are not a random sample of conditions: agencies sample in
+swim season, on a schedule, and sometimes after known spills. Non-detects are
+dropped rather than imputed, which thins the low end. `SampleDate` carries no
+time of day, so tide and wind are daily means — not the value at the moment of
+sampling.
+
+The shore normal used to turn wind and swell direction into onshore
+components is an **assumption** (`SHORE_NORMAL_DEG`, 180 degrees for the Santa
+Cruz sites, which face south across Monterey Bay). Any onshore/offshore result
+is conditional on it.
