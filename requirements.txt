@@ -1,0 +1,7 @@
+# pywebcoos is NOT on PyPI — it installs from GitHub only.
+# Source: https://github.com/WebCOOS/py-webcoos-client
+pywebcoos @ git+https://github.com/WebCOOS/py-webcoos-client.git
+
+ndbc-api
+pandas
+requests
