@@ -70,6 +70,11 @@ TIMEOUT = 60
 WORKERS = 6
 # Between pages of /elements/, which is a listing endpoint rather than a CDN.
 PAGE_PAUSE = 0.2
+# Elements per page. The server may cap this; asking for more is harmless and
+# a listing of 130,000 stills at 100 a page is 1,300 round trips.
+ELEMENT_PAGE_SIZE = 1000
+# A single read timeout should not discard hours of pagination.
+MAX_RETRIES = 5
 
 
 def headers():
@@ -282,7 +287,36 @@ def report_inventory(service_slug):
 # Elements
 # ---------------------------------------------------------------------------
 
-def fetch_elements(service_slug, start, end, interval_minutes=None):
+def get_with_retry(url, **kwargs):
+    """GET with exponential backoff on the failures that are worth retrying.
+
+    A listing run makes over a thousand sequential requests, so a transient
+    read timeout is close to certain rather than unlucky. Without this, one
+    such timeout discards every page already fetched.
+    """
+    delay = 2
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = requests.get(url, timeout=TIMEOUT, **kwargs)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            if attempt == MAX_RETRIES:
+                raise
+            print(f"    {type(exc).__name__} (attempt {attempt}/{MAX_RETRIES});"
+                  f" retrying in {delay}s")
+            time.sleep(delay)
+            delay *= 2
+            continue
+        if resp.status_code in (429, 500, 502, 503, 504) and attempt < MAX_RETRIES:
+            print(f"    HTTP {resp.status_code} (attempt {attempt}/{MAX_RETRIES});"
+                  f" retrying in {delay}s")
+            time.sleep(delay)
+            delay *= 2
+            continue
+        return resp
+    raise RuntimeError("unreachable")
+
+
+def fetch_elements(service_slug, start, end, interval_minutes=None, quiet=False):
     """Every element for a service in [start, end), oldest first.
 
     start/end are timezone-aware UTC datetimes. interval_minutes, if given,
@@ -293,17 +327,19 @@ def fetch_elements(service_slug, start, end, interval_minutes=None):
         "service": service_slug,
         "starting_after": start.isoformat().replace("+00:00", "Z"),
         "starting_before": end.isoformat().replace("+00:00", "Z"),
+        "limit": ELEMENT_PAGE_SIZE,
     }
     url = f"{API_BASE}/elements/"
     out, page = [], 1
     while url:
-        resp = requests.get(url, headers=headers(), params=params, timeout=TIMEOUT)
+        resp = get_with_retry(url, headers=headers(), params=params)
         if resp.status_code != 200:
             sys.exit(f"/elements/ page {page} returned {resp.status_code}: {resp.text[:300]}")
         payload = resp.json()
         results = payload.get("results") or []
         out.extend(results)
-        print(f"  page {page}: {len(results)} elements (total {len(out)})")
+        if not quiet or page % 25 == 0:
+            print(f"  page {page}: {len(results)} elements (total {len(out)})")
         url = dig(payload, "pagination", "next")
         params = None  # the next URL already carries the query
         page += 1
@@ -322,8 +358,9 @@ def fetch_elements(service_slug, start, end, interval_minutes=None):
         rows.append({"timestamp": when, "url": href,
                      "filename": os.path.basename(href)})
     rows.sort(key=lambda r: r["timestamp"])
-    print(f"  {len(rows)} elements with a usable url"
-          + (f" after thinning to every {interval_minutes} min" if interval_minutes else ""))
+    if not quiet:
+        print(f"  {len(rows)} elements with a usable url"
+              + (f" after thinning to every {interval_minutes} min" if interval_minutes else ""))
     return rows
 
 
@@ -379,23 +416,68 @@ def download(rows, save_dir, workers=WORKERS):
 # Coverage -- when was the camera actually looking?
 # ---------------------------------------------------------------------------
 
-def build_coverage(rows, out_csv):
-    """Hourly count of images captured. Nothing is downloaded to produce it.
+def _coverage_paths(out_csv):
+    return out_csv, out_csv.replace(".csv", "_progress.csv")
 
-    Element enumeration returns a timestamp per element, which is all a
-    denominator needs. Downloading the imagery itself would be hundreds of
-    thousands of files to answer a question the listing already answers.
+
+def load_progress(progress_csv):
+    """Dates already enumerated, so a resumed run does not redo them."""
+    if not os.path.exists(progress_csv):
+        return set()
+    frame = pd.read_csv(progress_csv)
+    return set(frame["date"].astype(str))
+
+
+def build_coverage(service_slug, start, end, out_csv):
+    """Hourly count of images captured, built one day at a time and resumable.
+
+    Nothing is downloaded: element listing returns a timestamp per element,
+    which is all a denominator needs, so hundreds of thousands of JPEGs never
+    move. But the listing itself is over a thousand sequential requests, and a
+    single read timeout used to discard the lot. Work is committed per day, so
+    a failure costs one day and re-running continues where it stopped.
     """
-    if not rows:
-        print("  no stills in that range — no coverage to write")
+    out_csv, progress_csv = _coverage_paths(out_csv)
+    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
+    done = load_progress(progress_csv)
+    days = pd.date_range(pd.Timestamp(start).floor("D"),
+                         pd.Timestamp(end).ceil("D") - pd.Timedelta(days=1),
+                         freq="D", tz="UTC")
+    todo = [d for d in days if d.strftime("%Y-%m-%d") not in done]
+    if done:
+        print(f"  resuming: {len(done)} days already enumerated,"
+              f" {len(todo)} to go")
+    else:
+        print(f"  {len(todo)} days to enumerate")
+
+    for index, day in enumerate(todo, 1):
+        label = day.strftime("%Y-%m-%d")
+        rows = fetch_elements(service_slug, day, day + pd.Timedelta(days=1),
+                              quiet=True)
+        if rows:
+            frame = pd.DataFrame({"timestamp": [r["timestamp"] for r in rows]})
+            frame["hour"] = pd.to_datetime(frame["timestamp"], utc=True).dt.floor("h")
+            hourly = frame.groupby("hour").size().rename("images").reset_index()
+            header = not os.path.exists(out_csv)
+            hourly.to_csv(out_csv, mode="a", header=header, index=False)
+        # Recorded even when empty: "the camera produced nothing that day" is
+        # a result, and without it every resume would retry the empty days.
+        pd.DataFrame([{"date": label, "images": len(rows)}]).to_csv(
+            progress_csv, mode="a", header=not os.path.exists(progress_csv),
+            index=False)
+        print(f"  {label}: {len(rows)} images  ({index}/{len(todo)})")
+
+    if not os.path.exists(out_csv):
+        print("  no imagery in that range at all")
         return None
-    frame = pd.DataFrame({"timestamp": [r["timestamp"] for r in rows]})
-    frame["hour"] = pd.to_datetime(frame["timestamp"], utc=True).dt.floor("h")
-    hourly = (frame.groupby("hour").size().rename("images").reset_index())
+    hourly = pd.read_csv(out_csv)
+    hourly["hour"] = pd.to_datetime(hourly["hour"], utc=True)
+    # An interrupted run can leave a day appended twice; collapse on read.
+    hourly = hourly.groupby("hour", as_index=False)["images"].max()
     hourly.to_csv(out_csv, index=False)
     span = hourly["hour"].max() - hourly["hour"].min()
     possible = int(span.total_seconds() // 3600) + 1
-    print(f"  wrote {out_csv}  ({len(hourly)} hours with imagery)")
+    print(f"\n  wrote {out_csv}  ({len(hourly)} hours with imagery)")
     print(f"  {len(hourly)} of {possible} hours in the span carry any image"
           f" ({100 * len(hourly) / max(possible, 1):.0f}%)")
     print(f"  median {int(hourly['images'].median())} images/hour,"
@@ -756,7 +838,11 @@ def main():
         return
 
     if args.coverage:
-        print("  enumerating stills (no downloads); this is the slow part")
+        print("  enumerating stills day by day (no downloads, resumable)")
+        build_coverage(service_slug, start, end, os.path.join(
+            OUT_DIR, f"coverage_{slugify(camera_label)}_hourly.csv"))
+        return
+
     rows = fetch_elements(service_slug, start, end, args.interval)
     if not rows:
         print("\nNo elements in that range.")
@@ -769,11 +855,6 @@ def main():
         return
     print(f"  first {rows[0]['timestamp']:%Y-%m-%d %H:%M}"
           f"  last {rows[-1]['timestamp']:%Y-%m-%d %H:%M} UTC")
-
-    if args.coverage:
-        build_coverage(rows, os.path.join(
-            OUT_DIR, f"coverage_{slugify(camera_label)}_hourly.csv"))
-        return
 
     got = download(rows, save_dir, args.workers)
     if args.probe:

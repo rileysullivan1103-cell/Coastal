@@ -355,6 +355,56 @@ def test_inventory_range():
           first3 is not None and str(last3).startswith("2025-05-09"), (first3, last3))
 
 
+def test_coverage_resumes():
+    print("\nbuild_coverage resume")
+    tmp = tempfile.mkdtemp()
+    calls = []
+
+    def fake_fetch(service, start, end, interval_minutes=None, quiet=False):
+        """Two images an hour for two hours a day, and fail on the third day."""
+        label = start.strftime("%Y-%m-%d")
+        calls.append(label)
+        if label == "2025-06-03" and calls.count(label) == 1:
+            raise TimeoutError("simulated read timeout")
+        return [{"timestamp": start + pd.Timedelta(hours=h, minutes=m)}
+                for h in (14, 15) for m in (0, 30)]
+
+    original = r.fetch_elements
+    try:
+        r.fetch_elements = fake_fetch
+        out = os.path.join(tmp, "coverage_test_hourly.csv")
+        start = pd.Timestamp("2025-06-01", tz="UTC")
+        end = pd.Timestamp("2025-06-05", tz="UTC")
+        try:
+            r.build_coverage("svc", start, end, out)
+            check("the simulated failure propagated", False)
+        except TimeoutError:
+            check("the simulated failure propagated", True)
+
+        progress = pd.read_csv(out.replace(".csv", "_progress.csv"))
+        check("days before the failure are committed", len(progress) == 2,
+              len(progress))
+        check("the failed day is not marked done",
+              "2025-06-03" not in set(progress["date"].astype(str)),
+              progress["date"].tolist())
+
+        before = len(calls)
+        hourly = r.build_coverage("svc", start, end, out)
+        retried = calls[before:]
+        check("the resume skips the days already done",
+              "2025-06-01" not in retried and "2025-06-02" not in retried, retried)
+        check("and picks up at the failed day", retried[0] == "2025-06-03",
+              retried[0])
+        check("all four days end up enumerated",
+              len(pd.read_csv(out.replace(".csv", "_progress.csv"))) == 4)
+        check("hours are counted, not elements",
+              set(hourly["images"]) == {2}, hourly["images"].tolist())
+        check("two hours per day over four days", len(hourly) == 8, len(hourly))
+    finally:
+        r.fetch_elements = original
+        shutil.rmtree(tmp)
+
+
 def test_describe_json():
     print("\ndescribe_json")
     try:
@@ -380,6 +430,7 @@ if __name__ == "__main__":
     test_build_table_binary()
     test_build_table_mixed()
     test_inventory_range()
+    test_coverage_resumes()
     test_describe_json()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     raise SystemExit(1 if FAILURES else 0)

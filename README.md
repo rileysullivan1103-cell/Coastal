@@ -682,7 +682,15 @@ fires (`detections` per hour) and how confident it is (`score_max`,
 `--coverage` enumerates the stills product and writes an hourly count of
 images captured. It **downloads nothing**: element listing already returns a
 timestamp per element, which is all a denominator needs, so hundreds of
-thousands of JPEGs never move. Pagination is the only cost.
+thousands of JPEGs never move. Pagination is the only cost — and Walton's
+stills service holds 652,697 elements, so that cost is real.
+
+It is **resumable**. Work is committed one day at a time to a
+`*_progress.csv` sidecar, so an interrupted run continues where it stopped
+instead of restarting. A first attempt died on a read timeout at page 443 of
+roughly 1,300 and lost everything; requests now retry with exponential backoff
+(5 attempts, on timeouts, connection errors and 429/5xx), and a day is the
+most any single failure can cost. Re-run the same command to continue.
 
 `analyze_drivers.py` picks the coverage file up automatically. With it, an
 hour holding images and no detection becomes an **observed zero**, an hour
