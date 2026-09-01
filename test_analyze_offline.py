@@ -355,6 +355,67 @@ def test_coverage_creates_observed_zeros():
         shutil.rmtree(tmp)
 
 
+def test_between_site_effect_is_caught():
+    print("\nwithin-site control on a purely between-site effect")
+    # Two beaches. One is dirtier AND sits at a gauge with higher water level.
+    # There is NO relationship between level and bacteria inside either beach.
+    # Pooled, that looks like a strong tide effect; within site, nothing.
+    rows = []
+    for site, level_base, dirt in [("Clean Beach", 0.5, 1.0),
+                                   ("Dirty Beach", 2.5, 3.0)]:
+        for _ in range(80):
+            rows.append({
+                "site": site,
+                "level_m": level_base + RNG.normal(scale=0.2),
+                "log_value": dirt + RNG.normal(scale=0.2),
+                "date": pd.Timestamp("2025-06-15")})
+    frame = pd.DataFrame(rows)
+
+    pooled_rho, _, _ = a.spearman(frame["level_m"], frame["log_value"])
+    within_rho, _, _ = a.spearman(a.demean_by(frame["level_m"], frame["site"]),
+                                  a.demean_by(frame["log_value"], frame["site"]))
+    check("pooled shows a strong effect that does not exist",
+          pooled_rho > 0.7, pooled_rho)
+    check("within site it vanishes", abs(within_rho) < 0.15, within_rho)
+
+    # And per-site, neither beach shows it on its own.
+    for site, group in frame.groupby("site"):
+        rho, n, _ = a.spearman(group["level_m"], group["log_value"])
+        check(f"{site} alone shows nothing", abs(rho) < 0.25, rho)
+
+
+def test_focus_tide_reports_per_site():
+    print("\nfocus_tide")
+    rows = []
+    for site, rho_target in [("Sausalito - Galilee Harbor", -0.6),
+                             ("Carpinteria State Beach, CA", 0.0)]:
+        level = RNG.normal(size=60)
+        noise = RNG.normal(size=60)
+        value = rho_target * level + np.sqrt(1 - rho_target ** 2) * noise
+        for lv, val in zip(level, value):
+            rows.append({"group": "ENT", "site": site, "level_m": lv,
+                         "log_value": val, "date": pd.Timestamp("2025-06-15")})
+    # A third site with too few samples to judge.
+    for _ in range(8):
+        rows.append({"group": "ENT", "site": "Capitola Wharf",
+                     "level_m": RNG.normal(), "log_value": RNG.normal(),
+                     "date": pd.Timestamp("2025-06-15")})
+
+    table = a.focus_tide(pd.DataFrame(rows))
+    check("one row per site-analyte pair", len(table) == 3, len(table))
+    bay = table[table["site"] == "Sausalito - Galilee Harbor"].iloc[0]
+    check("the planted negative effect is found", bay["rho"] < -0.4, bay["rho"])
+    check("its setting is labelled", bay["setting"] == "enclosed bay",
+          bay["setting"])
+    flat = table[table["site"] == "Carpinteria State Beach, CA"].iloc[0]
+    check("the flat site stays flat", abs(flat["rho"]) < 0.25, flat["rho"])
+    thin = table[table["site"] == "Capitola Wharf"].iloc[0]
+    check("an underpowered site is flagged, not dropped",
+          thin["powered"] == "underpowered" and thin["n"] == 8,
+          (thin["powered"], thin["n"]))
+    check("and its rho is withheld", pd.isna(thin["rho"]), thin["rho"])
+
+
 def test_analyte_key():
     print("\nanalyte_key")
     cases = {"Enterococcus": "ENT", "ENTEROCOCCUS": "ENT", "E. coli": "ECOLI",
@@ -370,6 +431,8 @@ if __name__ == "__main__":
     test_demean_by()
     test_standardized_ols()
     test_analyte_key()
+    test_between_site_effect_is_caught()
+    test_focus_tide_reports_per_site()
     test_coverage_creates_observed_zeros()
     test_regression_drops_identical_columns()
     test_regression_withholds_when_singular()

@@ -68,12 +68,12 @@ SHORE_NORMAL_DEG = {
 # Statistics
 # ---------------------------------------------------------------------------
 
-def spearman(x, y):
+def spearman(x, y, min_n=None):
     """(rho, n, p) rank correlation. NaNs are dropped pairwise."""
     frame = pd.DataFrame({"x": pd.to_numeric(x, errors="coerce"),
                           "y": pd.to_numeric(y, errors="coerce")}).dropna()
     n = len(frame)
-    if n < MIN_N:
+    if n < (MIN_N if min_n is None else min_n):
         return np.nan, n, np.nan
     rx, ry = frame["x"].rank(), frame["y"].rank()
     if rx.nunique() < 2 or ry.nunique() < 2:
@@ -177,7 +177,7 @@ def report_regression(frame, target, predictors):
     return fit
 
 
-def report_correlations(frame, target, predictors, control=None, title=""):
+def report_correlations(frame, target, predictors, control=None, title="", top=None):
     """Print a ranked table. `control` is a series to demean both sides by."""
     rows = []
     for name in predictors:
@@ -199,8 +199,11 @@ def report_correlations(frame, target, predictors, control=None, title=""):
     table = table.reindex(table[key].abs().sort_values(ascending=False).index)
     if title:
         print(f"\n{title}")
+    shown = table if top is None else table.head(top)
     with pd.option_context("display.width", 200, "display.max_columns", 20):
-        print(table.round(4).to_string(index=False))
+        print(shown.round(4).to_string(index=False))
+    if top is not None and len(table) > top:
+        print(f"  ({len(table) - top} weaker predictors not shown)")
     weak = table[key].abs().max()
     if pd.isna(weak):
         print("  every correlation was under-powered; treat none of this as a finding")
@@ -483,6 +486,26 @@ def analyze_rip(sites):
 # Water quality
 # ---------------------------------------------------------------------------
 
+# How each site sits relative to open ocean. This decides where a tide-level
+# effect is even plausible: inside an enclosed bay, water level tracks
+# flushing and the arrival of bay water at the shoreline, whereas on open
+# coast it is mostly just the astronomical tide. Classified by hand from the
+# geography, and wrong classifications will show up as an effect appearing
+# where the label says it should not.
+SITE_SETTING = {
+    "Sausalito - Galilee Harbor": "enclosed bay",
+    "Stinson Beach (northwest view)": "open coast",
+    "Capitola Wharf": "open embayment",
+    "Santa Cruz Wharf at Santa Cruz, CA": "open embayment",
+    "Walton Lighthouse, Santa Cruz, CA": "open embayment",
+    "San Elijo State Beach, CA": "open coast",
+    "Carpinteria State Beach, CA": "open coast",
+}
+# Reported with its n even below MIN_N, flagged rather than hidden: for a
+# single pre-specified predictor, seeing an underpowered estimate is more
+# informative than a blank.
+FOCUSED_MIN_N = 15
+
 WQ_PREDICTORS = ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm", "precip_mm",
                  "level_m", "rate_m_per_hr", "WVHT", "DPD", "WTMP",
                  "wind_speed_10m", "temperature_2m"]
@@ -578,6 +601,58 @@ def map_stations(sites, samples):
     return mapping
 
 
+def focus_tide(combined):
+    """Per-site tide-level correlation, the one predictor asked about.
+
+    Pooled across sites, a tide effect is ambiguous: sites differ in both
+    their bacteria levels and their tide gauge, so a between-site difference
+    masquerades as a tide relationship. Split by site, that route is closed —
+    each row uses one beach's own variation against one gauge.
+
+    The setting column is the prior. Inside an enclosed bay, water level
+    plausibly tracks flushing and the arrival of bay water at the shoreline.
+    On open coast it is mostly the astronomical tide, and a strong effect
+    there deserves more suspicion than confirmation.
+    """
+    print("\n" + "=" * 70)
+    print("TIDE LEVEL vs BACTERIA, PER SITE")
+    print("=" * 70)
+    rows = []
+    for (key, site), group in combined.groupby(["group", "site"]):
+        if "level_m" not in group.columns:
+            continue
+        rho, n, p = spearman(group["level_m"], group["log_value"],
+                             min_n=FOCUSED_MIN_N)
+        rows.append({"analyte": key, "site": site,
+                     "setting": SITE_SETTING.get(site, "unclassified"),
+                     "rho": rho, "n": n, "p": p,
+                     "powered": "" if n >= MIN_N else "underpowered"})
+    if not rows:
+        print("  no tide data joined to any site")
+        return None
+    table = pd.DataFrame(rows).sort_values(["analyte", "rho"])
+    with pd.option_context("display.width", 200, "display.max_columns", 20):
+        print(table.round(4).to_string(index=False))
+
+    solid = table[(table["n"] >= MIN_N) & table["rho"].notna()]
+    if solid.empty:
+        print("\n  No site has enough samples to judge the tide effect on its")
+        print("  own. The pooled result stands unreplicated — do not rely on it.")
+        return table
+    negative = solid[solid["rho"] < -0.15]
+    print(f"\n  {len(negative)} of {len(solid)} adequately powered site-analyte"
+          f" pairs show a negative tide effect stronger than -0.15.")
+    by_setting = solid.groupby("setting")["rho"].agg(["mean", "count"])
+    print(by_setting.round(3).to_string())
+    if not negative.empty:
+        settings = sorted(set(negative["setting"]))
+        print(f"  those pairs sit in: {', '.join(settings)}")
+        if settings == ["open coast"]:
+            print("  Note: open coast only. Water level there is mostly the")
+            print("  astronomical tide, so a flushing story does not fit.")
+    return table
+
+
 def analyze_wq(sites):
     samples = load_water_quality()
     if samples is None:
@@ -614,6 +689,8 @@ def analyze_wq(sites):
         return
     combined = pd.concat(pieces, ignore_index=True)
 
+    focus_tide(combined)
+
     for key in sorted(set(combined["group"].dropna())):
         subset = combined[combined["group"] == key]
         if len(subset) < MIN_N:
@@ -634,9 +711,28 @@ def analyze_wq(sites):
         # can correlate, in either direction, purely through the calendar.
         report_correlations(subset, "log_value", WQ_PREDICTORS,
                             control=subset["date"].dt.month,
-                            title="rho = raw; rho_ctrl = after removing "
+                            title="POOLED — rho = raw; rho_ctrl = after removing "
                                   "per-month means from both sides")
+        if subset["site"].nunique() > 1:
+            report_correlations(
+                subset, "log_value", WQ_PREDICTORS, control=subset["site"],
+                title="POOLED, WITHIN SITE — rho_ctrl removes each site's own "
+                      "mean, so only variation inside a beach counts.\n"
+                      "A predictor that survives raw but not here was really "
+                      "telling you which beach the sample came from.")
         report_regression(subset, "log_value", WQ_PREDICTORS)
+
+        for site, group in sorted(subset.groupby("site")):
+            setting = SITE_SETTING.get(site, "unclassified")
+            if len(group) < MIN_N:
+                print(f"\n  {site} [{setting}]: {len(group)} samples, "
+                      f"below the {MIN_N} floor — not reported")
+                continue
+            report_correlations(
+                group, "log_value", WQ_PREDICTORS,
+                control=group["date"].dt.month, top=6,
+                title=f"--- {site} [{setting}] — {len(group)} samples, "
+                      f"median {group['value'].median():.0f} ---")
 
     print("\nCaveats specific to this target:")
     print("  - Samples are not random: agencies sample in swim season, on")
@@ -647,6 +743,8 @@ def analyze_wq(sites):
     print("  - rain_24/48/72h are nested sums; treat them as one family.")
     print("  - Rainfall in California is seasonal and sampling is concentrated")
     print("    in the dry swim season, so judge on rho_ctrl, not rho.")
+    print("  - Per-site tables are the ones to trust. A pooled correlation can")
+    print("    be driven entirely by which beach a sample came from.")
     print("  - Conditions are daily means, because SampleDate carries no time.")
     print("    A tide or wind value on the sample day is not the value at the")
     print("    moment of sampling.")

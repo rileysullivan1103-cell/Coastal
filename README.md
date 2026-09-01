@@ -727,3 +727,42 @@ Exact and near-duplicate columns are now dropped before fitting, with a line
 saying which. Above `MAX_REPORTABLE_CONDITION` the coefficients are withheld
 entirely rather than printed, because a number nobody can trust is worse than
 no number.
+
+## Per-site, not pooled
+
+Water quality is reported three ways per analyte: pooled, pooled with each
+site's own mean removed, and one table per site.
+
+The middle one is the guard that matters. Sites differ in both how dirty they
+are and which tide gauge serves them, so a between-site difference arrives
+looking exactly like a within-site relationship. The test fixture plants
+precisely this: two beaches, one dirtier and sitting at a higher-water gauge,
+with no relationship inside either. Pooled it scores **rho 0.73**; within site
+it collapses to **-0.10**, and neither beach shows anything alone. A predictor
+that survives raw but not within-site was telling you which beach the sample
+came from.
+
+### The tide check
+
+`TIDE LEVEL vs BACTERIA, PER SITE` reports `level_m` against each analyte for
+each site separately, with the site's setting alongside — enclosed bay, open
+embayment or open coast, classified by hand in `SITE_SETTING`.
+
+That column is a prior, not decoration. Inside an enclosed bay, water level
+plausibly tracks flushing and the arrival of bay water at the shoreline. On
+open coast it is mostly the astronomical tide, so a strong effect there earns
+suspicion rather than confirmation. If the pooled tide effect turns out to sit
+only on open-coast sites, the mechanism does not fit and something else is
+doing the work.
+
+Sites below `MIN_N` are listed with their sample count and marked
+`underpowered`, with the correlation withheld rather than the row hidden — for
+a single pre-specified predictor, knowing a site could not be judged beats a
+silent omission.
+
+## Rip detection: no conclusions yet
+
+Deliberately not drawing any. One camera, and the observation window barely
+overlaps the rip window (`n=39` on the gridded join, `n=1` on the buoy). Until
+more cameras carry the product, or enough time accumulates for a real overlap,
+anything the rip tables show is noise with a p-value.
