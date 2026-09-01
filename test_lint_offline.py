@@ -8,12 +8,20 @@ offline tests passed, and the failure surfaced only in the middle of the
 user's real three-month pull.
 
 Python resolves globals at call time, so nothing catches this before the line
-executes. The check here is deliberately narrow: every ALL_CAPS name loaded
-anywhere in a module must be assigned somewhere in that module, imported, or
-be a builtin. Module constants are exactly the thing that gets deleted during
-a refactor while a reference survives on a rarely-taken branch, and restricting
-the rule to that naming convention keeps it free of false positives without
-reimplementing a full linter.
+executes. Every bare name loaded anywhere in a module must be assigned
+somewhere in that module, imported, or be a builtin.
+
+This started out restricted to ALL_CAPS names, on the theory that module
+constants were the thing that vanished in refactors. Then `glob` was used in a
+new function of pull_rip_detection without being imported there, the check
+skipped it for being lowercase, and it failed in the user's terminal. A
+deleted constant and a missing import are the same bug from the checker's
+point of view, so the rule now covers both.
+
+The analysis is deliberately scope-blind: a name bound ANYWHERE in the module
+counts as defined. That under-reports — a local in one function will excuse a
+reference in another — but it never cries wolf, which is what keeps the check
+worth running.
 
     python test_lint_offline.py
 """
@@ -23,6 +31,11 @@ import builtins
 import glob
 import os
 import sys
+
+# Names the interpreter provides at module scope. Without these the check
+# reports __file__ as undefined, and a checker that cries wolf gets ignored.
+MODULE_DUNDERS = {"__file__", "__name__", "__doc__", "__package__", "__spec__",
+                  "__loader__", "__builtins__", "__debug__", "__path__"}
 
 FAILURES = []
 
@@ -58,12 +71,15 @@ def defined_names(tree):
     return found
 
 
-def loaded_constants(tree):
-    """(name, line) for every ALL_CAPS bare name read, not attribute access."""
+def loaded_names(tree):
+    """(name, line) for every bare name read. Attribute access is not a name.
+
+    `glob.glob(...)` reads the name `glob`; `self.glob` does not, so only the
+    module reference is checked and attributes on it are left alone.
+    """
     out = []
     for node in ast.walk(tree):
-        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
-                and node.id.isupper() and len(node.id) > 1):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             out.append((node.id, node.lineno))
     return out
 
@@ -71,15 +87,19 @@ def loaded_constants(tree):
 def check_module(path):
     with open(path) as handle:
         tree = ast.parse(handle.read(), filename=path)
-    known = defined_names(tree) | set(dir(builtins))
-    missing = [(name, line) for name, line in loaded_constants(tree)
-               if name not in known]
+    known = defined_names(tree) | set(dir(builtins)) | MODULE_DUNDERS
+    seen, missing = set(), []
+    for name, line in loaded_names(tree):
+        if name in known or name in seen:
+            continue
+        seen.add(name)
+        missing.append((name, line))
     return missing
 
 
 def main():
     paths = sorted(p for p in glob.glob("*.py") if p != os.path.basename(__file__))
-    print(f"checking {len(paths)} modules for undefined constants\n")
+    print(f"checking {len(paths)} modules for undefined names\n")
     for path in paths:
         missing = check_module(path)
         detail = "" if not missing else "; ".join(

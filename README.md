@@ -100,9 +100,10 @@ see Region scoping below.
   counts across the CSVs in `data/`.
 - **`test_analyze_offline.py`** — plants a known driver in synthetic data and
   checks the analysis recovers it, and that a pure clock variable is demoted.
-- **`test_lint_offline.py`** — every ALL_CAPS name read in a module must be
-  defined in it. Catches a constant deleted during a refactor while a
-  reference survives on a branch the tests do not reach.
+- **`test_lint_offline.py`** — every bare name read in a module must be
+  defined, imported, or a builtin there. Catches a constant deleted during a
+  refactor, or a module used without being imported, on a branch the tests do
+  not reach. It was ALL_CAPS-only until a missing `import glob` walked past it.
 - **`pull_rip_detection.py`** — downloads WebCOOS's own rip-detection product
   for Walton Lighthouse. Resolves feed and product by slug, so it is not
   subject to the pywebcoos label bug described below.
