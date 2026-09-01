@@ -416,6 +416,38 @@ def test_focus_tide_reports_per_site():
     check("and its rho is withheld", pd.isna(thin["rho"]), thin["rho"])
 
 
+def test_thin_join_is_flagged():
+    print("\nassemble_rip on windows that barely overlap")
+    tmp = tempfile.mkdtemp()
+    old_data, old_sites = a.DATA_DIR, a.SITES_CSV
+    try:
+        # Rip hours in June 2025; conditions starting September 2025.
+        rip_hours = pd.date_range("2025-06-01 15:00", periods=200, freq="h", tz="UTC")
+        pd.DataFrame({"hour": rip_hours, "frames": 4,
+                      "frames_with_detection": 4, "detections": 4,
+                      "detection_rate": 1.0, "score_max": 0.7,
+                      "bbox_area_max": 100.0}).to_csv(
+            f"{tmp}/rip_test-beach_hourly.csv", index=False)
+        grid_hours = pd.date_range("2025-09-01", periods=500, freq="h", tz="UTC")
+        pd.DataFrame({"time": grid_hours,
+                      "wind_speed_10m": RNG.normal(size=500),
+                      "temperature_2m": RNG.normal(size=500)}).to_csv(
+            f"{tmp}/gridded_{a.grid_slug('Test Beach')}.csv", index=False)
+        pd.DataFrame([{"camera_name": "Test Beach", "lat": 36.9, "lon": -122.0,
+                       "buoy_id": None, "precip_station_id": None,
+                       "wq_station_id": None, "wq_station_name": None,
+                       "has_all_four": True}]).to_csv(f"{tmp}/sites.csv", index=False)
+
+        a.DATA_DIR, a.SITES_CSV = tmp, f"{tmp}/sites.csv"
+        frame, name = a.assemble_rip(a.load_sites())
+        check("the frame is still returned", frame is not None)
+        overlap = frame["wind_speed_10m"].notna().sum()
+        check("almost nothing joined", overlap == 0, overlap)
+    finally:
+        a.DATA_DIR, a.SITES_CSV = old_data, old_sites
+        shutil.rmtree(tmp)
+
+
 def test_analyte_key():
     print("\nanalyte_key")
     cases = {"Enterococcus": "ENT", "ENTEROCOCCUS": "ENT", "E. coli": "ECOLI",
@@ -431,6 +463,7 @@ if __name__ == "__main__":
     test_demean_by()
     test_standardized_ols()
     test_analyte_key()
+    test_thin_join_is_flagged()
     test_between_site_effect_is_caught()
     test_focus_tide_reports_per_site()
     test_coverage_creates_observed_zeros()

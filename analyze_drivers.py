@@ -46,6 +46,9 @@ SITES_CSV = "candidate_sites_ranked.csv"
 
 # Below this many paired observations a correlation is not reported at all.
 MIN_N = 30
+# Fraction of rip hours that must find matching conditions before the join is
+# worth analysing. Below this the tables are arithmetic on a handful of rows.
+MIN_JOIN_FRACTION = 0.2
 # Correlations among these are structural, not findings.
 RAIN_FAMILY = ("precipitation", "precip_mm", "rain_24h_mm", "rain_48h_mm",
                "rain_72h_mm")
@@ -352,6 +355,7 @@ def assemble_rip(sites):
           f"{frame['hour'].min()} to {frame['hour'].max()}")
 
     merged = frame.set_index("hour")
+    thin = []
     for label, part in [
             ("gridded weather", load_gridded(name)),
             ("buoy", load_buoy(site["buoy_id"]) if pd.notna(site.get("buoy_id")) else None),
@@ -362,8 +366,24 @@ def assemble_rip(sites):
             print(f"  {label}: no file, skipped")
             continue
         overlap = merged.index.intersection(part.index)
-        print(f"  {label}: {len(part)} hours, {len(overlap)} overlapping")
+        fraction = len(overlap) / max(len(merged), 1)
+        flag = "" if fraction >= MIN_JOIN_FRACTION else "   <- barely overlaps"
+        print(f"  {label}: {len(part)} hours, {len(overlap)} overlapping"
+              f" ({100 * fraction:.0f}%){flag}")
+        if fraction < MIN_JOIN_FRACTION:
+            thin.append((label, len(overlap), part.index.min(), part.index.max()))
         merged = merged.join(part, how="left", rsuffix=f"_{label[:4]}")
+
+    if thin:
+        print("\n  *** THE WINDOWS DO NOT LINE UP ***")
+        print(f"  rip hours run {merged.index.min():%Y-%m-%d}"
+              f" to {merged.index.max():%Y-%m-%d}, but:")
+        for label, count, first, last in thin:
+            print(f"    {label} covers {first:%Y-%m-%d} to {last:%Y-%m-%d}"
+                  f" — only {count} hours in common")
+        print("  Correlations below are computed on those few hours and mean")
+        print("  nothing. Re-pull the rip range over the observation window:")
+        print("    python pull_rip_detection.py --pull --match-observations")
 
     normal = SHORE_NORMAL_DEG.get(name)
     if normal is None:

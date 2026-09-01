@@ -760,6 +760,27 @@ Sites below `MIN_N` are listed with their sample count and marked
 a single pre-specified predictor, knowing a site could not be judged beats a
 silent omission.
 
+## Matching the rip range to the observations
+
+    python pull_rip_detection.py --pull --match-observations
+    python pull_rip_detection.py --coverage --match-observations
+
+`--match-observations` reads the time span of every `gridded_*`, `buoy_*` and
+`tide_*` CSV already in `data/`, takes their **intersection**, clips it to what
+the rip product's inventory actually holds, and pulls that. A rip hour is only
+usable where the conditions meant to explain it also exist, so the union would
+be the wrong answer.
+
+This exists because the first run got it wrong: the rip pull covered June-August
+2025 while `pull_observations.py` had fetched August 2025 to August 2026. The
+join landed on 39 hours of gridded weather and **one** hour of buoy data, and
+the correlation tables printed anyway, looking like results.
+
+`analyze_drivers.py` now refuses to be quiet about it. Each source prints the
+percentage of rip hours it covers, and below 20% the run prints
+`*** THE WINDOWS DO NOT LINE UP ***` with each source's actual span and the
+command to fix it.
+
 ## Rip detection: no conclusions yet
 
 Deliberately not drawing any. One camera, and the observation window barely

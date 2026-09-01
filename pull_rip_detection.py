@@ -48,6 +48,10 @@ import requests
 
 API_BASE = "https://app.webcoos.org/webcoos/api/v1"
 OUT_DIR = "data/rip_detection"
+OBS_DIR = "data"
+# Sources whose time span defines the window the analysis can actually use.
+# A rip pull outside it produces rows that join to nothing.
+OBS_PATTERNS = ("gridded_*.csv", "buoy_*.csv", "tide_*.csv")
 RAW_DUMP = "webcoos_assets_raw.json"
 
 # The product we are after, by slug. Matched case-insensitively, and any
@@ -181,6 +185,52 @@ def find_stills_service(asset, slug=None):
     """The imagery product that says WHEN the camera was actually looking."""
     return find_service(asset, (slug or STILLS_SLUG).lower(), "still",
                         label="stills ")
+
+
+def _csv_span(path):
+    """(first, last) timestamp in a CSV, from whichever column holds times."""
+    try:
+        head = pd.read_csv(path, nrows=1)
+    except (ValueError, OSError):
+        return None
+    for column in list(head.columns):
+        if column.lower() in ("time", "hour", "date", "unnamed: 0", ""):
+            try:
+                stamps = pd.to_datetime(pd.read_csv(path, usecols=[column])[column],
+                                        utc=True, errors="coerce").dropna()
+            except (ValueError, OSError):
+                continue
+            if not stamps.empty:
+                return stamps.min(), stamps.max()
+    return None
+
+
+def observation_window():
+    """The window every observation CSV on disk covers, as (start, end).
+
+    The overlap is the intersection, not the union: a rip hour is only usable
+    where the conditions it would be explained by also exist. A first pull
+    took three months of 2025 while the observations ran Aug 2025 to Aug 2026,
+    and the join landed on 39 hours of gridded weather and 1 of buoy.
+    """
+    spans = []
+    for pattern in OBS_PATTERNS:
+        for path in sorted(glob.glob(os.path.join(OBS_DIR, pattern))):
+            span = _csv_span(path)
+            if span:
+                spans.append((os.path.basename(path), span[0], span[1]))
+    if not spans:
+        return None
+    print("  observation sources on disk:")
+    for name, first, last in spans:
+        print(f"    {name:<28} {first:%Y-%m-%d} to {last:%Y-%m-%d}")
+    start = max(first for _, first, _ in spans)
+    end = min(last for _, _, last in spans)
+    if start >= end:
+        print("  those sources do not all overlap; cannot derive a window")
+        return None
+    print(f"  common window: {start:%Y-%m-%d} to {end:%Y-%m-%d}")
+    return start, end
 
 
 # ---------------------------------------------------------------------------
@@ -781,6 +831,9 @@ def main():
     ap.add_argument("--coverage", action="store_true",
                     help="enumerate the stills product to find the hours the "
                          "camera was looking; downloads nothing")
+    ap.add_argument("--match-observations", action="store_true",
+                    help="use the window the observation CSVs already cover, "
+                         "so the pull joins to something")
     ap.add_argument("--stills-product", default=None,
                     help=f"product slug to use as denominator (default {STILLS_SLUG})")
     ap.add_argument("--via-pywebcoos", action="store_true",
@@ -817,6 +870,21 @@ def main():
            if args.end else None)
     start = (datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
              if args.start else None)
+
+    if args.match_observations:
+        print("\nmatching the observation window")
+        window = observation_window()
+        if window is None:
+            sys.exit("No observation CSVs to match — run pull_observations.py first.")
+        obs_start, obs_end = window
+        # Clip to what the product actually holds, so the request is not
+        # partly outside the inventory.
+        start = max(obs_start, first) if first is not None else obs_start
+        end = min(obs_end, last) if last is not None else obs_end
+        start = start.to_pydatetime() if hasattr(start, "to_pydatetime") else start
+        end = end.to_pydatetime() if hasattr(end, "to_pydatetime") else end
+        if start >= end:
+            sys.exit("The product's coverage and the observation window do not overlap.")
 
     if start is None or end is None:
         # Default to where the data actually is, not to now.
