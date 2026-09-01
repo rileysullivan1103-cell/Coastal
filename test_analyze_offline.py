@@ -584,6 +584,54 @@ def test_analyte_key():
         check(f"{text!r} -> {want}", got == want, got)
 
 
+# ---------------------------------------------------------------------------
+# Site bookkeeping across the California file and the national scan
+# ---------------------------------------------------------------------------
+
+def test_site_sources():
+    """A camera found by scan_cameras.py must be analysable.
+
+    candidate_sites_ranked.csv only ever held California, so before this a rip
+    pull for Virginia Beach landed on disk and then reported 'not among the
+    qualifying sites' — a bookkeeping failure that reads like a data failure.
+    """
+    print("site list merges both sources")
+    import tempfile
+    import analyze_drivers as ad
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ca = os.path.join(tmp, "ca.csv")
+        national = os.path.join(tmp, "national.csv")
+        pd.DataFrame([{"camera_name": "Walton Lighthouse, Santa Cruz, CA",
+                       "lat": 36.96, "lon": -122.02, "buoy_id": "46236",
+                       "has_all_four": True},
+                      {"camera_name": "Dropped Site", "lat": 1, "lon": 1,
+                       "buoy_id": "x", "has_all_four": False}]).to_csv(ca, index=False)
+        pd.DataFrame([{"camera": "Hampton Inn Oceanfront South at Virginia Beach",
+                       "lat": 36.83, "lon": -75.97, "buoy_id": "44099"},
+                      {"camera": "Walton Lighthouse, Santa Cruz, CA",
+                       "lat": 36.96, "lon": -122.02, "buoy_id": "WRONG"}]).to_csv(
+            national, index=False)
+
+        old_sites, old_cand = ad.SITES_CSV, ad.CANDIDATES_CSV
+        ad.SITES_CSV, ad.CANDIDATES_CSV = ca, national
+        try:
+            sites = ad.load_sites()
+        finally:
+            ad.SITES_CSV, ad.CANDIDATES_CSV = old_sites, old_cand
+
+    names = list(sites["camera_name"])
+    check("Virginia Beach is now a known site",
+          any("Virginia Beach" in n for n in names), str(names))
+    check("Walton survives", any("Walton" in n for n in names))
+    check("has_all_four is still honoured", "Dropped Site" not in names)
+    check("no duplicate rows for a camera in both files",
+          len(names) == len(set(names)), str(names))
+    walton = sites[sites["camera_name"].str.contains("Walton")].iloc[0]
+    check("the California file wins on a conflict", walton["buoy_id"] == "46236",
+          str(walton["buoy_id"]))
+
+
 if __name__ == "__main__":
     test_spearman()
     test_demean_by()
@@ -602,5 +650,6 @@ if __name__ == "__main__":
     test_degenerate_target_is_named()
     test_rip_recovers_planted_driver()
     test_wq_recovers_planted_driver()
+    test_site_sources()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     raise SystemExit(1 if FAILURES else 0)

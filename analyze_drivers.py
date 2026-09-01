@@ -43,6 +43,7 @@ import pandas as pd
 
 DATA_DIR = "data"
 SITES_CSV = "candidate_sites_ranked.csv"
+CANDIDATES_CSV = "camera_candidates.csv"
 
 # Below this many paired observations a correlation is not reported at all.
 MIN_N = 30
@@ -283,11 +284,36 @@ def report_correlations(frame, target, predictors, control=None, title="", top=N
 # ---------------------------------------------------------------------------
 
 def load_sites():
-    if not os.path.exists(SITES_CSV):
-        sys.exit(f"{SITES_CSV} not found — run find_candidate_sites.py first.")
-    sites = pd.read_csv(SITES_CSV)
-    if "has_all_four" in sites.columns:
-        sites = sites[sites["has_all_four"]]
+    """Qualifying sites, from the California search and the national scan.
+
+    candidate_sites_ranked.csv only ever held California. Anything found by
+    scan_cameras.py -- Virginia Beach, Corolla -- is in camera_candidates.csv
+    under different column names, so both are read and normalised. Without
+    this a rip pull for a non-California camera lands on disk and then reports
+    'not among the qualifying sites', which looks like a data problem and is
+    really a bookkeeping one.
+    """
+    frames = []
+    if os.path.exists(SITES_CSV):
+        sites = pd.read_csv(SITES_CSV)
+        if "has_all_four" in sites.columns:
+            sites = sites[sites["has_all_four"]]
+        frames.append(sites)
+
+    if os.path.exists(CANDIDATES_CSV):
+        national = pd.read_csv(CANDIDATES_CSV).rename(columns={"camera": "camera_name"})
+        keep = [c for c in ("camera_name", "lat", "lon", "buoy_id", "tide_id")
+                if c in national.columns]
+        frames.append(national[keep])
+
+    if not frames:
+        sys.exit(f"Neither {SITES_CSV} nor {CANDIDATES_CSV} exists — run "
+                 "find_candidate_sites.py or scan_cameras.py first.")
+
+    sites = pd.concat(frames, ignore_index=True, sort=False)
+    # The California file wins where a camera is in both: it carries the
+    # precipitation and water-quality station ids the national scan does not.
+    sites = sites.drop_duplicates(subset=["camera_name"], keep="first")
     return sites.reset_index(drop=True)
 
 
@@ -396,20 +422,44 @@ RIP_PREDICTORS = [
 ]
 
 
-def assemble_rip(sites):
+def assemble_rip(sites, want=None):
     # pull_rip_detection writes into data/rip_detection/, so a flat glob on
     # data/ finds nothing and the whole rip half silently reports "not pulled".
     paths = sorted(glob.glob(f"{DATA_DIR}/**/rip_*_hourly.csv", recursive=True))
     if not paths:
         print("No data/rip_*_hourly.csv — run pull_rip_detection.py --pull first.")
         return None, None
-    frame = pd.read_csv(paths[0])
+
+    stems = [os.path.basename(p)[len("rip_"):-len("_hourly.csv")] for p in paths]
+    if want:
+        hits = [(p, st) for p, st in zip(paths, stems)
+                if want.lower().replace(" ", "-") in st or want.lower() in st]
+        if not hits:
+            print(f"No rip table matching {want!r}. Available:")
+            for stem in stems:
+                print(f"  {stem}")
+            return None, None
+        path, stem = hits[0]
+    else:
+        # Taking paths[0] silently analysed whichever site sorted first and
+        # never mentioned the others, which is the kind of thing that gets
+        # noticed only after the conclusions are written down.
+        if len(paths) > 1:
+            print(f"{len(paths)} rip tables on disk; analysing the first. "
+                  "Use --site to pick another:")
+            for stem in stems:
+                print(f"  {stem}")
+        path, stem = paths[0], stems[0]
+
+    frame = pd.read_csv(path)
     frame["hour"] = to_hour(frame["hour"])
-    stem = os.path.basename(paths[0])[len("rip_"):-len("_hourly.csv")]
 
     match = [s for _, s in sites.iterrows() if rip_slug(s["camera_name"]) == stem]
     if not match:
         print(f"  {stem} is not among the qualifying sites; cannot attach conditions.")
+        print("  Sites known here:")
+        for _, s in sites.iterrows():
+            print(f"    {rip_slug(s['camera_name'])}")
         return None, None
     site = match[0]
     name = site["camera_name"]
@@ -507,8 +557,8 @@ def apply_coverage(frame, stem):
 RIP_TARGETS = ["detection_rate", "detections", "score_max", "bbox_area_max"]
 
 
-def analyze_rip(sites):
-    frame, name = assemble_rip(sites)
+def analyze_rip(sites, want=None):
+    frame, name = assemble_rip(sites, want=want)
     if frame is None:
         return
     frame, has_coverage = apply_coverage(frame, rip_slug(name))
@@ -865,6 +915,8 @@ def analyze_wq(sites):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--target", choices=["rip", "wq", "both"], default="both")
+    ap.add_argument("--site", help="substring of the rip table to analyse, when "
+                                   "more than one camera has been pulled")
     args = ap.parse_args()
     sites = load_sites()
     print(f"{len(sites)} qualifying sites\n")
@@ -872,7 +924,7 @@ def main():
         print("=" * 70)
         print("RIP DETECTION")
         print("=" * 70)
-        analyze_rip(sites)
+        analyze_rip(sites, want=args.site)
     if args.target in ("wq", "both"):
         print("\n" + "=" * 70)
         print("WATER QUALITY")
