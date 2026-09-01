@@ -548,6 +548,14 @@ def test_variance_explained():
           abs(a.variance_explained(pure, months) - 1.0) < 1e-9,
           a.variance_explained(pure, months))
 
+    # Many groups over few rows fit noise; the correction should pull an
+    # otherwise-meaningless grouping back toward zero.
+    few = pd.Series(RNG.normal(size=300))
+    many_cells = pd.Series(range(150)).repeat(2).reset_index(drop=True)
+    share = a.variance_explained(few, many_cells)
+    check("150 cells over 300 rows of noise is corrected toward 0",
+          abs(share) < 0.15, share)
+
     # Independent of month.
     noise = pd.Series(RNG.normal(size=len(months)))
     share = a.variance_explained(noise, months)

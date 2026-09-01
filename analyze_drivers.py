@@ -204,7 +204,15 @@ def variance_explained(series, key):
     if total <= 0:
         return float("nan")
     residual = frame["v"] - frame.groupby("k")["v"].transform("mean")
-    return 1.0 - float(residual.var(ddof=0)) / total
+    eta_sq = 1.0 - float(residual.var(ddof=0)) / total
+
+    # Group means fit noise, so eta squared is biased upward by roughly
+    # (k-1)/(n-1) even when the grouping is meaningless. With 12 months that
+    # is negligible; with 149 hour-by-month cells it is several points, which
+    # would otherwise make the finer control look more explanatory than it is.
+    groups = frame["k"].nunique()
+    null = (groups - 1) / (len(frame) - 1)
+    return (eta_sq - null) / (1 - null) if null < 1 else float("nan")
 
 
 def report_variance_absorbed(frame, targets, controls):
@@ -221,7 +229,8 @@ def report_variance_absorbed(frame, targets, controls):
         return None
     table = pd.DataFrame(rows)
     print("\n=== HOW MUCH OF EACH TARGET IS JUST THE CALENDAR ===")
-    print("share of variance explained by the control key alone")
+    print("share of variance explained by the control key alone,")
+    print("corrected for the upward bias that comes from fitting group means")
     print(table.round(3).to_string(index=False))
     return table
 
