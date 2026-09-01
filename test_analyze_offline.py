@@ -448,6 +448,61 @@ def test_thin_join_is_flagged():
         shutil.rmtree(tmp)
 
 
+def test_seasonal_control():
+    print("\nseasonal control on a driver that is really the calendar")
+    # Water temperature and the target both follow an annual cycle, with no
+    # relationship inside a given month. Season is to a year of hourly data
+    # what hour-of-day is to a daylight-only feed.
+    hours = pd.date_range("2025-09-01", periods=24 * 350, freq="h", tz="UTC")
+    frame = pd.DataFrame({"hour": hours})
+    frame["month"] = frame["hour"].dt.month
+    frame["hour_of_day"] = frame["hour"].dt.hour
+    seasonal = np.cos(2 * np.pi * frame["hour"].dt.dayofyear / 365)
+    frame["WTMP"] = 13 + 3 * seasonal
+    frame["real"] = RNG.normal(size=len(frame))
+    frame["y"] = 2 * seasonal + 0.5 * frame["real"] + RNG.normal(scale=0.1, size=len(frame))
+    frame["hr_mo"] = (frame["hour_of_day"].astype(str) + "-"
+                      + frame["month"].astype(str))
+
+    raw, _, _ = a.spearman(frame["WTMP"], frame["y"])
+    check("the seasonal variable correlates strongly raw", raw > 0.8, raw)
+    controlled, _, _ = a.spearman(a.demean_by(frame["WTMP"], frame["hr_mo"]),
+                                  a.demean_by(frame["y"], frame["hr_mo"]))
+    # Demeaning by month removes the between-month signal but not the trend
+    # WITHIN each month, so a perfectly seasonal driver drops far without
+    # reaching zero. 0.94 -> 0.38 is the control working, not failing.
+    check("and collapses once month is removed", abs(controlled) < 0.5, controlled)
+
+    real_raw, _, _ = a.spearman(frame["real"], frame["y"])
+    real_ctrl, _, _ = a.spearman(a.demean_by(frame["real"], frame["hr_mo"]),
+                                 a.demean_by(frame["y"], frame["hr_mo"]))
+    check("a genuine driver survives the control", real_ctrl > 0.8,
+          (real_raw, real_ctrl))
+
+    table = a.report_correlations(
+        frame, "y", ["WTMP", "real"],
+        controls=[("hr", frame["hour_of_day"]), ("hrmo", frame["hr_mo"])])
+    check("the table ranks by the strictest control",
+          table.iloc[0]["predictor"] == "real", table["predictor"].tolist())
+    check("both control columns are present",
+          {"rho_hr", "rho_hrmo"} <= set(table.columns), list(table.columns))
+
+
+def test_non_finite_rows_dropped():
+    print("\nstandardized_ols with an inf in the target")
+    n = 200
+    frame = pd.DataFrame({"a": RNG.normal(size=n), "b": RNG.normal(size=n)})
+    frame["y"] = 2 * frame["a"] + RNG.normal(scale=0.2, size=n)
+    frame.loc[5, "y"] = np.inf
+    fit = a.standardized_ols(frame, "y", ["a", "b"])
+    check("a fit is still produced", fit is not None)
+    check("n reports the rows actually fitted", fit["n"] == n - 1, fit["n"])
+    check("and the coefficients are finite",
+          fit["beta"] is not None and bool(np.isfinite(fit["beta"]).all()),
+          str(fit["beta"]))
+    check("R2 is finite", np.isfinite(fit["r2"]), fit["r2"])
+
+
 def test_analyte_key():
     print("\nanalyte_key")
     cases = {"Enterococcus": "ENT", "ENTEROCOCCUS": "ENT", "E. coli": "ECOLI",
@@ -463,6 +518,8 @@ if __name__ == "__main__":
     test_demean_by()
     test_standardized_ols()
     test_analyte_key()
+    test_seasonal_control()
+    test_non_finite_rows_dropped()
     test_thin_join_is_flagged()
     test_between_site_effect_is_caught()
     test_focus_tide_reports_per_site()

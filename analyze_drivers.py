@@ -138,20 +138,28 @@ def standardized_ols(frame, target, predictors):
         usable = [usable[i] for i in unique]
         X = X[:, unique]
 
-    if not np.isfinite(X).all():
+    # dropna removes NaN but not inf, and an inf anywhere makes lstsq return
+    # a non-finite solution while the condition number still looks healthy.
+    finite = np.isfinite(X).all(axis=1) & np.isfinite(y)
+    if finite.sum() < MIN_N:
         return None
+    if not finite.all():
+        print(f"  dropping {int((~finite).sum())} rows with non-finite values")
+        X, y = X[finite], y[finite]
+    used = int(finite.sum())
     design = np.column_stack([np.ones(len(X)), X])
     condition = float(np.linalg.cond(design))
-    beta, *_ = np.linalg.lstsq(design, y_scaled := (y - y.mean()) / (y.std() or 1.0),
-                               rcond=None)
-    fitted = design @ beta
+    y_scaled = (y - y.mean()) / (y.std() or 1.0)
+    with np.errstate(all="ignore"):
+        beta, *_ = np.linalg.lstsq(design, y_scaled, rcond=None)
+        fitted = design @ beta
     if not np.isfinite(fitted).all():
-        return {"names": usable, "beta": None, "r2": np.nan, "n": len(subset),
+        return {"names": usable, "beta": None, "r2": np.nan, "n": used,
                 "condition": condition}
     ss_res = float(((y_scaled - fitted) ** 2).sum())
     ss_tot = float(((y_scaled - y_scaled.mean()) ** 2).sum())
     r2 = 1 - ss_res / ss_tot if ss_tot else np.nan
-    return {"names": usable, "beta": beta[1:], "r2": r2, "n": len(subset),
+    return {"names": usable, "beta": beta[1:], "r2": r2, "n": used,
             "condition": condition}
 
 
@@ -180,25 +188,33 @@ def report_regression(frame, target, predictors):
     return fit
 
 
-def report_correlations(frame, target, predictors, control=None, title="", top=None):
-    """Print a ranked table. `control` is a series to demean both sides by."""
+def report_correlations(frame, target, predictors, control=None, title="", top=None,
+                        controls=None):
+    """Print a ranked table, ranked by the last control applied.
+
+    `controls` is an ordered list of (suffix, key) pairs, each demeaning both
+    sides by that key's group means. They are independent views, not cumulative:
+    a driver that holds up under the strictest one is the one to believe.
+    """
+    if controls is None:
+        controls = [("ctrl", control)] if control is not None else []
     rows = []
     for name in predictors:
         if name not in frame.columns:
             continue
         rho, n, p = spearman(frame[name], frame[target])
         row = {"predictor": name, "rho": rho, "n": n, "p": p}
-        if control is not None:
-            ctrl_rho, ctrl_n, ctrl_p = spearman(
-                demean_by(frame[name], control), demean_by(frame[target], control))
-            row["rho_ctrl"] = ctrl_rho
-            row["p_ctrl"] = ctrl_p
+        for suffix, key in controls:
+            c_rho, _, c_p = spearman(demean_by(frame[name], key),
+                                     demean_by(frame[target], key))
+            row[f"rho_{suffix}"] = c_rho
+            row[f"p_{suffix}"] = c_p
         rows.append(row)
     if not rows:
         print("  no usable predictors")
         return None
     table = pd.DataFrame(rows)
-    key = "rho_ctrl" if "rho_ctrl" in table.columns else "rho"
+    key = f"rho_{controls[-1][0]}" if controls else "rho"
     table = table.reindex(table[key].abs().sort_values(ascending=False).index)
     if title:
         print(f"\n{title}")
@@ -480,12 +496,22 @@ def analyze_rip(sites):
         print("  no target with any variance; nothing to correlate")
         return
 
+    # Season is a confound of the same shape as time of day, and a year of
+    # data makes it live: water temperature, air temperature and the whole
+    # wave climate cycle annually, so a raw correlation can be the calendar.
+    observed["month"] = observed["hour"].dt.month
+    observed["hr_mo"] = (observed["hour_of_day"].astype(str) + "-"
+                         + observed["month"].astype(str))
+    controls = [("hr", observed["hour_of_day"]), ("hrmo", observed["hr_mo"])]
+
     for target in usable:
         report_correlations(
-            observed, target, RIP_PREDICTORS, control=observed["hour_of_day"],
+            observed, target, RIP_PREDICTORS, controls=controls,
             title=f"=== WHAT TRACKS {target} at {name} ===\n"
-                  "rho = raw rank correlation; rho_ctrl = after removing "
-                  "hour-of-day means from both sides")
+                  "rho = raw; rho_hr = hour-of-day removed; "
+                  "rho_hrmo = hour-of-day AND month removed.\n"
+                  "Ranked by rho_hrmo — a driver that survives both is the "
+                  "only kind worth believing here.")
         report_regression(observed, target, RIP_PREDICTORS)
 
     print("\nCaveats specific to this target:")
@@ -495,8 +521,9 @@ def analyze_rip(sites):
     print("    indistinguishable here from a driver of the rip.")
     print("  - Walton has no observed wind, so every wind column is ERA5 grid,")
     print("    which compare_wind_sources.py could not validate at this site.")
-    print("  - Daylight only, so any driver with a daily cycle is confounded;")
-    print("    that is what the rho_ctrl column is for.")
+    print("  - Daylight only, and a full year long, so anything with a daily or")
+    print("    annual cycle is confounded. That is what rho_hr and rho_hrmo are")
+    print("    for; judge on rho_hrmo.")
     if not has_coverage:
         print("  - No stills denominator, so there are no observed zeros and")
         print("    detection_rate carries no information. Run --coverage.")

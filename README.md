@@ -782,6 +782,29 @@ percentage of rip hours it covers, and below 20% the run prints
 `*** THE WINDOWS DO NOT LINE UP ***` with each source's actual span and the
 command to fix it.
 
+## Season is the second confound
+
+The rip window now spans a full year, which makes the calendar a confound of
+the same shape that time of day already was. Water temperature, air
+temperature and the whole wave climate cycle annually, so a raw correlation
+can be the season and nothing else.
+
+Each rip correlation therefore prints three ways:
+
+    rho        raw
+    rho_hr     hour-of-day means removed from both sides
+    rho_hrmo   hour-of-day AND month means removed
+
+Tables rank by `rho_hrmo`. In the test fixture a variable that is purely
+seasonal scores **0.94 raw and 0.38 after the month control**, while a genuine
+driver goes the other way, **0.34 raw to 0.90 controlled** — the calendar was
+hiding it. Judge on `rho_hrmo`.
+
+One limit worth knowing: demeaning by month removes the between-month signal
+but not the trend inside each month, so a perfectly seasonal driver drops a
+long way without reaching zero. A residual of 0.3-0.4 on something like water
+temperature is consistent with pure season, not with a weak real effect.
+
 ## Rip detection: no conclusions yet
 
 Deliberately not drawing any. One camera, and the observation window barely
