@@ -502,16 +502,32 @@ def analyze_rip(sites):
     observed["month"] = observed["hour"].dt.month
     observed["hr_mo"] = (observed["hour_of_day"].astype(str) + "-"
                          + observed["month"].astype(str))
-    controls = [("hr", observed["hour_of_day"]), ("hrmo", observed["hr_mo"])]
+    controls = [("hr", observed["hour_of_day"]),
+                ("mo", observed["month"]),
+                ("hrmo", observed["hr_mo"])]
+
+    # A demeaning control cannot distinguish "season caused the outcome" from
+    # "the cause only varies with season". A driver that barely moves within a
+    # month has almost nothing left after the control, so it collapses whether
+    # or not it is causal — the fixture demonstrates a genuinely causal driver
+    # going from 0.83 to 0.09. Reporting month alone alongside hour-by-month
+    # at least shows how much of the collapse each control is responsible for.
+    cells = observed["hr_mo"].nunique()
+    print(f"\n  control cells: {observed['month'].nunique()} months, "
+          f"{cells} hour-by-month combinations")
+    print("  A slow-varying predictor (swell period, water temperature) cannot")
+    print("  be separated from season by this data. A collapse from rho to")
+    print("  rho_mo means 'indistinguishable from season', NOT 'not a cause'.")
 
     for target in usable:
         report_correlations(
             observed, target, RIP_PREDICTORS, controls=controls,
             title=f"=== WHAT TRACKS {target} at {name} ===\n"
-                  "rho = raw; rho_hr = hour-of-day removed; "
-                  "rho_hrmo = hour-of-day AND month removed.\n"
-                  "Ranked by rho_hrmo — a driver that survives both is the "
-                  "only kind worth believing here.")
+                  "rho = raw; rho_hr = hour removed; rho_mo = month removed; "
+                  "rho_hrmo = both.\n"
+                  "Ranked by rho_hrmo. Compare rho_mo against it: a large gap "
+                  "means the finer control ran out of data, not that the "
+                  "driver vanished.")
         report_regression(observed, target, RIP_PREDICTORS)
 
     print("\nCaveats specific to this target:")

@@ -800,10 +800,20 @@ seasonal scores **0.94 raw and 0.38 after the month control**, while a genuine
 driver goes the other way, **0.34 raw to 0.90 controlled** — the calendar was
 hiding it. Judge on `rho_hrmo`.
 
-One limit worth knowing: demeaning by month removes the between-month signal
-but not the trend inside each month, so a perfectly seasonal driver drops a
-long way without reaching zero. A residual of 0.3-0.4 on something like water
-temperature is consistent with pure season, not with a weak real effect.
+Two limits worth knowing.
+
+Demeaning by month removes the between-month signal but not the trend inside
+each month, so a perfectly seasonal driver drops a long way without reaching
+zero.
+
+More importantly, **this control cannot distinguish "season caused it" from
+"the cause only varies with season"**. A predictor that barely moves within a
+month has almost nothing left after demeaning, so it collapses whether or not
+it is causal. The fixture shows a genuinely causal driver going from **0.83
+raw to 0.09 controlled**, while a fast-varying driver holds at 0.96 under the
+identical control. So a collapse means *indistinguishable from season here* —
+not *not a cause*. `rho_mo` is printed beside `rho_hrmo` to show which control
+did the damage.
 
 ## Rip detection: no conclusions yet
 

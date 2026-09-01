@@ -503,6 +503,41 @@ def test_non_finite_rows_dropped():
     check("R2 is finite", np.isfinite(fit["r2"]), fit["r2"])
 
 
+def test_seasonal_driver_is_indistinguishable():
+    print("\na driver whose variation is almost entirely seasonal")
+    # This is the case APD presents. The driver genuinely causes y, but it
+    # barely moves within a month, so demeaning by month leaves almost nothing
+    # of it and the correlation collapses. The data cannot separate "season
+    # was the real cause" from "the cause only varies with season" -- and that
+    # ambiguity is the finding, not a defect to code around.
+    rows = []
+    for month in range(1, 13):
+        for _ in range(90):
+            rows.append({"month": month})
+    frame = pd.DataFrame(rows)
+    seasonal = np.cos(2 * np.pi * frame["month"] / 12)
+    frame["driver"] = 3 * seasonal + 0.15 * RNG.normal(size=len(frame))
+    frame["y"] = frame["driver"] + RNG.normal(scale=1.5, size=len(frame))
+
+    raw, _, _ = a.spearman(frame["driver"], frame["y"])
+    controlled, _, _ = a.spearman(a.demean_by(frame["driver"], frame["month"]),
+                                  a.demean_by(frame["y"], frame["month"]))
+    check("strong raw", raw > 0.5, raw)
+    check("collapses under the month control even though it is causal",
+          abs(controlled) < 0.2, controlled)
+    print(f"    raw {raw:.3f}  controlled {controlled:.3f}"
+          "  <- causal, and still collapses")
+
+    # A driver with real within-month variation survives, which is what makes
+    # the comparison informative rather than uniformly destructive.
+    frame["fast"] = RNG.normal(size=len(frame))
+    frame["y2"] = frame["fast"] + RNG.normal(scale=0.3, size=len(frame))
+    fast_ctrl, _, _ = a.spearman(a.demean_by(frame["fast"], frame["month"]),
+                                 a.demean_by(frame["y2"], frame["month"]))
+    check("a fast-varying driver survives the same control", fast_ctrl > 0.8,
+          fast_ctrl)
+
+
 def test_analyte_key():
     print("\nanalyte_key")
     cases = {"Enterococcus": "ENT", "ENTEROCOCCUS": "ENT", "E. coli": "ECOLI",
@@ -518,6 +553,7 @@ if __name__ == "__main__":
     test_demean_by()
     test_standardized_ols()
     test_analyte_key()
+    test_seasonal_driver_is_indistinguishable()
     test_seasonal_control()
     test_non_finite_rows_dropped()
     test_thin_join_is_flagged()
