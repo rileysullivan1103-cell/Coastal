@@ -538,6 +538,34 @@ def test_seasonal_driver_is_indistinguishable():
           fast_ctrl)
 
 
+def test_variance_explained():
+    print("\nvariance_explained")
+    months = pd.Series(list(range(1, 13)) * 100)
+
+    # Entirely determined by month: the group mean IS the value.
+    pure = months.map({m: m * 1.0 for m in range(1, 13)})
+    check("a pure group effect is 1.0",
+          abs(a.variance_explained(pure, months) - 1.0) < 1e-9,
+          a.variance_explained(pure, months))
+
+    # Independent of month.
+    noise = pd.Series(RNG.normal(size=len(months)))
+    share = a.variance_explained(noise, months)
+    check("noise is near 0", abs(share) < 0.05, share)
+
+    # Half and half: a seasonal component plus equal-variance noise.
+    mixed = pure / pure.std() + pd.Series(RNG.normal(size=len(months)))
+    share = a.variance_explained(mixed, months)
+    check("a mixed signal lands in between", 0.3 < share < 0.7, share)
+
+    check("a constant series is NaN rather than 0 or 1",
+          math.isnan(a.variance_explained(pd.Series([5.0] * 200),
+                                          pd.Series([1, 2] * 100))))
+    check("too few rows is NaN",
+          math.isnan(a.variance_explained(pd.Series([1.0, 2.0]),
+                                          pd.Series([1, 2]))))
+
+
 def test_analyte_key():
     print("\nanalyte_key")
     cases = {"Enterococcus": "ENT", "ENTEROCOCCUS": "ENT", "E. coli": "ECOLI",
@@ -553,6 +581,7 @@ if __name__ == "__main__":
     test_demean_by()
     test_standardized_ols()
     test_analyte_key()
+    test_variance_explained()
     test_seasonal_driver_is_indistinguishable()
     test_seasonal_control()
     test_non_finite_rows_dropped()

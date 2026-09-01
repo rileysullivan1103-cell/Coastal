@@ -815,6 +815,20 @@ identical control. So a collapse means *indistinguishable from season here* —
 not *not a cause*. `rho_mo` is printed beside `rho_hrmo` to show which control
 did the damage.
 
+## How much of the target is just the calendar
+
+`HOW MUCH OF EACH TARGET IS JUST THE CALENDAR` reports, per target, the share
+of its variance that hour-of-day, month, and the two together account for on
+their own — eta squared on the control key, no predictors involved.
+
+This is the number to read before interpreting any collapse. If month explains
+little of the target, then a predictor collapsing under the month control is
+telling you about the predictor (it has no within-month variation to test),
+not that season drives the outcome. If month explains a lot, season is a real
+competitor to every driver in the table.
+
+Without it the two cases look identical in the correlation columns.
+
 ## Rip detection: no conclusions yet
 
 Deliberately not drawing any. One camera, and the observation window barely

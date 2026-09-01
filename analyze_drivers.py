@@ -188,6 +188,44 @@ def report_regression(frame, target, predictors):
     return fit
 
 
+def variance_explained(series, key):
+    """Share of a series' variance that group means account for (eta squared).
+
+    Answers "how much of this target is just the calendar?" directly, rather
+    than leaving it to be inferred from how the predictors behaved. 1.0 would
+    mean the group entirely determines the value; 0.0 that knowing the group
+    tells you nothing.
+    """
+    values = pd.to_numeric(series, errors="coerce")
+    frame = pd.DataFrame({"v": values, "k": key}).dropna()
+    if len(frame) < MIN_N or frame["k"].nunique() < 2:
+        return float("nan")
+    total = float(frame["v"].var(ddof=0))
+    if total <= 0:
+        return float("nan")
+    residual = frame["v"] - frame.groupby("k")["v"].transform("mean")
+    return 1.0 - float(residual.var(ddof=0)) / total
+
+
+def report_variance_absorbed(frame, targets, controls):
+    """How much of each target the control keys explain on their own."""
+    rows = []
+    for target in targets:
+        if target not in frame.columns:
+            continue
+        row = {"target": target}
+        for suffix, key in controls:
+            row[f"var_{suffix}"] = variance_explained(frame[target], key)
+        rows.append(row)
+    if not rows:
+        return None
+    table = pd.DataFrame(rows)
+    print("\n=== HOW MUCH OF EACH TARGET IS JUST THE CALENDAR ===")
+    print("share of variance explained by the control key alone")
+    print(table.round(3).to_string(index=False))
+    return table
+
+
 def report_correlations(frame, target, predictors, control=None, title="", top=None,
                         controls=None):
     """Print a ranked table, ranked by the last control applied.
@@ -518,6 +556,8 @@ def analyze_rip(sites):
     print("  A slow-varying predictor (swell period, water temperature) cannot")
     print("  be separated from season by this data. A collapse from rho to")
     print("  rho_mo means 'indistinguishable from season', NOT 'not a cause'.")
+
+    report_variance_absorbed(observed, usable, controls)
 
     for target in usable:
         report_correlations(
