@@ -41,7 +41,7 @@ s.addText("Findings brief   ·   updated with the controls applied", { x:M, y:1.
 s.addText("Rips, Runoff, and\nWhat Actually Replicates", { x:M, y:1.95, w:9.6, h:1.9,
   isTextBox:true, margin:0, fontFace:"Cambria", fontSize:47, bold:true, color:"FFFFFF",
   lineSpacing:52 });
-s.addText("Four beach cameras, eight bacteria stations and 2,815 hand-annotated European frames, run against measured and modelled ocean conditions.",
+s.addText("Four beach cameras, eight bacteria stations and 2,815 hand-annotated European frames, run against measured and modelled ocean conditions \u2014 including a nearshore wave model 1.45 km off one of the beaches.",
   { x:M, y:4.05, w:8.4, h:0.9, isTextBox:true, margin:0, fontFace:"Calibri", fontSize:15,
     color:"C9D4DA", lineSpacing:23 });
 s.addShape(pres.ShapeType.rect, { x:M, y:5.25, w:1.5, h:0.035, fill:{ color:ACC } });
@@ -139,7 +139,7 @@ rows.forEach((r,ri)=>{
     if (!isHead && ci === 2) { col = survives ? GOOD : ACC; bold = true; }
     if (!isHead && ci === 3) { col = survives ? GOOD : MUTE; }
     s.addText(cell, { x:x, y:y, w:colw[ci]-0.15, h:0.42, isTextBox:true, margin:0,
-      fontFace: isHead ? "Calibri" : (ci===0 ? "Calibri" : "Consolas"),
+      fontFace: isHead ? "Calibri" : (ci===0 || ci===3 ? "Calibri" : "Consolas"),
       fontSize: isHead ? 11.5 : 14, bold:bold, color:col, valign:"middle",
       charSpacing: isHead ? 1.2 : 0 });
     x += colw[ci];
@@ -162,7 +162,7 @@ const cams = [
   { name:"Walton Lighthouse", sub:"Sep 2025–Aug 2026 · 4,843 hours analysed · 2,295 observed zeros",
     col:TEAL,
     rows:[["precipitation","0.15"],["tide level","0.14"],["rain, 48 h","0.11"],
-          ["onshore swell (buoy)","0.08"],["wave height (buoy)","0.04"]],
+          ["onshore swell (buoy)","0.09"],["wave height (nearshore model)","0.08"]],
     foot:"“strongest |rho| is 0.15 — nothing here is a strong driver”" },
 ];
 cams.forEach((c,i)=>{
@@ -186,39 +186,67 @@ cams.forEach((c,i)=>{
 });
 s.addText("Detection rate vs conditions, after removing hour-of-day and month. Tide is the one driver that agrees across both coasts.",
   { x:M, y:5.75, w:CW, h:0.4, isTextBox:true, margin:0, fontFace:"Cambria", fontSize:14.5, color:INK });
-note(s, "Both use a stills-feed denominator so hours with imagery and no detection count as observed zeros.", 6.25);
+note(s, "Both use a stills-feed denominator so hours with imagery and no detection count as observed zeros. Walton’s wave figure is now CDIP’s nearshore model 1.45 km off the beach; the 23 km buoy it replaced reads 0.04 on this target. The next slide is about that swap — and about the three other targets, where it matters far more.", 6.25);
 
-/* ------------------------------------------------------- 6 the wave puzzle */
+/* ------------------------------------------------------- 6 the wave test */
 s = pres.addSlide(); light(s);
-head(s, "Reading the disagreement", "The wave contradiction is about instruments, not physics");
-s.addShape(pres.ShapeType.roundRect, { x:M, y:1.8, w:5.9, h:2.6, rectRadius:0.06,
-  fill:{ color:"FFFFFF" }, line:{ color:LINE, width:1 } });
-s.addText("Virginia Beach", { x:M+0.3, y:2.0, w:5.3, h:0.35, isTextBox:true, margin:0,
-  fontFace:"Cambria", fontSize:17, bold:true, color:INK });
-s.addText("0.40", { x:M+0.3, y:2.42, w:2.0, h:0.75, isTextBox:true, margin:0,
-  fontFace:"Cambria", fontSize:44, bold:true, color:ACC });
-s.addText("Wave height is the top driver of all four rip targets. The source is an Open-Meteo model cell directly offshore, present in 100% of analysed hours.",
-  { x:M+2.4, y:2.42, w:3.2, h:1.6, isTextBox:true, margin:0, fontFace:"Calibri",
-    fontSize:12.5, color:INK, lineSpacing:18 });
+head(s, "The prediction, and the test", "A wave source 16x closer moved every wave result");
+s.addText("The previous version of this deck called Walton’s wave null a measurement failure rather than a finding, and said so as a prediction: give the site a wave record that covers its hours and the null should move. CDIP’s nearshore model gave it one — a buoy-driven hindcast on the 15 m isobath, 1.45 km off the camera, hourly since 1999.",
+  { x:M, y:1.56, w:CW, h:0.72, isTextBox:true, margin:0, fontFace:"Calibri",
+    fontSize:12.5, color:INK, lineSpacing:19 });
 
-s.addShape(pres.ShapeType.roundRect, { x:M+6.2, y:1.8, w:5.9, h:2.6, rectRadius:0.06,
-  fill:{ color:"FFFFFF" }, line:{ color:LINE, width:1 } });
-s.addText("Walton Lighthouse", { x:M+6.5, y:2.0, w:5.3, h:0.35, isTextBox:true, margin:0,
-  fontFace:"Cambria", fontSize:17, bold:true, color:INK });
-s.addText("0.04", { x:M+6.5, y:2.42, w:2.0, h:0.75, isTextBox:true, margin:0,
-  fontFace:"Cambria", fontSize:44, bold:true, color:MUTE });
-s.addText("Wave height does nothing (p = 0.20). The source is a buoy 23 km away that reports a wave height in only 43% of the analysed hours.",
-  { x:M+8.6, y:2.42, w:3.2, h:1.6, isTextBox:true, margin:0, fontFace:"Calibri",
-    fontSize:12.5, color:INK, lineSpacing:18 });
+const wX = [M, M+4.30, M+7.10, M+9.95];
+const wW = [4.10, 2.50, 2.50, CW-9.95];
+s.addText("wave height, against…", { x:wX[0], y:2.42, w:wW[0], h:0.28, isTextBox:true,
+  margin:0, fontFace:"Calibri", fontSize:10.5, bold:true, charSpacing:1.2, color:MUTE });
+s.addText("buoy 46236", { x:wX[1], y:2.36, w:wW[1], h:0.26, isTextBox:true, margin:0,
+  align:"right", fontFace:"Calibri", fontSize:11.5, bold:true, color:MUTE });
+s.addText("22.9 km  ·  43% of hours", { x:wX[1], y:2.60, w:wW[1], h:0.24, isTextBox:true,
+  margin:0, align:"right", fontFace:"Calibri", fontSize:9.5, color:MUTE });
+s.addText("CDIP MOP  SC130", { x:wX[2], y:2.36, w:wW[2], h:0.26, isTextBox:true, margin:0,
+  align:"right", fontFace:"Calibri", fontSize:11.5, bold:true, color:TEAL });
+s.addText("1.45 km  ·  100% of hours", { x:wX[2], y:2.60, w:wW[2], h:0.24, isTextBox:true,
+  margin:0, align:"right", fontFace:"Calibri", fontSize:9.5, color:TEAL });
+s.addShape(pres.ShapeType.rect, { x:M, y:2.92, w:CW, h:0.02, fill:{ color:INK } });
 
-s.addShape(pres.ShapeType.rect, { x:M, y:4.75, w:0.05, h:1.35, fill:{ color:ACC } });
-s.addText("Walton's wave null is most likely a measurement failure, not evidence that waves do not drive rips.",
-  { x:M+0.35, y:4.72, w:CW-0.35, h:0.45, isTextBox:true, margin:0, fontFace:"Cambria",
-    fontSize:17, bold:true, color:INK });
-s.addText("I previously reported that null as a finding. With a second camera in hand it reads differently: the site with the closer, more complete wave record is the site where waves matter. Before Walton is used to argue anything about waves, it needs a wave source that covers its hours.",
-  { x:M+0.35, y:5.20, w:CW-1.2, h:0.95, isTextBox:true, margin:0, fontFace:"Calibri",
-    fontSize:13, color:INK, lineSpacing:20 });
-note(s, "Naming convention throughout: ALL-CAPS columns are measured by an instrument, lower_snake_case are model reanalysis.", 6.35);
+const wRows = [
+  ["largest detection box", "0.151", "0.304", "2.0×", true ],
+  ["detection confidence",  "0.033", "0.118", "3.6×", false],
+  ["detections per hour",   "0.063", "0.145", "2.3×", false],
+  ["detection rate",        "0.039", "0.077", "2.0×", false],
+];
+wRows.forEach((r,i)=>{
+  const y = 3.08 + i*0.56;
+  const lead = r[4];
+  s.addText(r[0], { x:wX[0], y:y, w:wW[0], h:0.44, isTextBox:true, margin:0,
+    fontFace:"Calibri", fontSize: lead ? 15 : 13.5, bold:lead, color:INK, valign:"middle" });
+  s.addText(r[1], { x:wX[1], y:y, w:wW[1], h:0.44, isTextBox:true, margin:0, align:"right",
+    fontFace:"Consolas", fontSize: lead ? 17 : 15, color: MUTE, valign:"middle" });
+  s.addText(r[2], { x:wX[2], y:y, w:wW[2], h:0.44, isTextBox:true, margin:0, align:"right",
+    fontFace:"Consolas", fontSize: lead ? 22 : 17, bold:true,
+    color: lead ? ACC : TEAL, valign:"middle" });
+  s.addText(r[3] + (i===3 ? "   buoy n.s." : ""), { x:wX[3]+0.25, y:y, w:wW[3], h:0.44,
+    isTextBox:true, margin:0, fontFace:"Calibri", fontSize:12, color:MUTE, valign:"middle" });
+  s.addShape(pres.ShapeType.rect, { x:M, y:y+0.46, w:CW, h:0.01, fill:{ color:LINE } });
+});
+
+const verdicts = [
+  { t:"Confirmed \u2014 on size.", c:GOOD,
+    b:"Box area and confidence are now led by wave height. At 0.304 the box-area figure is the largest controlled correlation in the rip half of this project." },
+  { t:"Not confirmed \u2014 on frequency.", c:ACC,
+    b:"How often the detector fires is still led by rain and tide. Walton and Virginia Beach, where waves drive that target at 0.40, still disagree." },
+];
+verdicts.forEach((v,i)=>{
+  const x = M + i*(CW/2 + 0.15);
+  s.addShape(pres.ShapeType.roundRect, { x:x, y:5.40, w:CW/2-0.15, h:1.15, rectRadius:0.06,
+    fill:{ color:"FFFFFF" }, line:{ color:LINE, width:1 } });
+  s.addText(v.t, { x:x+0.28, y:5.54, w:CW/2-0.7, h:0.28, isTextBox:true,
+    margin:0, fontFace:"Calibri", fontSize:12.5, bold:true, color:v.c });
+  s.addText(v.b, { x:x+0.28, y:5.86, w:CW/2-0.7, h:0.60, isTextBox:true, margin:0,
+    fontFace:"Calibri", fontSize:11, color:INK, lineSpacing:16 });
+});
+
+note(s, "Spearman rho after removing hour-of-day and month; n = 2,548 for the model, 1,094 for the buoy. The buoy’s detection-rate figure is not significant (p = 0.20), so that row’s ratio is arithmetic rather than evidence. What the model did not deliver: waveSxy, the alongshore radiation stress that drives longshore current and the reason for going to CDIP at all, is a fill value in 233,581 of 233,601 hours here and at both neighbouring points. It is not tested on this slide or anywhere else.", 6.68);
 
 /* ------------------------------------------------------------- 7 RipAID bias */
 s = pres.addSlide(); dark(s);
@@ -343,7 +371,7 @@ s.addText("THE BOTTOM LINE", { x:M, y:1.15, w:CW, h:0.3, isTextBox:true, margin:
 const bl = [
   ["What replicates","Rain against bacteria at Santa Cruz Wharf: three analytes, same sign, \u03c1 \u2248 0.45 after the season control \u2014 and it repeats at Virginia Beach, an independent sampling programme on the opposite coast.", GOOD],
   ["What does not transfer","The sign flips between beaches. Rain against enterococcus is +0.47 at Santa Cruz and \u22120.32 at Carpinteria; wind against a rip casualty is \u22120.04 in New Hanover and +0.07 in Palm Beach, two Atlantic beaches 800 km apart. Unrelated outcomes, unrelated programmes, and the sign reverses within a single coastline as readily as between oceans: a driver fitted at one beach should not be deployed at another.", ACC],
-  ["Worth acting on","Nothing yet. The strongest effect anywhere in this project explains under a quarter of the variance in one target at one camera, and no rip driver survives at two beaches at once.", MUTE],
+  ["Worth acting on","One thing: where the wave number is measured. At Walton the same quantity is two to four times stronger from a model 1.45 km off the beach than from the buoy 23 km out \u2014 on every rip target, at no cost but a different source. Beyond that, nothing yet: the strongest rip effect still explains 14% of the variance in one target at one camera, and no rip driver survives at two cameras at once.", TEAL],
 ];
 bl.forEach((b,i)=>{
   const y = 1.70 + i*1.62;

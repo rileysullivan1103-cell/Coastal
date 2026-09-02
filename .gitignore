@@ -11,3 +11,6 @@ ripaid_sites.csv
 data/storm_events/
 *.pptx
 data/cdip_mop_catalog.html
+node_modules/
+package-lock.json
+package.json

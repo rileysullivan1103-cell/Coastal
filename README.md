@@ -647,9 +647,10 @@ above 30, where individual coefficients stop being interpretable.
 
 `detection_rate` is a YOLOv8 model's confidence, not a verified rip. Anything
 that drives the *detector* — glare, swell texture, contrast, water colour — is
-indistinguishable here from something that drives the *rip*. Rip data exists
-at one camera only, so nothing generalizes to another beach, and Walton has no
-observed wind, so every wind column there is unvalidated ERA5.
+indistinguishable here from something that drives the *rip*. Two WebCOOS
+cameras carry the product and RipAID's eight are a different instrument
+entirely, so nothing here generalizes to a beach that was not analysed, and
+Walton has no observed wind, so every wind column there is unvalidated ERA5.
 
 Bacteria samples are not a random sample of conditions: agencies sample in
 swim season, on a schedule, and sometimes after known spills. Non-detects are
@@ -658,9 +659,13 @@ time of day, so tide and wind are daily means — not the value at the moment of
 sampling.
 
 The shore normal used to turn wind and swell direction into onshore
-components is an **assumption** (`SHORE_NORMAL_DEG`, 180 degrees for the Santa
-Cruz sites, which face south across Monterey Bay). Any onshore/offshore result
-is conditional on it.
+components is an **assumption** (`SHORE_NORMAL_DEG`) everywhere CDIP MOP does
+not reach. Where a MOP file exists the published `metaShoreNormal` wins, and at
+Walton that is **206.0 degrees against the 180 the constant assumed for all
+three Santa Cruz sites** — so every onshore figure printed at Santa Cruz before
+the MOP pull was computed off a 26-degree error. Virginia Beach, Cala Millor
+and Son Bou are still on bearings read off a map, and every onshore/offshore
+result at those sites is conditional on them.
 
 ## What the rip feed does and does not contain
 
@@ -829,12 +834,73 @@ competitor to every driver in the table.
 
 Without it the two cases look identical in the correlation columns.
 
-## Rip detection: no conclusions yet
+## Rip detection at Walton, once the waves came from the beach
 
-Deliberately not drawing any. One camera, and the observation window barely
-overlaps the rip window (`n=39` on the gridded join, `n=1` on the buoy). Until
-more cameras carry the product, or enough time accumulates for a real overlap,
-anything the rip tables show is noise with a p-value.
+This section used to say "no conclusions yet", because the observation window
+barely overlapped the rip window — `n=39` on the gridded join and `n=1` on the
+buoy. That is no longer the constraint. A year of rip output, a stills-feed
+denominator and a nearshore wave model give **4,843 hours analysed** (2,550
+with detections, 2,295 observed zeros), of which 2,548 carry the gridded and
+MOP columns and 1,094 carry the buoy.
+
+Ranked on `rho_hrmo` — hour-of-day and month both removed:
+
+| target | leader | rho_hrmo | `mop_wave_height` | buoy `WVHT` | calendar share |
+|---|---|---|---|---|---|
+| `bbox_area_max` | `mop_wave_height` | **0.3037** | **0.3037** (1st) | 0.1508 | 0.070 |
+| `score_max` | `mop_wave_height` | **0.1183** | **0.1183** (1st) | 0.0333 | 0.078 |
+| `detections` | `level_m` | 0.1852 | 0.1451 (5th) | 0.0627 | 0.242 |
+| `detection_rate` | `precipitation` | 0.1486 | 0.0774 (7th) | 0.0387 | 0.279 |
+
+All at `n=2548` for the MOP and gridded columns, `n=1094` for the buoy;
+everything above `p=0.001` except `WVHT` on `detection_rate` (`p=0.20`).
+
+**The nearshore model beats the buoy on all four targets**, by 2x to 4x. Same
+physical quantity, same camera, same hours where they overlap: what changed is
+1.45 km instead of 22.9 km, 15 m of water instead of 133 m, and 100% coverage
+instead of 43%. This is the single clearest thing the project has shown about
+where a wave number should be measured — and it is the reason the earlier
+Walton wave null was reported as a suspected instrument failure rather than as
+a finding.
+
+**But it splits by target, and the split is not flattering.** The two targets
+`mop_wave_height` leads are the ones that describe *how big* a detection is,
+and both are nearly calendar-free (7-8% of variance in the control key). The
+two it does not lead describe *how often* the detector fires, are the most
+calendar-loaded targets here (24% and 28%), and are led by rain and tide. So
+the honest sentence is: bigger waves at the beach go with bigger, more
+confident detection boxes; they do not much change how often a box appears.
+
+### What that does not settle
+
+`bbox_area_max` is the area in pixels of a YOLOv8 box. A bigger wave breaking
+closer in produces a wider, brighter foam signature, which produces a bigger
+box, whether or not the water inside it is a rip. The cleanest correlation in
+the rip half of this project is therefore also the one most exposed to the
+detector-versus-rip ambiguity — a stronger result on a weaker target.
+
+The rain columns did not go away either: `rain_24h_mm` is 0.2234 on
+`bbox_area_max`, second behind the waves, and `precipitation` still leads
+`detection_rate`. Rain and nearshore wave height are not the same weather but
+they are not independent in a Californian winter, and nothing here separates a
+detector responding to swell texture from one responding to runoff plumes.
+
+One number in the output is smaller than it looks: the standardized regression
+reports `mop_wave_height` at beta **0.2345** on `bbox_area_max`, the largest
+coefficient in that fit, but the fit is `n=1094` — dropping any row without
+buoy data pins the joint model to 43% of the hours the correlation used. The
+correlation column is the one with 2,548 hours behind it.
+
+### Virginia Beach still disagrees
+
+At Virginia Beach, modelled wave height is the top driver of `detection_rate`
+at 0.40. At Walton, with a wave source that is now closer and more complete
+than Virginia Beach's, the same target gives `mop_wave_height` 0.0774. Getting
+Walton a better wave record did not make the two cameras agree on that target.
+The instrument explanation for the old disagreement was half right: it was
+hiding a real wave signal at Walton, but that signal is in box size, not in
+detection frequency, so the two cameras genuinely behave differently and one
+of them is not simply mismeasured.
 
 ## Rip-current casualties, and why two beaches on one coast disagree
 
@@ -1091,3 +1157,20 @@ OPeNDAP request (`waveDm[0:553:221327]`) rather than five rows off the front, an
 prints each column's usable share and the month its first bad sample appears.
 The head sample saw only the denormals; the fill values start after 2013. A probe
 that reads the beginning of a record answers a question nobody asked.
+
+### What it bought, and what it cost
+
+Bought: at Walton, `mop_wave_height` beats buoy `WVHT` on every rip target, by
+two to four times, and tops `bbox_area_max` at rho_hrmo **0.3037** against the
+buoy's 0.1508 — full numbers under [Rip detection at Walton](#rip-detection-at-walton-once-the-waves-came-from-the-beach).
+It also replaced a guessed shore normal with a published one, 26 degrees away.
+
+Cost: **`waveSxy` was the reason for coming here and it does not exist.** The
+alongshore radiation stress is the term that actually drives longshore current,
+and at SC130 it is `-999.99` in 233,581 of 233,601 hours — as is `waveDm`, and
+`waveSxx` fails the range check at 28.4% usable. SC125 and SC150, two and three
+km along the same beach, return byte-identical rows, so no neighbouring point
+rescues them. What MOP delivered is height, mean period, peak period and peak
+direction, well measured and close in. The rip-forcing term is not available
+from this source at this stretch of coast, and nothing here should be read as
+having tested it.
