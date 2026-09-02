@@ -835,3 +835,125 @@ Deliberately not drawing any. One camera, and the observation window barely
 overlaps the rip window (`n=39` on the gridded join, `n=1` on the buoy). Until
 more cameras carry the product, or enough time accumulates for a real overlap,
 anything the rip tables show is noise with a p-value.
+
+## Rip-current casualties, and why the two coasts disagree
+
+Every rip target elsewhere in this project is our own instrument: `detection_rate`
+is a YOLOv8 model's output, RipAID's boxes are a curator's pen. NOAA's Storm
+Events database records something else — a day on which a rip current killed or
+injured somebody — and it was written by people who had never seen our cameras.
+`pull_storm_events.py` writes it as a daily series, and `analyze_storm.py` joins
+it to conditions.
+
+Three properties of the record decide how it can be read.
+
+**It has real zeros.** RipAID's no-rip frames were deleted by a curator, so its
+zeros are not zeros. Here a day with no logged event is a genuine observed zero
+for "a rip hurt somebody today", and the daily table writes those days out
+explicitly rather than leaving gaps.
+
+**It samples attendance, not the ocean.** An event is logged when a person is in
+the water. In New Hanover County, Saturday holds 31 of 72 events against
+Thursday's 2 — no ocean process distinguishes Saturday from Sunday, let alone
+from Thursday. Every table is therefore reported with each predictor ranked
+within its own month and weekday, so 50 (or rho 0) is the null whatever the
+season and the weekend are doing.
+
+**It is not comparable between zones.** New Hanover logs 33 casualties across 72
+events; Florida's Coastal Bay logs 70 across 63. That is the local forecast
+office's filing practice, not the water. Nothing here compares one zone's event
+*count* to another's — only the sign and size of each zone's own drivers.
+
+### The zones are named twice
+
+NWS re-cut its coastal zones during this period, so one stretch of coast appears
+under two names in two eras: `NEW HANOVER` 2000-2010 filed against the county,
+`COASTAL NEW HANOVER` 2012-2026 filed against the forecast zone. Escambia has
+three names in three eras. Analysed apart, each name carries years of zeros that
+are a filing change rather than a quiet ocean. `--zone` matches on a substring
+and pools them, printing each name's span and saying whether the spans are
+disjoint (a rename being repaired) or overlapping (two places being conflated).
+`--exclude` drops the ones that are not beaches — `INLAND NEW HANOVER` is caught
+by the same substring that correctly pools the other two.
+
+### Two zones, opposite signs
+
+Both zones have enough positives to model — 72 and 79 event days over 9,736 —
+and both have complete conditions from `era5_ocean`. Season-only, ranked within
+month and weekday:
+
+| predictor | New Hanover, NC | Palm Beach, FL | do they agree? |
+|---|---|---|---|
+| `wind_speed_10m` | **-0.042** (p=0.002) | **+0.069** (p<0.0001) | opposite, z=6.5, p=8e-11 |
+| `wave_height` | -0.008 (ns) | **+0.074** (p<0.0001) | opposite, z=4.8, p=2e-06 |
+| `wave_height_max` | -0.024 (ns) | **+0.068** (p<0.0001) | opposite, z=5.5, p=5e-08 |
+| `wave_period` | **+0.092** (p<0.0001) | +0.005 (ns) | NC only, z=5.1, p=3e-07 |
+
+In percentile terms — where the typical casualty day sat among ordinary days of
+the same month and weekday — the two signatures are different phenomena:
+
+- **New Hanover:** wave period at the 76th percentile, wind at the 32nd. Long
+  swell arriving under light wind. A clean, calm-looking day.
+- **Palm Beach:** wind at the 77th, wave height at the 75th, gusts at the 74th,
+  wave period at the 51st. A windy day with a short, steep sea.
+
+The seasons differ to match. New Hanover's events peak in July and August and
+there are none at all from November to March. Palm Beach's peak in **April and
+May** (17 and 22 of 79) and it logs events in every month of the year — a
+spring cold-front coast, not a summer swell coast.
+
+### What this does and does not establish
+
+It does not validate the cameras. Storm Events carries no coordinates, its zone
+is a stretch of county coast, and the imagery starts in 2023 while the casualty
+record starts in 2000. These are two independent regressions on the same coast,
+compared — never merged.
+
+**Neither zone has a strong driver.** The largest controlled rho in either is
+0.09. The percentile shifts are real (the null sd on 72-79 event days is about
+6 points, and the shifts run 20-27), but the ocean explains very little of when
+somebody gets hurt, which is unsurprising for an outcome that requires a person
+to be present.
+
+**The replication failed, and that is the result.** New Hanover's signature does
+not appear at Palm Beach; the wind term is significantly *reversed*. So there is
+no general rule here of the form "long-period swell is the dangerous case" — and
+equally, the earlier suspicion that our detector might be tracking whitewater
+rather than hazard is not supported, because at Palm Beach casualty days really
+are the bigger-wave, windier days the detector responds to.
+
+What survives is the same shape as the water-quality result: rain against
+enterococcus is +0.47 at Santa Cruz Wharf and -0.32 at Carpinteria; wind against
+a rip casualty is -0.04 in New Hanover and +0.07 in Palm Beach. Two entirely
+independent outcome types, two independent sampling programmes, and in both the
+sign flips between beaches. **A driver fitted at one beach should not be
+deployed at another.**
+
+### Zones with a camera in them
+
+`camera_candidates.csv` contains cameras inside four zones with enough events to
+model: New Hanover (74 events, Wrightsville Beach and Carolina Beach), Palm Beach
+(87, Jupiter Inlet), Bay (63, Panama City Beach) and Horry (22, Cherry Grove
+Pier — below the floor). None of our original cameras qualify: Virginia Beach has
+**6** casualty days in seventeen years, Corolla 5, Santa Cruz 4, Carpinteria 1.
+That is why this analysis moved to other beaches rather than checking the ones
+the project started with.
+
+### Two data traps found here
+
+**The default wave model is a forecast model.** The first Wrightsville pull wrote
+233,664 hours and carried a wave height in 18% of them — not patchy data, a
+series that began in 2021-10, fifteen years after the casualty record. The
+request succeeded and the file was written. `--marine-probe` asks each model what
+span it actually has at that coordinate; only `era5_ocean` reaches 2000. Use it
+for anything historical, and note that it serves the combined height, direction
+and period but **not** the swell/wind-wave partition, which is exactly the split
+that would test the New Hanover story directly.
+
+**A catalogued station is not a publishing station.** Buoy 41110 sits 10.2 km off
+Wrightsville Beach and publishes no standard meteorological feed at all
+(`Includes Meteorology: False`). CO-OPS 8658163 sits 3.6 km away and serves no
+water level. Both appear in `camera_candidates.csv` with their distances, and
+those distances fed the site ranking. `buoy_km` and `tide_km` measure how far
+away a station is, not whether it has ever published anything — the same class of
+error as counting a wave column that is silently all NaN.
