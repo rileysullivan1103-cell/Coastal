@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Offline checks for pull_cdip_mop.py — no network.
+
+The parser is written against a real response captured from the server, not
+against my idea of the OPeNDAP format. Two turns were lost to guessing an
+identifier shape and a URL encoding; these tests pin both.
+"""
+import sys
+
+import pandas as pd
+
+import pull_cdip_mop as mop
+import analyze_drivers as ad
+
+FAILURES = []
+
+
+def check(label, ok, detail=""):
+    print(f"  {'ok  ' if ok else 'FAIL'} {label}" + (f"  {detail}" if detail else ""))
+    if not ok:
+        FAILURES.append(label)
+
+
+# Captured verbatim from
+#   .../SC130_hindcast.nc.ascii?waveHs%5B0:1:4%5D
+REAL_SINGLE = """Dataset {
+    Float32 waveHs[waveTime = 5];
+} cdip/model/MOP_alongshore/SC130_hindcast.nc;
+---------------------------------------------
+waveHs[5]
+0.41, 0.43, 0.45, 0.44, 0.42
+"""
+
+REAL_SCALARS = """Dataset {
+    Float32 metaWaterDepth;
+    Float32 metaShoreNormal;
+} cdip/model/MOP_alongshore/SC130_hindcast.nc;
+---------------------------------------------
+metaWaterDepth, 10.0
+metaShoreNormal, 175.5
+"""
+
+REAL_MULTI = """Dataset {
+    Int32 waveTime[waveTime = 3];
+    Float32 waveHs[waveTime = 3];
+    Byte waveFlagPrimary[waveTime = 3];
+} cdip/model/MOP_alongshore/SC130_hindcast.nc;
+---------------------------------------------
+waveTime[3]
+946684800, 946688400, 946692000
+
+waveHs[3]
+0.41, 0.43, 0.45
+
+waveFlagPrimary[3]
+1, 1, 3
+"""
+
+REAL_ERROR = """Error {
+    code = 404;
+    message = "FileNotFound: No such file or directory";
+};
+"""
+
+
+def test_bracket_encoding():
+    """The whole reason an earlier probe came back empty. curl and requests
+    both refuse a bare '[' with 'bad range in URL', and the failure looks like
+    the server returning nothing."""
+    print("subscript brackets are percent-encoded before the request")
+    got = mop.encode("waveHs[0:1:4],waveTime[0:1:4]")
+    check("[ becomes %5B", "%5B" in got and "[" not in got, got)
+    check("] becomes %5D", "%5D" in got and "]" not in got, got)
+    check("the colons and commas are untouched",
+          got == "waveHs%5B0:1:4%5D,waveTime%5B0:1:4%5D", got)
+
+
+def test_parses_a_real_array_response():
+    print("\nthe captured single-variable response parses")
+    out = mop.parse_ascii(REAL_SINGLE)
+    check("one variable found", list(out) == ["waveHs"], list(out))
+    check("five values", len(out["waveHs"]) == 5, out.get("waveHs"))
+    check("they convert to float",
+          mop.to_float(out["waveHs"])[0] == 0.41, out["waveHs"][:1])
+    check("the DDS header is not parsed as data",
+          "Dataset" not in out and "Float32" not in out, list(out))
+
+
+def test_parses_scalars_and_multiple_variables():
+    print("\nscalars and multi-variable responses parse")
+    out = mop.parse_ascii(REAL_SCALARS)
+    check("both scalars found", set(out) == {"metaWaterDepth", "metaShoreNormal"},
+          list(out))
+    check("shore normal reads back", mop.to_float(out["metaShoreNormal"])[0] == 175.5,
+          out["metaShoreNormal"])
+
+    out = mop.parse_ascii(REAL_MULTI)
+    check("three variables found",
+          set(out) == {"waveTime", "waveHs", "waveFlagPrimary"}, list(out))
+    check("each has three values",
+          all(len(v) == 3 for v in out.values()), {k: len(v) for k, v in out.items()})
+    check("the epoch time converts",
+          str(pd.to_datetime(mop.to_float(out["waveTime"])[0], unit="s", utc=True))
+          .startswith("2000-01-01"), out["waveTime"][0])
+
+
+def test_an_error_response_raises():
+    """A 404 comes back with HTTP 200 and an Error block in the body. Parsed
+    as data it would look like an empty variable set, which is how a missing
+    point would quietly become a site with no waves."""
+    print("\nan OPeNDAP Error body raises instead of parsing as empty")
+    try:
+        mop.parse_ascii(REAL_ERROR)
+        check("it raises", False, "parse_ascii accepted an Error body")
+    except ValueError as exc:
+        check("it raises", True)
+        check("and quotes the server's message", "FileNotFound" in str(exc))
+
+
+def test_id_regex_catches_both_shapes():
+    """B0001 is one letter and four digits; SC001 is two and three. A pattern
+    matching only one silently drops entire counties -- which is exactly how
+    Santa Cruz came back as 'not covered'."""
+    print("\nthe id pattern catches both naming shapes")
+    html = ('<a href="B0001_hindcast.nc">B0001_hindcast.nc</a>'
+            '<a href="SC001_hindcast.nc">SC001_hindcast.nc</a>'
+            '<a href="SC328_hindcast.nc">SC328_hindcast.nc</a>'
+            '<a href="DN001_nowcast.nc">DN001_nowcast.nc</a>')
+    found = sorted(set(mop.ID_RE.findall(html)))
+    check("one-letter four-digit ids", "B0001" in found, found)
+    check("two-letter three-digit ids", "SC001" in found and "SC328" in found, found)
+    check("only hindcast entries, so each point counts once",
+          "DN001" not in found, found)
+
+
+def test_dds_length():
+    print("\nthe array length is read from the DDS, not assumed")
+    dds = ("Dataset {\n"
+           "    Int32 waveTime[waveTime = 221328];\n"
+           "    Float32 waveHs[waveTime = 221328];\n"
+           "    Float32 waveFrequency[waveFrequency = 20];\n"
+           "    Float32 metaShoreNormal;\n"
+           "} x.nc;")
+    sizes = {n: int(s) for n, d, s in mop.DDS_RE.findall(dds) if n == d}
+    check("waveTime length found", sizes.get("waveTime") == 221328, sizes)
+    check("the frequency axis is not mistaken for it",
+          sizes.get("waveFrequency") == 20, sizes)
+    have = mop.available(dds, ["waveHs", "waveTa", "metaShoreNormal"])
+    check("present variables are detected", "waveHs" in have, have)
+    check("absent ones are not requested", "waveTa" not in have, have)
+    check("scalars are detected too", "metaShoreNormal" in have, have)
+
+
+def test_rename_keeps_mean_and_peak_apart():
+    """waveTa is an average period and waveTp a peak one. Open-Meteo's
+    wave_period is a mean, so mapping waveTp onto it would put a peak period
+    in a column every other site fills with a mean."""
+    print("\nmean and peak periods do not collide")
+    check("average period takes the shared name",
+          mop.RENAME["waveTa"] == "wave_period", mop.RENAME["waveTa"])
+    check("peak period gets its own", mop.RENAME["waveTp"] == "wave_period_peak",
+          mop.RENAME["waveTp"])
+    check("mean direction takes the shared name",
+          mop.RENAME["waveDm"] == "wave_direction", mop.RENAME["waveDm"])
+    check("no two CDIP names map to one of ours",
+          len(set(mop.RENAME.values())) == len(mop.RENAME), mop.RENAME)
+    check("the shared names are ones analyze_drivers already reads",
+          {"wave_height", "wave_period", "wave_direction"} <= set(ad.MARINE_COLUMNS),
+          ad.MARINE_COLUMNS)
+
+
+def test_slug_matches_the_rest_of_the_project():
+    print("\nthe output slug matches the other pullers")
+    name = "Walton Lighthouse, Santa Cruz, CA"
+    check("identical to analyze_drivers.grid_slug",
+          mop.grid_slug(name) == ad.grid_slug(name), mop.grid_slug(name))
+
+
+def test_distance():
+    print("\nthe distance the site selection turns on")
+    walton = (36.960695, -122.0022)
+    sc130 = (36.94782, -122.00476)
+    buoy = (36.759, -121.950)
+    near = mop.km_between(*walton, *sc130)
+    far = mop.km_between(*walton, *buoy)
+    check("SC130 is about 1.45 km from Walton", 1.3 < near < 1.6, round(near, 2))
+    check("buoy 46236 is about 23 km", 22 < far < 24, round(far, 2))
+    check("the MOP point is much closer", far / near > 10, round(far / near, 1))
+
+
+if __name__ == "__main__":
+    test_bracket_encoding()
+    test_parses_a_real_array_response()
+    test_parses_scalars_and_multiple_variables()
+    test_an_error_response_raises()
+    test_id_regex_catches_both_shapes()
+    test_dds_length()
+    test_rename_keeps_mean_and_peak_apart()
+    test_slug_matches_the_rest_of_the_project()
+    test_distance()
+    print()
+    if FAILURES:
+        print(f"{len(FAILURES)} FAILED: {FAILURES}")
+        sys.exit(1)
+    print("ALL PASS")
