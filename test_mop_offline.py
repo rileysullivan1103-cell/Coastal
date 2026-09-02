@@ -249,6 +249,89 @@ def test_the_distance_guard_exists():
     check("SC130 still passes", good < mop.MAX_KM, round(good, 2))
 
 
+# Captured verbatim from
+#   .../SC130_hindcast.nc.ascii?waveTime%5B120000:1:120002%5D,waveHs...
+# waveHs is a healthy 0.47 m at the very timestamps where waveDm, waveSxy and
+# waveSxx are the documented _FillValue. The first version of this puller
+# turned -999.99 into a float, called notna() on it, and reported the column
+# 100.0% populated.
+REAL_FILL = """Dataset {
+    Float32 waveTime[waveTime = 3];
+    Float32 waveHs[waveTime = 3];
+    Float32 waveDm[waveTime = 3];
+} cdip/model/MOP_alongshore/SC130_hindcast.nc;
+---------------------------------------------
+waveTime[3]
+1378684800, 1378688400, 1378692000
+
+waveHs[3]
+0.4663298, 0.46263605, 0.45027834
+
+waveDm[3]
+-999.99, -999.99, -999.99
+"""
+
+
+def test_fill_value_is_not_data():
+    print("\nCDIP's fill value is not a wave direction")
+    values = mop.parse_ascii(REAL_FILL)
+    direction = pd.Series(mop.to_float(values["waveDm"]))
+    height = pd.Series(mop.to_float(values["waveHs"]))
+    check("to_float still turns -999.99 into a float (that is the trap)",
+          direction.notna().all())
+    check("is_fill catches every one of them", bool(mop.is_fill(direction).all()))
+    check("is_fill leaves real wave heights alone",
+          not bool(mop.is_fill(height).any()))
+
+
+def test_denormals_are_not_data():
+    print("\ndenormals at the start of the record are not data")
+    series = pd.Series([0.0, 0.0, 1.2397983e-33, 0.9])
+    flagged = mop.is_denormal(series)
+    check("the denormal from the start of SC130's record is caught",
+          bool(flagged.iloc[2]))
+    check("an exact zero is not called a denormal", not bool(flagged.iloc[0]))
+    check("a real value is untouched", not bool(flagged.iloc[3]))
+
+
+def test_clean_fill_drops_the_unusable_column_and_keeps_the_good_one():
+    print("\na column that is all fill is dropped, its neighbours are kept")
+    frame = pd.DataFrame({
+        "waveHs": [0.47, 0.46, 0.45, 0.44],
+        "waveDm": [-999.99, -999.99, 0.0, 1.2397983e-33],
+        "waveTa": [8.0, 9.0, -999.99, 10.0],
+    })
+    cleaned, audit, dropped = mop.clean_fill(frame, ["waveHs", "waveDm", "waveTa"])
+    check("waveDm is dropped, not written as wave_direction",
+          "waveDm" in dropped and "waveDm" not in cleaned.columns)
+    check("waveHs survives untouched", "waveHs" in cleaned.columns
+          and cleaned["waveHs"].notna().all())
+    check("waveTa survives with its one fill value masked",
+          "waveTa" in cleaned.columns and int(cleaned["waveTa"].isna().sum()) == 1,
+          f"{audit['waveTa']['share']:.2f} usable")
+    check("no rows were dropped to protect a bad column", len(cleaned) == 4)
+
+
+def test_reported_share_is_honest():
+    print("\nthe populated percentage counts fill values as missing")
+    frame = pd.DataFrame({"waveDm": [-999.99] * 10})
+    cleaned, audit, dropped = mop.clean_fill(frame, ["waveDm"],
+                                             keep_degenerate=True)
+    share = 100.0 * cleaned["waveDm"].notna().mean()
+    check("a column of nothing but fill reports 0% populated, not 100%",
+          share == 0.0, f"{share:.1f}%")
+    check("the audit counts every fill value", audit["waveDm"]["fill"] == 10)
+
+
+def test_keep_degenerate_is_an_escape_not_the_default():
+    print("\ndropping is the default; keeping it is a flag")
+    frame = pd.DataFrame({"waveDm": [-999.99] * 10})
+    _, _, dropped = mop.clean_fill(frame.copy(), ["waveDm"])
+    _, _, kept = mop.clean_fill(frame.copy(), ["waveDm"], keep_degenerate=True)
+    check("dropped by default", dropped == ["waveDm"])
+    check("--keep-degenerate writes it anyway", kept == [])
+
+
 if __name__ == "__main__":
     test_bracket_encoding()
     test_parses_a_real_array_response()
@@ -262,6 +345,11 @@ if __name__ == "__main__":
     test_region_membership_is_anchored()
     test_every_region_is_scored_not_the_first_that_passes()
     test_the_distance_guard_exists()
+    test_fill_value_is_not_data()
+    test_denormals_are_not_data()
+    test_clean_fill_drops_the_unusable_column_and_keeps_the_good_one()
+    test_reported_share_is_honest()
+    test_keep_degenerate_is_an_escape_not_the_default()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -55,6 +55,23 @@ CHUNK = 20000
 # file, so the distance is now checked and the run refuses.
 MAX_KM = 25.0
 
+# CDIP declares _FillValue = -999.99 on every Float32 wave variable, and the
+# .ascii service hands it back as a plain number. float("-999.99") is a
+# perfectly good float, so notna() is True and a column of nothing but fill
+# reports as 100% populated -- which is exactly what SC130's waveDm, waveSxy
+# and waveSxx did on the first run here. Anything within FILL_TOL of it is
+# missing, not data.
+FILL_VALUE = -999.99
+FILL_TOL = 0.01
+# The same three columns open the record with runs of 0.0 and denormals like
+# 1.2397983E-33 -- uninitialised memory written out as Float32, not a
+# measurement. No wave height, period, direction or radiation stress this
+# project cares about is legitimately smaller than TINY.
+TINY = 1e-20
+# A column with less than this share of usable values at the chosen point is
+# dropped rather than written mostly-empty under a name other sites fill.
+MIN_USABLE = 0.50
+
 # Dataset ids come in two shapes -- B0001 (one letter, four digits) and SC001
 # (two letters, three digits) -- and assuming either one alone silently hides
 # whole counties. Santa Cruz is only in the second family.
@@ -148,6 +165,77 @@ def parse_ascii(text):
 
 def to_float(values):
     return [float(v) if v not in ("", "nan") else float("nan") for v in values]
+
+
+def is_fill(series):
+    return (series - FILL_VALUE).abs() < FILL_TOL
+
+
+def is_denormal(series):
+    """Non-zero but smaller than any real measurement -- garbage bits."""
+    magnitude = series.abs()
+    return (magnitude > 0) & (magnitude < TINY)
+
+
+def audit_column(series):
+    """How many of this column's values are fill, denormal, or exactly zero."""
+    total = len(series)
+    fill = int(is_fill(series).sum())
+    denormal = int(is_denormal(series).sum())
+    zero = int((series == 0).sum())
+    blank = int(series.isna().sum())
+    usable = total - fill - denormal - zero - blank
+    return {"total": total, "fill": fill, "denormal": denormal, "zero": zero,
+            "blank": blank, "usable": usable,
+            "share": (usable / total) if total else 0.0}
+
+
+def clean_fill(frame, columns, min_usable=MIN_USABLE, keep_degenerate=False):
+    """Mask CDIP's fill values, then drop whatever is left unusable.
+
+    Returns the frame and the audit, so the caller can print what it lost.
+    Rows are never dropped: at SC130 waveHs is a healthy 0.47 m at the very
+    timestamps where waveDm is -999.99, so dropping those rows would throw
+    away good height and period to protect a direction column that has
+    nothing in it anywhere.
+    """
+    audit, dropped = {}, []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        series = pd.to_numeric(frame[column], errors="coerce")
+        report = audit_column(series)
+        audit[column] = report
+        frame[column] = series.mask(is_fill(series) | is_denormal(series))
+        if report["share"] < min_usable and not keep_degenerate:
+            dropped.append(column)
+    if dropped:
+        frame = frame.drop(columns=dropped)
+    return frame, audit, dropped
+
+
+def print_audit(audit, dropped, rename=None):
+    rename = rename or {}
+    print("\n  column health (fill and denormal counted as missing):")
+    for column, report in audit.items():
+        label = rename.get(column, column)
+        note = ""
+        if report["fill"]:
+            note += f"  fill {report['fill']:,}"
+        if report["denormal"]:
+            note += f"  denormal {report['denormal']:,}"
+        if report["zero"]:
+            note += f"  zero {report['zero']:,}"
+        if report["blank"]:
+            note += f"  blank {report['blank']:,}"
+        mark = "  DROPPED" if column in dropped else ""
+        print(f"    {label:<22} {100 * report['share']:5.1f}% usable{note}{mark}")
+    if dropped:
+        names = ", ".join(rename.get(c, c) for c in dropped)
+        print(f"\n  dropped {names}: below {100 * MIN_USABLE:.0f}% usable at "
+              "this point.\n  CDIP publishes the column; at this point it "
+              "holds fill values and\n  denormals, not waves. Pass "
+              "--keep-degenerate to write it anyway.")
 
 
 def fetch(dataset, projection):
@@ -374,6 +462,8 @@ def main():
                     help="refuse a point further than this from the site")
     ap.add_argument("--stride", type=int, default=10,
                     help="coarse scan step when searching for the nearest point")
+    ap.add_argument("--keep-degenerate", action="store_true",
+                    help="write columns that are mostly fill values anyway")
     ap.add_argument("--probe", action="store_true",
                     help="find the point, print its metadata and five rows, stop")
     args = ap.parse_args()
@@ -428,7 +518,18 @@ def main():
                        + ",waveTime[0:1:4]")
         print("\n  first five rows:")
         for key, values in sample.items():
-            print(f"    {key:<22} {values}")
+            series = pd.Series(values, dtype="float64") if key != "metaSiteLabel" \
+                else None
+            note = ""
+            if series is not None and key in RENAME:
+                bad = int((is_fill(series) | is_denormal(series) |
+                           (series == 0)).sum())
+                if bad:
+                    note = f"   <- {bad}/{len(series)} fill or denormal"
+            print(f"    {key:<22} {values}{note}")
+        print("\n  Five rows is not a verdict; the fill values at SC130 start "
+              "mid-record.\n  The full run audits every column and drops the "
+              "unusable ones.")
         print("\nRe-run without --probe to write the CSV.")
         return
 
@@ -453,6 +554,10 @@ def main():
         print(f"\n  {before - len(out)} duplicated timestamp(s) at the "
               "hindcast/nowcast seam, dropped")
 
+    out, audit, dropped = clean_fill(out, list(RENAME),
+                                     keep_degenerate=args.keep_degenerate)
+    print_audit(audit, dropped, RENAME)
+
     out = out.rename(columns=RENAME)
     keep = ["time"] + [c for c in RENAME.values() if c in out.columns] + ["product"]
     out = out[keep]
@@ -469,6 +574,8 @@ def main():
         if column in out.columns:
             share = 100.0 * out[column].notna().mean()
             print(f"  {column:<22} {share:5.1f}% populated")
+    if dropped:
+        print("  not written: " + ", ".join(RENAME[c] for c in dropped))
 
 
 if __name__ == "__main__":

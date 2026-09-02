@@ -964,3 +964,56 @@ water level. Both appear in `camera_candidates.csv` with their distances, and
 those distances fed the site ranking. `buoy_km` and `tide_km` measure how far
 away a station is, not whether it has ever published anything — the same class of
 error as counting a wave column that is silently all NaN.
+
+## Waves at the beach, from CDIP MOP
+
+Every wave number in this project so far has come from far away: Walton
+Lighthouse joined to buoy **46236, 22.9 km out in 133 m of water**, Wrightsville
+Beach to an Open-Meteo reanalysis cell. Surfline's Santa Cruz wave data does not
+come from Surfline — the upstream is **CDIP** (Coastal Data Information Program,
+Scripps), which pushes its buoy measurements to NDBC every 30 minutes and also
+runs **MOP** (MOnitoring and Prediction), a model that propagates those waves
+inshore and publishes hourly series at points along the 10–15 m isobath.
+
+`pull_cdip_mop.py` reads them over OPeNDAP. For Walton the nearest point is
+**SC130, 1.45 km from the camera**, hourly from 1999-12-31, with the hindcast and
+nowcast files abutting at one shared timestamp. It is a model, so its columns
+stay `lower_snake_case` alongside ERA5 — but a model initialised by a real buoy
+and propagated to the surf zone carries three things nothing else here has:
+`metaShoreNormal` (published, against four bearings this project read off a map),
+`waveModelInputSource` (which buoy constrained each timestep), and `waveSxy`,
+the alongshore radiation stress that actually drives longshore current.
+
+California only. MOP does not exist for Virginia Beach, Wrightsville or Jupiter.
+
+### Three data traps found here
+
+**A region search that stops at the first candidate.** The first run wrote 229,867
+hours from **B1788, 251 km away**, under the Walton camera's name. Two faults: the
+loop broke at the first region whose *first* point was within 400 km (B0001 is
+367 km from Santa Cruz), and nothing afterwards refused the result. The search now
+scores every region and `MAX_KM = 25.0` makes the run exit rather than write. A
+wrong file that looks complete is worse than no file.
+
+**Guessing an identifier shape.** Dataset ids come in two families — `B0001` (one
+letter, four digits) and `SC001` (two letters, three) — and three separate
+attempts to pattern-match them cost a turn each, once producing a confident
+"only 4 regions" census that was also doubled because each dataset appears twice
+in the catalogue HTML. Santa Cruz exists only in the second family.
+
+**`_FillValue` is a number.** CDIP declares `_FillValue = -999.99` on its Float32
+wave variables and the `.ascii` service hands it back as plain text. `float()`
+accepts it, `notna()` is True, and the puller's own coverage report called a
+column of nothing but fill **100.0% populated**. At SC130 that hit `waveDm`,
+`waveSxy` and `waveSxx` — near-zero denormals (`1.2397983E-33`, uninitialised
+memory) at the start of the record and explicit `-999.99` mid-record — while
+`waveHs` reads a healthy 0.47 m at the very same timestamps. Unfixed, it would
+have poisoned `wave_direction` with a −999.99 bearing. `clean_fill()` masks fill
+values and denormals before any percentage is computed, and drops a column that
+is under 50% usable at the chosen point rather than writing it under a name other
+sites fill honestly. It never drops rows: the height and period at those
+timestamps are good, and throwing them away to protect a direction column that
+has nothing in it anywhere would lose real data. `--keep-degenerate` overrides.
+
+This is the same failure this project keeps catching in other people's data — a
+sentinel counted as a measurement — found this time in the checking code itself.
