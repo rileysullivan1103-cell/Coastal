@@ -191,7 +191,7 @@ def report_overlap(storm_frame, conditions):
     return joined
 
 
-def contrast(frame, target, predictors):
+def contrast(frame, target, predictors, strata_key=None):
     """Median on event days vs quiet days, and where that sits in the quiet
     distribution.
 
@@ -214,12 +214,23 @@ def contrast(frame, target, predictors):
         if len(on) < ad.MIN_N or len(off) < ad.MIN_N:
             continue
         pct = 100.0 * float((off < on.median()).mean())
-        rows.append({"predictor": name, "n_event_days": len(on),
-                     "median_event": on.median(), "median_quiet": off.median(),
-                     "pctile_of_quiet": pct, "shift": pct - 50.0})
+        row = {"predictor": name, "n_event_days": len(on),
+               "median_event": on.median(), "median_quiet": off.median(),
+               "pctile_raw": pct}
+        # The raw percentile is the legible number and therefore the dangerous
+        # one: it is the row a reader lifts onto a slide, and uncontrolled it
+        # will say a casualty day was warm, which only means it was July. The
+        # controlled column asks the same question inside the day's own month
+        # and weekday, so 50 is the null whatever the season does.
+        if strata_key is not None:
+            ranks = within_rank(values, strata_key)
+            row["pctile_ctrl"] = 100.0 * float(ranks[hit].dropna().median())
+        rows.append(row)
     if not rows:
         return None
     table = pd.DataFrame(rows)
+    key = "pctile_ctrl" if strata_key is not None else "pctile_raw"
+    table["shift"] = table[key] - 50.0
     return table.reindex(table["shift"].abs().sort_values(ascending=False).index)
 
 
@@ -313,11 +324,13 @@ def run(joined, label):
             joined, target, PREDICTORS, strata,
             title=f"{label} — {target}  ({hits} positive of {len(joined)} days)")
 
-    table = contrast(joined, "any_event", PREDICTORS)
+    table = contrast(joined, "any_event", PREDICTORS, strata_key=strata[-1][1])
     if table is not None:
         print(f"\n{label} — casualty days against ordinary days")
-        print("  pctile_of_quiet: where the typical event day's value sits in "
-              "the\n  distribution of days with no event. 50 means no difference.")
+        print("  pctile_raw:  where the typical event day sits among all days.")
+        print("  pctile_ctrl: the same, but among days of the SAME month and "
+              "weekday.\n  50 is no difference. Read pctile_ctrl; the raw "
+              "column still carries\n  the swimming season and the weekend.")
         with pd.option_context("display.width", 200):
             print(table.round(3).to_string(index=False))
     print("\n  rho_mo ranks each predictor within its month, rho_modow within"

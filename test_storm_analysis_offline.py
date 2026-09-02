@@ -141,7 +141,7 @@ def test_contrast_reads_as_a_percentile():
     frame = pd.DataFrame({"any_event": hit.astype(int), "wave_height": wave},
                          index=days)
     table = st.contrast(frame, "any_event", ["wave_height"])
-    pct = float(table["pctile_of_quiet"].iloc[0])
+    pct = float(table["pctile_raw"].iloc[0])
     check("event days sit high in the quiet-day distribution", pct > 90, round(pct, 1))
     check("and the shift is reported against 50", round(pct - 50, 1) ==
           round(float(table["shift"].iloc[0]), 1))
@@ -149,7 +149,7 @@ def test_contrast_reads_as_a_percentile():
     flat = pd.DataFrame({"any_event": (rng.random(len(days)) < 0.1).astype(int),
                          "wave_height": wave}, index=days)
     pct = float(st.contrast(flat, "any_event", ["wave_height"])
-                ["pctile_of_quiet"].iloc[0])
+                ["pctile_raw"].iloc[0])
     check("an unrelated predictor sits near 50", 40 < pct < 60, round(pct, 1))
 
 
@@ -207,6 +207,28 @@ def test_thin_coverage_is_visible_before_any_correlation():
                       for line in text.splitlines()), text)
 
 
+def test_the_contrast_table_is_also_controlled():
+    """The percentile table is the legible one, so it is the one a reader
+    lifts onto a slide. Uncontrolled it reports the swimming season."""
+    print("\nthe percentile table separates a seasonal artifact from a driver")
+    days, rng = _days()
+    warm = pd.Series(days.month.isin([6, 7, 8]).astype(float)
+                     + rng.normal(0, 0.3, len(days)), index=days)
+    events = pd.Series((days.month.isin([6, 7, 8])
+                        & (rng.random(len(days)) < 0.3)).astype(int), index=days)
+    frame = pd.DataFrame({"any_event": events, "warm": warm}, index=days)
+    key = pd.Series(days.month, index=days).astype(str) + "-" + \
+        pd.Series(days.dayofweek, index=days).astype(str)
+    table = st.contrast(frame, "any_event", ["warm"], strata_key=key)
+    raw = float(table["pctile_raw"].iloc[0])
+    ctrl = float(table["pctile_ctrl"].iloc[0])
+    check("uncontrolled, the July artifact looks like a big effect", raw > 75,
+          round(raw, 1))
+    check("controlled, it sits at the null", abs(ctrl - 50) < 6, round(ctrl, 1))
+    check("the table is ranked by the controlled column",
+          abs(float(table["shift"].iloc[0]) - (ctrl - 50)) < 1e-6)
+
+
 if __name__ == "__main__":
     test_a_real_driver_survives_both_strata()
     test_demeaning_a_binary_target_loses_a_real_signal()
@@ -214,6 +236,7 @@ if __name__ == "__main__":
     test_a_seasonal_artifact_is_removed()
     test_season_is_derived_from_where_the_events_are()
     test_contrast_reads_as_a_percentile()
+    test_the_contrast_table_is_also_controlled()
     test_daily_max_is_kept_alongside_the_mean()
     test_thin_coverage_is_visible_before_any_correlation()
     print()
