@@ -78,6 +78,34 @@ def load_storm(zone):
     return frame.dropna(subset=["date"]).set_index("date").sort_index()
 
 
+def resolve_camera(text):
+    """Accept a substring of a camera name, as every other script here does.
+
+    The conditions files are named from the FULL camera name, and these names
+    are long ("Masonboro Inlet, Wrightsville Beach, NC"). Requiring it exactly
+    would mean a typo reads as 'no conditions for this site' rather than as a
+    typo.
+    """
+    if ad.read_csv(f"{DATA_DIR}/gridded_{ad.grid_slug(text)}.csv") is not None:
+        return text
+    frame = ad.read_csv(ad.CANDIDATES_CSV)
+    if frame is None or "camera" not in frame.columns:
+        return text
+    hits = frame[frame["camera"].astype(str).str.contains(text, case=False, na=False)]
+    if hits.empty:
+        return text
+    names = sorted(hits["camera"].astype(str).unique())
+    have = [n for n in names
+            if ad.read_csv(f"{DATA_DIR}/gridded_{ad.grid_slug(n)}.csv") is not None
+            or ad.read_csv(f"{DATA_DIR}/marine_{ad.grid_slug(n)}.csv") is not None]
+    chosen = (have or names)[0]
+    if len(names) > 1:
+        print(f"  {len(names)} cameras match {text!r}; using {chosen!r}")
+        if have and len(have) < len(names):
+            print(f"  ({len(names) - len(have)} of them have no conditions pulled yet)")
+    return chosen
+
+
 def daily_conditions(camera_name):
     """Daily means, plus a daily max for the variables where a peak matters."""
     parts = []
@@ -289,9 +317,10 @@ def main():
     args = ap.parse_args()
 
     storm_frame = load_storm(args.zone)
-    conditions = daily_conditions(args.camera)
+    camera = resolve_camera(args.camera)
+    conditions = daily_conditions(camera)
     if conditions is None:
-        sys.exit(f"No gridded_ or marine_ file for {args.camera!r}. Pull it with:\n"
+        sys.exit(f"No gridded_ or marine_ file for {camera!r}. Pull it with:\n"
                  f"  python pull_site_observations.py --camera {args.camera!r} "
                  "--start 2000-01-01 --skip-us-stations")
 
