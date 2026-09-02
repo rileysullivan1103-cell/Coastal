@@ -45,6 +45,11 @@ DATA_DIR = "data"
 SITES_CSV = "candidate_sites_ranked.csv"
 CANDIDATES_CSV = "camera_candidates.csv"
 
+# How far a CO-OPS file may be from a site before it is treated as absent.
+# pull_observations searches out to 50 km; the slack here covers a station
+# that moved slightly, not a different coastline.
+MAX_STATION_KM = 75
+
 # Below this many paired observations a correlation is not reported at all.
 MIN_N = 30
 # Fraction of rip hours that must find matching conditions before the join is
@@ -397,19 +402,31 @@ def pick_coops(prefix, lat, lon):
     pull_observations picks a station at runtime and does not record which,
     so the mapping is re-derived here from the station list rather than
     guessed from the filename.
+
+    A distance cap is the whole point of the rewrite: without one this
+    returned the nearest file ON DISK, and at Virginia Beach — where no water
+    temperature was ever pulled — that was San Diego, 3,762 km away, joined
+    at 100% overlap and reported as if it were local. A missing input has to
+    stay missing; substituting the wrong ocean is worse than having none.
     """
     paths = sorted(glob.glob(f"{DATA_DIR}/{prefix}_*.csv"))
     if not paths:
         return None
-    if len(paths) == 1:
-        return paths[0]
+
     try:
         import pull_observations as po
         stations = po.coops_stations("waterlevels" if prefix != "wind" else "met")
     except Exception as exc:  # noqa: BLE001 -- offline is a normal case here
-        print(f"    cannot resolve which {prefix} station serves this site ({exc});"
-              f" using {os.path.basename(paths[0])}")
-        return paths[0]
+        # Previously this fell back to paths[0], which is the same silent
+        # wrong-station failure by another route.
+        if len(paths) == 1:
+            print(f"    {prefix}: cannot verify distance ({exc}); using "
+                  f"{os.path.basename(paths[0])} UNCHECKED")
+            return paths[0]
+        print(f"    {prefix}: cannot verify which of {len(paths)} files serves "
+              f"this site ({exc}); skipping rather than guessing")
+        return None
+
     have = {os.path.basename(p).split("_", 1)[1][:-4]: p for p in paths}
     best, best_km = None, None
     # coops_stations returns a DataFrame, so iterate rows, not the object.
@@ -420,9 +437,18 @@ def pick_coops(prefix, lat, lon):
         km = po.f.haversine_km(lat, lon, station.lat, station.lon)
         if best_km is None or km < best_km:
             best, best_km = path, km
-    if best is not None:
-        print(f"    {prefix}: {os.path.basename(best)} is nearest ({best_km:.1f} km)")
-    return best or paths[0]
+
+    if best is None:
+        print(f"    {prefix}: none of the {len(paths)} files on disk could be "
+              "matched to a station; skipping")
+        return None
+    if best_km > MAX_STATION_KM:
+        print(f"    {prefix}: nearest file is {os.path.basename(best)} at "
+              f"{best_km:.0f} km — beyond the {MAX_STATION_KM} km limit, so this "
+              f"site has NO {prefix}. Run pull_site_observations.py for it.")
+        return None
+    print(f"    {prefix}: {os.path.basename(best)} is nearest ({best_km:.1f} km)")
+    return best
 
 
 def load_coops(prefix, lat, lon):

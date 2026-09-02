@@ -12,6 +12,7 @@ output still looks like a finding.
 import math
 import os
 import shutil
+import sys
 import tempfile
 
 import numpy as np
@@ -695,6 +696,59 @@ def test_marine_waves():
           any("Virginia Beach" in k for k in ad.SHORE_NORMAL_DEG))
 
 
+# ---------------------------------------------------------------------------
+# A missing station must stay missing
+# ---------------------------------------------------------------------------
+
+def test_distant_station_is_refused():
+    """No water temperature was ever pulled for Virginia Beach, so pick_coops
+    returned the nearest file on disk — San Diego, 3,762 km away — and it was
+    joined at 100% overlap and reported as local. A missing input has to stay
+    missing."""
+    print("a station on another coastline is refused")
+    import tempfile
+    import types
+    import analyze_drivers as ad
+
+    stations = pd.DataFrame([
+        {"station_id": "9410170", "lat": 32.71, "lon": -117.17},   # San Diego
+        {"station_id": "8638901", "lat": 37.03, "lon": -76.08},    # Chesapeake
+    ])
+    import find_candidate_sites
+    fake_po = types.SimpleNamespace(coops_stations=lambda kind: stations,
+                                    f=find_candidate_sites)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for station in ("9410170", "8638901"):
+            pd.DataFrame({"time": ["2026-05-01T00:00:00Z"], "x": [1.0]}).to_csv(
+                os.path.join(tmp, f"watertemp_{station}.csv"), index=False)
+        old_dir, old_po = ad.DATA_DIR, sys.modules.get("pull_observations")
+        ad.DATA_DIR = tmp
+        sys.modules["pull_observations"] = fake_po
+        try:
+            # Virginia Beach: the Chesapeake file is 24 km away and wins.
+            near = ad.pick_coops("watertemp", 36.84, -75.97)
+            # Now delete it, leaving only San Diego 3,762 km away.
+            os.remove(os.path.join(tmp, "watertemp_8638901.csv"))
+            far = ad.pick_coops("watertemp", 36.84, -75.97)
+            # A single file is still distance-checked, not waved through.
+            single = ad.pick_coops("watertemp", 32.71, -117.17)
+        finally:
+            ad.DATA_DIR = old_dir
+            if old_po is None:
+                sys.modules.pop("pull_observations", None)
+            else:
+                sys.modules["pull_observations"] = old_po
+
+    check("picks the nearby station", near is not None and "8638901" in near,
+          str(near))
+    check("refuses one on the wrong coast", far is None, str(far))
+    check("the lone-file case is still checked", single is not None
+          and "9410170" in single, str(single))
+    check("the cap is a coastal distance, not a continental one",
+          40 <= ad.MAX_STATION_KM <= 150, str(ad.MAX_STATION_KM))
+
+
 if __name__ == "__main__":
     test_spearman()
     test_demean_by()
@@ -715,5 +769,6 @@ if __name__ == "__main__":
     test_wq_recovers_planted_driver()
     test_site_sources()
     test_marine_waves()
+    test_distant_station_is_refused()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     raise SystemExit(1 if FAILURES else 0)
