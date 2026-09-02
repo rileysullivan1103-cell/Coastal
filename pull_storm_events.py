@@ -223,24 +223,116 @@ def load_rips(files, start_year, end_year):
     return pd.concat(frames, ignore_index=True), years
 
 
-def show_zones(files, start_year, end_year):
-    rips, years = load_rips(files, start_year, end_year)
-    print(f"\n{'=' * 74}\nZONES LOGGING RIP CURRENTS, {min(years)}-{max(years)}"
-          f"\n{'=' * 74}")
+BEGIN_FORMATS = ("%d-%b-%Y %H:%M:%S", "%d-%b-%y %H:%M:%S")
+
+
+def parse_begin(series):
+    """BEGIN_DATE_TIME, parsed with ONE format for the whole column.
+
+    NCEI has written this field with both a four-digit and a two-digit year
+    across the years covered here, so both are tried and whichever reads more
+    rows wins. What matters is that a single format is then applied to every
+    row. Left to infer, pandas parses each string on its own, and a row whose
+    day and month could be swapped is quietly read under a different
+    convention from its neighbours -- an off-by-months date that no error
+    ever announces.
+    """
+    best, best_ok = None, -1
+    for fmt in BEGIN_FORMATS:
+        parsed = pd.to_datetime(series, format=fmt, errors="coerce")
+        ok = int(parsed.notna().sum())
+        if ok > best_ok:
+            best, best_ok = parsed, ok
+    total = int(series.notna().sum())
+    if total and best_ok < total * 0.5:
+        print(f"  NOTE: {COL_BEGIN} matched no known format for "
+              f"{total - best_ok}/{total} rows; falling back to per-row "
+              "parsing. Check the format and add it to BEGIN_FORMATS.")
+        best = pd.to_datetime(series, errors="coerce")
+    return best
+
+
+def zone_table(rips):
+    """Zone -> events, casualties, and the YEARS it was in use.
+
+    The year span is not decoration. NWS renamed and re-cut its coastal zones
+    over this period, so one stretch of coast appears under two names in two
+    eras -- NEW HANOVER until the change, COASTAL NEW HANOVER after it. Read
+    the counts alone and they look like two different places, each with half
+    the events it really has. Read the spans and the rename is obvious.
+    """
+    year = parse_begin(rips[COL_BEGIN]).dt.year
+    rips = rips.assign(_year=year)
     grouped = rips.groupby([COL_STATE, COL_CZ_NAME])
+
+    def total(col):
+        return grouped[col].apply(
+            lambda s: pd.to_numeric(s, errors="coerce").fillna(0).sum())
+
     table = pd.DataFrame({
         "events": grouped.size(),
-        "deaths": grouped[COL_DEATHS].apply(
-            lambda s: pd.to_numeric(s, errors="coerce").fillna(0).sum()),
-        "injuries": grouped[COL_INJURIES].apply(
-            lambda s: pd.to_numeric(s, errors="coerce").fillna(0).sum()),
-    }).sort_values("events", ascending=False)
-    with pd.option_context("display.max_rows", 60, "display.width", 200):
-        print(table.head(50).to_string())
+        "deaths": total(COL_DEATHS),
+        "injuries": total(COL_INJURIES),
+        "first": grouped["_year"].min(),
+        "last": grouped["_year"].max(),
+    })
+    if COL_CZ_TYPE in rips.columns:
+        table["cz"] = grouped[COL_CZ_TYPE].apply(
+            lambda s: "".join(sorted(set(str(v) for v in s.dropna()))))
+    return table.sort_values("events", ascending=False)
+
+
+def show_zones(rips, years, state=None):
+    if state:
+        rips = rips[rips[COL_STATE].astype(str).str.upper() == state.upper()]
+        if rips.empty:
+            sys.exit(f"No rip-current events logged in STATE == {state.upper()!r}. "
+                     "Run --zones with no --state to see which states appear.")
+    title = f"ZONES LOGGING RIP CURRENTS, {min(years)}-{max(years)}"
+    if state:
+        title += f" — {state.upper()} ONLY"
+    print(f"\n{'=' * 74}\n{title}\n{'=' * 74}")
+
+    table = zone_table(rips)
+    shown = len(table) if state else 50
+    with pd.option_context("display.max_rows", len(table) + 10,
+                           "display.width", 220):
+        print(table.head(shown).to_string())
+    if len(table) > shown:
+        print(f"\n...{len(table) - shown} more. Narrow with --state to see them all.")
+
     print(f"\n{len(table)} zones in total. Pass one to --zone (a case-insensitive"
           " substring of CZ_NAME).")
     print("The zone is a stretch of coast, not a beach. Check on a map which"
           " camera it actually contains before joining.")
+    print("Watch the first/last columns: two names whose spans do not overlap"
+          " are one place renamed, and splitting them halves your sample.")
+
+
+def describe_match(subset):
+    """Name every zone the substring caught, and say whether pooling them is
+    a rename being repaired or two places being conflated."""
+    table = zone_table(subset)
+    print(f"\nmatched {len(table)} zone name(s):")
+    for (state, zone), row in table.iterrows():
+        cz = f"  CZ_TYPE {row['cz']}" if "cz" in row.index else ""
+        print(f"  {str(state):<16} {str(zone):<38} {int(row['events']):>4} events, "
+              f"{int(row['first'])}-{int(row['last'])}{cz}")
+    if len(table) < 2:
+        return
+    print("  these are pooled into one series.")
+
+    spans = sorted((int(r["first"]), int(r["last"])) for _, r in table.iterrows())
+    disjoint = all(a[1] < b[0] for a, b in zip(spans, spans[1:]))
+    if disjoint:
+        print("  their spans do not overlap, so this is almost certainly one"
+              " stretch of\n  coast renamed. Pooling is the correct repair:"
+              " kept apart, each name\n  would carry years of zeros that are"
+              " a filing change, not a quiet ocean.")
+    else:
+        print("  their spans OVERLAP, so these are probably genuinely different"
+              "\n  places being conflated. Narrow the substring unless you mean"
+              " to pool them.")
 
 
 def daily_table(rips, years, label):
@@ -251,7 +343,7 @@ def daily_table(rips, years, label):
     against. Reindexing onto every day in the span turns a list of incidents
     into a series with real zeros.
     """
-    stamp = pd.to_datetime(rips[COL_BEGIN], errors="coerce")
+    stamp = parse_begin(rips[COL_BEGIN])
     unparsed = int(stamp.isna().sum())
     if unparsed:
         print(f"  {unparsed}/{len(rips)} rows have an unreadable "
@@ -320,7 +412,8 @@ def main():
     ap.add_argument("--zones", action="store_true",
                     help="list every zone that logs rip currents, with counts")
     ap.add_argument("--zone", help="substring of CZ_NAME to write a daily table for")
-    ap.add_argument("--state", help="restrict to one STATE")
+    ap.add_argument("--state", help="restrict to one STATE (works with --zones too,"
+                                    " and then every zone in it is listed)")
     ap.add_argument("--start-year", type=int, default=2000)
     ap.add_argument("--end-year", type=int, default=None)
     args = ap.parse_args()
@@ -341,7 +434,7 @@ def main():
     rips, years = load_rips(files, args.start_year, end_year)
 
     if args.zones:
-        show_zones(files, args.start_year, end_year)
+        show_zones(rips, years, args.state)
         return
 
     subset = rips
@@ -355,10 +448,7 @@ def main():
         sys.exit(f"No rip-current events in a zone matching {args.zone!r}. "
                  "Run --zones to see the real names.")
 
-    matched = sorted(subset[COL_CZ_NAME].astype(str).unique())
-    print(f"\nmatched {len(matched)} zone name(s): {', '.join(matched)}")
-    if len(matched) > 1:
-        print("  more than one zone matched; they are pooled into one series")
+    describe_match(subset)
 
     frame = daily_table(subset, years, args.zone)
     report(frame, f"RIP-CURRENT EVENT DAYS — {args.zone}", years)

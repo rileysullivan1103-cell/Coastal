@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Offline checks for pull_storm_events.py — no network."""
+import io
 import sys
+from contextlib import redirect_stdout
 
 import numpy as np
 import pandas as pd
@@ -116,6 +118,94 @@ def test_exposure_skew_is_measurable():
     check("and would trip the 40% warning", share > 40, share)
 
 
+def _events(rows):
+    """rows of (state, zone, date, deaths, injuries, cz) as a details frame."""
+    return pd.DataFrame({
+        se.COL_STATE: [r[0] for r in rows],
+        se.COL_CZ_NAME: [r[1] for r in rows],
+        se.COL_BEGIN: [r[2] for r in rows],
+        se.COL_DEATHS: [r[3] for r in rows],
+        se.COL_INJURIES: [r[4] for r in rows],
+        se.COL_CZ_TYPE: [r[5] for r in rows],
+    })
+
+
+def test_a_renamed_zone_is_visible_not_silent():
+    """The listing showed NEW HANOVER (16 events) and COASTAL NEW HANOVER (58)
+    as separate rows. If those are one stretch of coast renamed, analysing
+    either alone gives a series whose quiet years are a filing change. The
+    year span is what makes that legible, so it has to be in the table."""
+    print("\na zone renamed mid-record is reported, not silently split")
+    frame = _events([
+        ("NORTH CAROLINA", "NEW HANOVER", "01-JUL-2001 15:00:00", 1, 0, "C"),
+        ("NORTH CAROLINA", "NEW HANOVER", "04-JUL-2003 15:00:00", 0, 2, "C"),
+        ("NORTH CAROLINA", "COASTAL NEW HANOVER", "02-JUL-2015 15:00:00", 1, 1, "Z"),
+        ("NORTH CAROLINA", "COASTAL NEW HANOVER", "09-AUG-2020 15:00:00", 0, 0, "Z"),
+    ])
+    table = se.zone_table(frame)
+    check("both names are listed", len(table) == 2, list(table.index))
+    old = table.loc[("NORTH CAROLINA", "NEW HANOVER")]
+    new = table.loc[("NORTH CAROLINA", "COASTAL NEW HANOVER")]
+    check("the old name's span ends where the record does",
+          (int(old["first"]), int(old["last"])) == (2001, 2003),
+          (old["first"], old["last"]))
+    check("the new name's span starts after it",
+          int(new["first"]) > int(old["last"]),
+          (old["last"], new["first"]))
+    check("casualties are totalled per name",
+          int(old["deaths"]) == 1 and int(old["injuries"]) == 2,
+          dict(old))
+    check("the CZ_TYPE change is carried too (a county became a zone)",
+          old["cz"] == "C" and new["cz"] == "Z", (old["cz"], new["cz"]))
+
+
+def test_pooled_names_are_judged_by_whether_their_spans_overlap():
+    """Pooling two names is right for a rename and wrong for two real places.
+    The only evidence available is whether their years overlap, so that is
+    what decides which message the user gets."""
+    print("\npooling is called a repair or a conflation on the evidence")
+    renamed = _events([
+        ("FLORIDA", "BAY", "01-JUL-2001 15:00:00", 1, 0, "C"),
+        ("FLORIDA", "COASTAL BAY", "01-JUL-2015 15:00:00", 1, 0, "Z"),
+    ])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        se.describe_match(renamed)
+    text = out.getvalue()
+    check("disjoint spans read as one place renamed",
+          "renamed" in text and "conflat" not in text, text.strip()[-120:])
+
+    distinct = _events([
+        ("FLORIDA", "COASTAL BAY", "01-JUL-2015 15:00:00", 1, 0, "Z"),
+        ("FLORIDA", "BAY COUNTY INLAND", "02-JUL-2015 15:00:00", 1, 0, "Z"),
+    ])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        se.describe_match(distinct)
+    text = out.getvalue()
+    check("overlapping spans read as two different places",
+          "conflat" in text and "renamed" not in text, text.strip()[-120:])
+
+
+def test_state_filter_lists_every_zone_in_it():
+    """231 zones print as a top-50, so a site outside the top 50 -- which is
+    where every camera in this project sits -- is invisible without this."""
+    print("\n--state lists all of that state's zones, not the national top 50")
+    rows = [("VIRGINIA", f"ZONE {i}", "01-JUL-2010 15:00:00", 0, 0, "Z")
+            for i in range(4)]
+    rows += [("FLORIDA", "COASTAL BAY", "01-JUL-2010 15:00:00", 0, 0, "Z")] * 60
+    frame = _events(rows)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        se.show_zones(frame, [2010], state="virginia")
+    text = out.getvalue()
+    check("all four Virginia zones appear",
+          all(f"ZONE {i}" in text for i in range(4)), text)
+    check("the busy Florida zone is excluded", "COASTAL BAY" not in text, text)
+    check("the header says the listing is filtered", "VIRGINIA ONLY" in text,
+          text.splitlines()[1] if len(text.splitlines()) > 1 else text)
+
+
 if __name__ == "__main__":
     test_filename_regex()
     test_daily_table_has_zero_days()
@@ -123,6 +213,9 @@ if __name__ == "__main__":
     test_missing_columns_are_named()
     test_slug_matches_the_rest_of_the_project()
     test_exposure_skew_is_measurable()
+    test_a_renamed_zone_is_visible_not_silent()
+    test_pooled_names_are_judged_by_whether_their_spans_overlap()
+    test_state_filter_lists_every_zone_in_it()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")
