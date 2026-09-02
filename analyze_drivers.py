@@ -65,7 +65,23 @@ SHORE_NORMAL_DEG = {
     "Walton Lighthouse, Santa Cruz, CA": 180.0,
     "Santa Cruz Wharf at Santa Cruz": 180.0,
     "Capitola Wharf": 180.0,
+    # The Virginia Beach oceanfront runs roughly north-south and faces east.
+    # Same status as the others: an assumption from a map, not a survey.
+    "Hampton Inn Oceanfront South at Virginia Beach": 90.0,
 }
+
+# Open-Meteo Marine columns, as returned by pull_site_observations.py. These
+# are reanalysis, not measurements. The distinction is carried by the naming
+# convention this project already uses everywhere: ALL-CAPS columns are
+# observed (NDBC stdmet), lower_snake_case columns are model output (ERA5,
+# Marine). Nothing renames one into the other, so a regression can never
+# average a modelled wave height together with a measured one without that
+# being visible in the predictor names.
+MARINE_COLUMNS = [
+    "wave_height", "wave_period", "wave_direction",
+    "wind_wave_height", "wind_wave_period",
+    "swell_wave_height", "swell_wave_period", "swell_wave_direction",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +363,23 @@ def load_gridded(camera_name):
     return frame.drop(columns=[time_col]).groupby("hour").mean(numeric_only=True)
 
 
+def load_marine(camera_name):
+    """Modelled waves, for sites where no buoy publishes them.
+
+    Virginia Beach is the case this exists for: its nearest NDBC station
+    (44064, 20 km) carries no standard meteorological feed, so WVHT, DPD and
+    APD are simply absent. Without this the rip analysis there would run with
+    no wave predictor at all, which for rips is most of the physics.
+    """
+    frame = read_csv(f"{DATA_DIR}/marine_{grid_slug(camera_name)}.csv")
+    if frame is None:
+        return None
+    time_col = "time" if "time" in frame.columns else frame.columns[0]
+    frame["hour"] = to_hour(frame[time_col])
+    keep = ["hour"] + [c for c in MARINE_COLUMNS if c in frame.columns]
+    return frame[keep].groupby("hour").mean(numeric_only=True)
+
+
 def load_buoy(buoy_id):
     frame = read_csv(f"{DATA_DIR}/buoy_{buoy_id}.csv", index_col=0)
     if frame is None:
@@ -416,6 +449,8 @@ def angular_component(direction_deg, normal_deg):
 
 RIP_PREDICTORS = [
     "WVHT", "DPD", "APD", "swell_onshore", "WTMP",
+    "wave_height", "wave_period", "wave_onshore_model",
+    "swell_wave_height", "swell_wave_period", "swell_onshore_model",
     "level_m", "rate_m_per_hr", "abs_rate_m_per_hr",
     "wind_speed_10m", "wind_gusts_10m", "wind_onshore", "temperature_2m",
     "precipitation", "rain_24h_mm", "rain_48h_mm", "rain_72h_mm",
@@ -471,6 +506,7 @@ def assemble_rip(sites, want=None):
     thin = []
     for label, part in [
             ("gridded weather", load_gridded(name)),
+            ("marine waves (model)", load_marine(name)),
             ("buoy", load_buoy(site["buoy_id"]) if pd.notna(site.get("buoy_id")) else None),
             ("tide", load_coops("tide", site["lat"], site["lon"])),
             ("water temp", load_coops("watertemp", site["lat"], site["lon"])),
@@ -505,6 +541,14 @@ def assemble_rip(sites, want=None):
         print(f"  shore normal assumed {normal:.0f} deg (see SHORE_NORMAL_DEG)")
         if "MWD" in merged.columns:
             merged["swell_onshore"] = angular_component(merged["MWD"], normal)
+        # Kept under separate names from the observed swell_onshore so the two
+        # never silently substitute for one another in a table of results.
+        if "swell_wave_direction" in merged.columns:
+            merged["swell_onshore_model"] = angular_component(
+                merged["swell_wave_direction"], normal)
+        if "wave_direction" in merged.columns:
+            merged["wave_onshore_model"] = angular_component(
+                merged["wave_direction"], normal)
         if "wind_direction_10m" in merged.columns:
             merged["wind_onshore"] = angular_component(
                 merged["wind_direction_10m"], normal)
@@ -636,6 +680,21 @@ def analyze_rip(sites, want=None):
     print("    indistinguishable here from a driver of the rip.")
     print("  - Walton has no observed wind, so every wind column is ERA5 grid,")
     print("    which compare_wind_sources.py could not validate at this site.")
+    observed_waves = [c for c in ("WVHT", "DPD", "APD")
+                      if c in frame.columns and frame[c].notna().any()]
+    model_waves = [c for c in MARINE_COLUMNS
+                   if c in frame.columns and frame[c].notna().any()]
+    if model_waves and not observed_waves:
+        print("  - NO OBSERVED WAVES at this site. Every wave column here is")
+        print("    Open-Meteo Marine reanalysis on a grid, not a buoy reading.")
+        print("    Convention: ALL-CAPS columns are measured, lower_snake_case")
+        print("    are modelled. A wave result here is a result about a model's")
+        print("    reconstruction of the sea state, one step further from the")
+        print("    water than the same result at a site with a buoy.")
+    elif model_waves and observed_waves:
+        print("  - Both measured (ALL-CAPS) and modelled (lower_snake_case) wave")
+        print("    columns are present. They are NOT independent evidence of")
+        print("    each other; agreement between them is expected, not a check.")
     print("  - Daylight only, and a full year long, so anything with a daily or")
     print("    annual cycle is confounded. That is what rho_hr and rho_hrmo are")
     print("    for; judge on rho_hrmo.")

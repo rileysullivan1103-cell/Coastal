@@ -632,6 +632,69 @@ def test_site_sources():
           str(walton["buoy_id"]))
 
 
+# ---------------------------------------------------------------------------
+# Modelled waves for sites with no buoy
+# ---------------------------------------------------------------------------
+
+def test_marine_waves():
+    """Virginia Beach has no buoy publishing waves, so without the marine file
+    its rip analysis would run with no wave predictor at all. The modelled
+    columns must load, and must stay distinguishable from measured ones."""
+    print("modelled waves load and stay separate from measured")
+    import tempfile
+    import analyze_drivers as ad
+
+    with tempfile.TemporaryDirectory() as tmp:
+        name = "Test Beach"
+        slug = ad.grid_slug(name)
+        pd.DataFrame({
+            "time": pd.date_range("2026-05-01", periods=4, freq="h", tz="UTC"),
+            "wave_height": [1.0, 1.2, 1.4, 1.6],
+            "wave_period": [7.0, 7.5, 8.0, 8.5],
+            "wave_direction": [90.0, 90.0, 270.0, 270.0],
+            "swell_wave_height": [0.8, 0.9, 1.0, 1.1],
+            "swell_wave_period": [11.0, 11.5, 12.0, 12.5],
+            "swell_wave_direction": [90.0, 90.0, 270.0, 270.0],
+            "wind_wave_height": [0.3, 0.3, 0.4, 0.4],
+            "wind_wave_period": [4.0, 4.0, 4.5, 4.5],
+            "irrelevant": [1, 2, 3, 4],
+        }).to_csv(os.path.join(tmp, f"marine_{slug}.csv"), index=False)
+
+        old = ad.DATA_DIR
+        ad.DATA_DIR = tmp
+        try:
+            marine = ad.load_marine(name)
+            missing = ad.load_marine("Nowhere At All")
+        finally:
+            ad.DATA_DIR = old
+
+    check("marine file loads", marine is not None and len(marine) == 4,
+          "None" if marine is None else str(len(marine)))
+    check("keeps the wave columns",
+          all(c in marine.columns for c in ("wave_height", "swell_wave_period")))
+    check("drops columns it was not asked for", "irrelevant" not in marine.columns)
+    check("indexed by hour", marine.index.name == "hour")
+    check("a site with no marine file is None, not a crash", missing is None)
+
+    # Shore normal 90 deg = facing east. A wave FROM 90 is onshore (+1),
+    # one from 270 is offshore (-1). Getting this backwards would invert every
+    # onshore result, so it is asserted rather than assumed.
+    onshore = ad.angular_component(pd.Series([90.0, 270.0]), 90.0)
+    check("wave from the shore normal is fully onshore",
+          abs(onshore.iloc[0] - 1.0) < 1e-9, str(onshore.iloc[0]))
+    check("wave from the opposite side is offshore",
+          abs(onshore.iloc[1] + 1.0) < 1e-9, str(onshore.iloc[1]))
+
+    check("modelled and measured wave names do not collide",
+          not set(ad.MARINE_COLUMNS) & {"WVHT", "DPD", "APD", "MWD", "WTMP"},
+          str(set(ad.MARINE_COLUMNS) & {"WVHT", "DPD", "APD", "MWD", "WTMP"}))
+    check("both onshore variants are predictors",
+          "swell_onshore" in ad.RIP_PREDICTORS
+          and "swell_onshore_model" in ad.RIP_PREDICTORS)
+    check("Virginia Beach has a shore normal configured",
+          any("Virginia Beach" in k for k in ad.SHORE_NORMAL_DEG))
+
+
 if __name__ == "__main__":
     test_spearman()
     test_demean_by()
@@ -651,5 +714,6 @@ if __name__ == "__main__":
     test_rip_recovers_planted_driver()
     test_wq_recovers_planted_driver()
     test_site_sources()
+    test_marine_waves()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     raise SystemExit(1 if FAILURES else 0)
