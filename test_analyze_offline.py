@@ -238,8 +238,34 @@ def test_wq_recovers_planted_driver():
             "wq_station_id": 101, "wq_station_name": "Test Beach WQ",
             "has_all_four": True}]).to_csv(f"{tmp}/sites.csv", index=False)
 
+        # A second bacteria file, in the national Water Quality Portal shape
+        # that pull_wqp_results.py writes. Before both formats were read, a
+        # site pulled this way was simply absent from the analysis.
+        wqp_days = pd.date_range("2025-09-01", periods=40, freq="D", tz="UTC")
+        pd.DataFrame({
+            "station": "21VASWCB-TEST", "analyte": "Enterococcus",
+            "value_raw": 10, "unit": "cfu/100mL",
+            "value": list(range(1, 39)) + [np.nan, np.nan],
+            "nondetect": [False] * 38 + [True, True],
+            "sampled_at": wqp_days, "has_sample_time": True,
+            "site": "Portal Beach"}).to_csv(f"{tmp}/wqp_Portal_Beach.csv",
+                                            index=False)
+
         a.DATA_DIR, a.SITES_CSV = tmp, f"{tmp}/sites.csv"
-        samples = a.load_water_quality()
+        sites = a.load_sites()
+        samples = a.load_water_quality(sites)
+        check("both bacteria formats are read",
+              set(samples["source"]) == {"CKAN", "WQP"},
+              sorted(set(samples["source"])) if samples is not None else None)
+        check("the portal site keeps its own camera name",
+              set(samples.loc[samples["source"] == "WQP", "camera_name"])
+              == {"Portal Beach"},
+              set(samples.loc[samples["source"] == "WQP", "camera_name"]))
+        check("non-detects are excluded, not counted as zero",
+              (samples["source"] == "WQP").sum() == 38,
+              int((samples["source"] == "WQP").sum()))
+
+        samples = samples[samples["source"] == "CKAN"].copy()
         check("results parsed", samples is not None and len(samples) == 300,
               None if samples is None else len(samples))
         check("the analyte is recognised",
@@ -248,7 +274,6 @@ def test_wq_recovers_planted_driver():
         check("log10 transform applied",
               samples["log_value"].max() < 6 and samples["value"].max() > 100)
 
-        sites = a.load_sites()
         mapping = a.map_stations(sites, samples)
         check("station mapped by name when the CKAN join is unavailable",
               mapping.get("TB-1") == "Test Beach", mapping)

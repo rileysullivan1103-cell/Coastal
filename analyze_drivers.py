@@ -327,8 +327,15 @@ def load_sites():
         frames.append(sites)
 
     if os.path.exists(CANDIDATES_CSV):
-        national = pd.read_csv(CANDIDATES_CSV).rename(columns={"camera": "camera_name"})
-        keep = [c for c in ("camera_name", "lat", "lon", "buoy_id", "tide_id")
+        national = pd.read_csv(CANDIDATES_CSV).rename(
+            columns={"camera": "camera_name",
+                     # scan_cameras writes precip_id; every reader downstream
+                     # asks for precip_station_id, so a national site was
+                     # quietly analysed with no rain gauge at all.
+                     "precip_id": "precip_station_id",
+                     "wq_id": "wq_station_id"})
+        keep = [c for c in ("camera_name", "lat", "lon", "buoy_id", "tide_id",
+                            "precip_station_id", "wq_station_id")
                 if c in national.columns]
         frames.append(national[keep])
 
@@ -831,6 +838,7 @@ FOCUSED_MIN_N = 15
 
 WQ_PREDICTORS = ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm", "precip_mm",
                  "level_m", "rate_m_per_hr", "WVHT", "DPD", "WTMP",
+                 "wave_height", "wave_period",
                  "wind_speed_10m", "temperature_2m"]
 
 # Single-sample California standards, in MPN or CFU per 100 mL. Used only to
@@ -851,22 +859,104 @@ def analyte_key(name):
     return None
 
 
-def load_water_quality():
+def load_water_quality(sites):
+    """Bacteria samples from both sources, normalised into one frame.
+
+    Two files with nothing in common but their meaning. water_quality.csv is
+    the California CKAN pull, which names a station and has to be joined back
+    to a camera. data/wqp_<site>.csv is the national Water Quality Portal pull,
+    which already knows which camera it was requested for. Reading only the
+    first -- which is what this did -- meant Virginia Beach's bacteria landed
+    on disk and were never analysed, and the water-quality section silently
+    stayed a California-only result.
+
+    Every row that comes out of here carries `source`, because the two differ
+    in ways that matter: the CKAN file has no non-detect flag at all, so its
+    censoring is invisible, while WQP marks non-detects explicitly.
+    """
+    frames = []
+    ckan = _load_ckan_wq(sites)
+    if ckan is not None:
+        frames.append(ckan)
+    frames.extend(_load_wqp_wq())
+
+    if not frames:
+        print("No bacteria files. Run pull_observations.py (California) or "
+              "pull_wqp_results.py --camera <name> (anywhere else).")
+        return None
+
+    frame = pd.concat(frames, ignore_index=True, sort=False)
+    frame["group"] = frame["Analyte"].map(analyte_key)
+    # log10 because bacteria counts span orders of magnitude; +1 keeps zeros.
+    frame["log_value"] = np.log10(frame["value"].clip(lower=0) + 1)
+    for source, part in frame.groupby("source"):
+        print(f"  {source}: {len(part)} numeric results, "
+              f"{part['camera_name'].nunique()} site(s)")
+    return frame
+
+
+def _load_ckan_wq(sites):
+    """The California file, joined back to cameras by station code."""
     frame = read_csv(f"{DATA_DIR}/water_quality.csv")
     if frame is None:
-        print("No data/water_quality.csv — run pull_observations.py first.")
         return None
     frame["date"] = pd.to_datetime(frame["SampleDate"], errors="coerce").dt.normalize()
     frame["value"] = pd.to_numeric(frame["Result"], errors="coerce")
     dropped = int(frame["value"].isna().sum())
     if dropped:
-        print(f"  {dropped}/{len(frame)} results are not numeric "
-              "(non-detects and qualifiers) and are excluded")
+        print(f"  water_quality.csv: {dropped}/{len(frame)} results are not "
+              "numeric (non-detects and qualifiers) and are excluded")
     frame = frame.dropna(subset=["date", "value"])
-    frame["group"] = frame["Analyte"].map(analyte_key)
-    # log10 because bacteria counts span orders of magnitude; +1 keeps zeros.
-    frame["log_value"] = np.log10(frame["value"].clip(lower=0) + 1)
-    return frame
+
+    mapping = map_stations(sites, frame)
+    frame["camera_name"] = frame["StationCode"].astype(str).map(mapping)
+    unmapped = int(frame["camera_name"].isna().sum())
+    if unmapped:
+        print(f"  {unmapped} CKAN results belong to no qualifying site "
+              "and are dropped")
+    frame = frame.dropna(subset=["camera_name"])
+    frame["source"] = "CKAN"
+    frame["nondetect"] = False
+    return frame if not frame.empty else None
+
+
+def _load_wqp_wq():
+    """Every data/wqp_<site>.csv, which already knows its own camera."""
+    frames = []
+    for path in sorted(glob.glob(f"{DATA_DIR}/wqp_*.csv")):
+        raw = read_csv(path)
+        if raw is None or "sampled_at" not in raw.columns:
+            continue
+        stamp = pd.to_datetime(raw["sampled_at"], errors="coerce", utc=True)
+        frame = pd.DataFrame({
+            "date": stamp.dt.tz_convert(None).dt.normalize(),
+            "value": pd.to_numeric(raw["value"], errors="coerce"),
+            "Analyte": raw["analyte"].astype(str),
+            "StationCode": raw["station"].astype(str),
+            "camera_name": raw["site"].astype(str),
+            "nondetect": raw.get("nondetect", False),
+            "source": "WQP",
+        })
+        censored = int(pd.Series(frame["nondetect"]).fillna(False).astype(bool).sum())
+        usable = frame.dropna(subset=["date", "value"])
+        name = os.path.basename(path)
+        if censored:
+            print(f"  {name}: {censored}/{len(frame)} are non-detects — dropped, "
+                  "so the low end of this site is under-represented")
+        if len(usable) < len(frame) - censored:
+            print(f"  {name}: {len(frame) - censored - len(usable)} rows have no "
+                  "usable date or value")
+        # Two unit codes in one file means two lab methods pooled as if they
+        # were one measurement. Ranks tolerate a constant rescaling; they do
+        # not tolerate two different ones mixed within a site.
+        if "unit" in raw.columns:
+            units = raw.loc[raw["unit"].astype(str).str.strip() != "", "unit"]
+            if units.nunique() > 1:
+                print(f"  {name}: MIXED UNITS {sorted(units.unique())} — the "
+                      "correlation below pools them without converting")
+        if not usable.empty:
+            frames.append(usable)
+    return frames
 
 
 def daily_conditions(site):
@@ -879,7 +969,11 @@ def daily_conditions(site):
             gauge["date"] = pd.to_datetime(gauge["date"], errors="coerce").dt.normalize()
             parts.append(gauge.set_index("date"))
 
+    # Marine is here for the same reason it is in the rip path: at a site with
+    # no buoy, leaving it out does not report "waves are missing", it reports
+    # "waves do not matter", which is a different and false claim.
     for loader in (lambda: load_gridded(site["camera_name"]),
+                   lambda: load_marine(site["camera_name"]),
                    lambda: load_buoy(site["buoy_id"]) if pd.notna(site.get("buoy_id")) else None,
                    lambda: load_coops("tide", site["lat"], site["lon"])):
         hourly = loader()
@@ -977,7 +1071,7 @@ def focus_tide(combined):
 
 
 def analyze_wq(sites):
-    samples = load_water_quality()
+    samples = load_water_quality(sites)
     if samples is None:
         return
     print(f"\n{len(samples)} numeric results, "
@@ -985,13 +1079,6 @@ def analyze_wq(sites):
     counts = samples["Analyte"].value_counts()
     print("\nanalytes:")
     print(counts.to_string())
-
-    mapping = map_stations(sites, samples)
-    samples["camera_name"] = samples["StationCode"].astype(str).map(mapping)
-    unmapped = int(samples["camera_name"].isna().sum())
-    if unmapped:
-        print(f"  {unmapped} results belong to no qualifying site and are dropped")
-    samples = samples.dropna(subset=["camera_name"])
     if samples.empty:
         print("Nothing left after mapping — cannot attach conditions.")
         return
