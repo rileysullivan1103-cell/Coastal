@@ -93,6 +93,20 @@ MARINE_COLUMNS = [
     "swell_wave_height", "swell_wave_period", "swell_wave_direction",
 ]
 
+# CDIP MOP columns, written by pull_cdip_mop.py. They carry the SAME names as
+# the Open-Meteo Marine columns above, so every one is prefixed "mop_" on the
+# way in. Both are models, but one is a global reanalysis cell and the other
+# is a buoy-driven nearshore model 1.45 km off the beach; letting them share
+# a column name would let a result about one be read as a result about the
+# other, which is the mistake this project's ALL-CAPS/lower_snake convention
+# exists to prevent between measured and modelled.
+MOP_COLUMNS = ["wave_height", "wave_period", "wave_period_peak",
+               "wave_direction", "wave_direction_peak"]
+# Per-camera metadata from the MOP file: the point id, its water depth, and
+# the shore normal CDIP publishes. Filled by load_mop, read where the shore
+# normal is chosen.
+MOP_META = {}
+
 
 # ---------------------------------------------------------------------------
 # Statistics
@@ -458,6 +472,32 @@ def load_marine(camera_name):
     return frame[keep].groupby("hour").mean(numeric_only=True)
 
 
+def load_mop(camera_name):
+    """Nearshore waves from CDIP's MOP model, if pull_cdip_mop.py has run.
+
+    Walton Lighthouse sits 22.9 km from buoy 46236 and 1.45 km from MOP point
+    SC130. Columns arrive prefixed so they never stand in for the Open-Meteo
+    ones, and the file's own shore normal is stashed in MOP_META because CDIP
+    publishes what SHORE_NORMAL_DEG only guesses.
+    """
+    frame = read_csv(f"{DATA_DIR}/mop_{grid_slug(camera_name)}.csv")
+    if frame is None:
+        return None
+    time_col = "time" if "time" in frame.columns else frame.columns[0]
+    frame["hour"] = to_hour(frame[time_col])
+    meta = {}
+    for key in ("mop_id", "shore_normal_deg", "water_depth_m"):
+        if key in frame.columns and frame[key].notna().any():
+            meta[key] = frame[key].dropna().iloc[0]
+    if meta:
+        MOP_META[camera_name] = meta
+    keep = [c for c in MOP_COLUMNS if c in frame.columns]
+    if not keep:
+        return None
+    hourly = frame[["hour"] + keep].groupby("hour").mean(numeric_only=True)
+    return hourly.rename(columns={c: f"mop_{c}" for c in keep})
+
+
 def load_buoy(buoy_id):
     frame = read_csv(f"{DATA_DIR}/buoy_{buoy_id}.csv", index_col=0)
     if frame is None:
@@ -611,6 +651,7 @@ def assemble_rip(sites, want=None):
     for label, part in [
             ("gridded weather", load_gridded(weather)),
             ("marine waves (model)", load_marine(weather)),
+            ("nearshore waves (CDIP MOP)", load_mop(weather)),
             ("buoy", load_buoy(site["buoy_id"]) if pd.notna(site.get("buoy_id")) else None),
             ("tide", load_coops("tide", site["lat"], site["lon"])),
             ("water temp", load_coops("watertemp", site["lat"], site["lon"])),
@@ -643,10 +684,33 @@ def assemble_rip(sites, want=None):
     normal = SHORE_NORMAL_DEG.get(name)
     if normal is None:
         normal = SHORE_NORMAL_DEG.get(weather)
+
+    # CDIP publishes a shore normal per MOP point. SHORE_NORMAL_DEG is four
+    # bearings read off a map, and the published values disagree: 206.0 deg at
+    # SC130 against the 180.0 assumed for all three Santa Cruz sites -- and
+    # 185.6 and 166.9 at SC125 and SC150, two and three km along the same
+    # beach. A single bearing for the bay was never going to be right. Where
+    # a MOP file exists, its number wins and the gap is printed, because every
+    # onshore and axial-offset figure at that site was computed from the guess.
+    published = (MOP_META.get(name) or MOP_META.get(weather) or {}).get(
+        "shore_normal_deg")
+    if published is not None:
+        published = float(published)
+        if normal is not None:
+            gap = abs((published - normal + 180.0) % 360.0 - 180.0)
+            mark = "   <- every onshore number here was computed from the guess" \
+                if gap > 5 else ""
+            print(f"  shore normal: CDIP publishes {published:.1f} deg, "
+                  f"SHORE_NORMAL_DEG assumes {normal:.0f} deg, "
+                  f"{gap:.0f} deg apart{mark}")
+        normal = published
+
     if normal is None:
         print("  no shore normal configured; onshore components skipped")
     else:
-        print(f"  shore normal assumed {normal:.0f} deg (see SHORE_NORMAL_DEG)")
+        source = "published by CDIP" if published is not None \
+            else "assumed (see SHORE_NORMAL_DEG)"
+        print(f"  shore normal {normal:.1f} deg, {source}")
         if "MWD" in merged.columns:
             merged["swell_onshore"] = angular_component(merged["MWD"], normal)
         # Kept under separate names from the observed swell_onshore so the two
@@ -657,6 +721,14 @@ def assemble_rip(sites, want=None):
         if "wave_direction" in merged.columns:
             merged["wave_onshore_model"] = angular_component(
                 merged["wave_direction"], normal)
+        # Kept apart from wave_onshore_model for the same reason the MOP
+        # columns are prefixed: this one is 1.45 km offshore, that one is a
+        # reanalysis cell.
+        for column, out in (("mop_wave_direction", "mop_wave_onshore"),
+                            ("mop_wave_direction_peak",
+                             "mop_wave_onshore_peak")):
+            if column in merged.columns:
+                merged[out] = angular_component(merged[column], normal)
         if "wind_direction_10m" in merged.columns:
             merged["wind_onshore"] = angular_component(
                 merged["wind_direction_10m"], normal)
@@ -1033,6 +1105,7 @@ def daily_conditions(site):
     # "waves do not matter", which is a different and false claim.
     for loader in (lambda: load_gridded(site["camera_name"]),
                    lambda: load_marine(site["camera_name"]),
+                   lambda: load_mop(site["camera_name"]),
                    lambda: load_buoy(site["buoy_id"]) if pd.notna(site.get("buoy_id")) else None,
                    lambda: load_coops("tide", site["lat"], site["lon"])):
         hourly = loader()

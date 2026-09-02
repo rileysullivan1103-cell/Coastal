@@ -800,6 +800,80 @@ def test_positives_only_drops_presence():
           "rip_axis_offset_deg" in a.RIP_TARGETS, a.RIP_TARGETS)
 
 
+def write_mop_fixture(tmp, hours, normal=206.0, direction=206.0):
+    """A MOP file as pull_cdip_mop.py writes it, for the same hours.
+
+    wave_direction and radiation_stress_* are absent on purpose: at SC130 they
+    are fill values end to end and the puller drops them, so the analysis has
+    to cope with a MOP file that carries only four columns.
+    """
+    pd.DataFrame({
+        "time": hours,
+        "wave_height": 0.8 + 0.2 * RNG.random(len(hours)),
+        "wave_period": 8 + RNG.normal(size=len(hours)),
+        "wave_period_peak": 11 + RNG.normal(size=len(hours)),
+        "wave_direction_peak": direction,
+        "product": "hindcast",
+        "mop_id": "SC130",
+        "shore_normal_deg": normal,
+        "water_depth_m": 15.0,
+    }).to_csv(f"{tmp}/mop_{a.grid_slug('Test Beach')}.csv", index=False)
+
+
+def test_mop_columns_are_kept_apart_from_the_reanalysis():
+    print("\nMOP columns arrive prefixed, so they cannot pass as Open-Meteo")
+    tmp = tempfile.mkdtemp()
+    old_data = a.DATA_DIR
+    try:
+        a.DATA_DIR = tmp
+        a.MOP_META.clear()
+        hours = pd.date_range("2025-06-01", periods=48, freq="h", tz="UTC")
+        write_mop_fixture(tmp, hours)
+        frame = a.load_mop("Test Beach")
+        check("wave height comes back under its own name",
+              "mop_wave_height" in frame.columns, list(frame.columns))
+        check("and not under the Open-Meteo name",
+              "wave_height" not in frame.columns, list(frame.columns))
+        check("a column the puller dropped is simply absent",
+              "mop_wave_direction" not in frame.columns)
+        check("the published shore normal is captured",
+              a.MOP_META["Test Beach"]["shore_normal_deg"] == 206.0)
+        check("so is the point it came from",
+              a.MOP_META["Test Beach"]["mop_id"] == "SC130")
+    finally:
+        a.DATA_DIR = old_data
+        a.MOP_META.clear()
+
+
+def test_the_published_shore_normal_beats_the_one_read_off_a_map():
+    print("\nCDIP's 206 deg overrides the 180 deg assumed for Santa Cruz")
+    tmp = tempfile.mkdtemp()
+    old_data, old_sites = a.DATA_DIR, a.SITES_CSV
+    try:
+        write_rip_fixture(tmp)
+        rip = pd.read_csv(f"{tmp}/rip_test-beach_hourly.csv")
+        hours = pd.to_datetime(rip["hour"], utc=True)
+        write_mop_fixture(tmp, hours, normal=206.0, direction=206.0)
+        a.DATA_DIR, a.SITES_CSV = tmp, f"{tmp}/sites.csv"
+        a.SHORE_NORMAL_DEG["Test Beach"] = 180.0
+        a.MOP_META.clear()
+        sites = a.load_sites()
+        frame, _ = a.assemble_rip(sites)
+        check("the MOP waves joined onto the rip hours",
+              "mop_wave_height" in frame.columns)
+        onshore = frame["mop_wave_onshore_peak"].dropna()
+        check("an onshore component is computed from the MOP direction",
+              len(onshore) > 0)
+        # Waves arriving exactly along the shore normal are fully onshore. At
+        # the assumed 180 deg this would read cos(26 deg) = 0.90 instead.
+        check("and it uses 206 deg, not the assumed 180",
+              abs(onshore.iloc[0] - 1.0) < 1e-6, onshore.iloc[0])
+    finally:
+        a.DATA_DIR, a.SITES_CSV = old_data, old_sites
+        a.SHORE_NORMAL_DEG.pop("Test Beach", None)
+        a.MOP_META.clear()
+
+
 if __name__ == "__main__":
     test_spearman()
     test_demean_by()
@@ -820,6 +894,8 @@ if __name__ == "__main__":
     test_wq_recovers_planted_driver()
     test_site_sources()
     test_marine_waves()
+    test_mop_columns_are_kept_apart_from_the_reanalysis()
+    test_the_published_shore_normal_beats_the_one_read_off_a_map()
     test_distant_station_is_refused()
     test_axial_offset()
     test_positives_only_drops_presence()

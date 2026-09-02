@@ -1048,6 +1048,24 @@ Its coverage was also scattered rather than an early gap — full in 2003–2007
 2015–2024, zero in 2000–2001 and 2009–2013 — so even physical values would have
 needed an era cut rather than the whole column.
 
+### Using it
+
+`analyze_drivers.py` loads `data/mop_<site>.csv` when it exists, prefixing every
+column `mop_`. Open-Meteo Marine and CDIP MOP publish the same names —
+`wave_height`, `wave_period`, `wave_direction` — and one is a global reanalysis
+cell while the other is a buoy-driven model 1.45 km off the beach. Sharing a
+column name would let a result about one be read as a result about the other:
+the same mistake the ALL-CAPS/lower_snake convention exists to prevent between
+measured and modelled.
+
+**The shore normal is now read, not guessed.** CDIP publishes one per point, and
+the file carries it. Where a MOP file exists its value wins, and the run prints
+the gap: **206.0° at SC130 against the 180.0° `SHORE_NORMAL_DEG` assumes for all
+three Santa Cruz sites** — with 185.6° at SC125 and 166.9° at SC150, two and
+three km along the same beach. A single bearing for the bay was never going to
+be right, and every `wind_onshore` and `rip_axis_offset_deg` figure at those
+sites was computed from the guess.
+
 This is the same failure this project keeps catching in other people's data — a
 sentinel counted as a measurement — found this time in the checking code itself.
 
