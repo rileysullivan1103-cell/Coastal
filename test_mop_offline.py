@@ -332,6 +332,18 @@ def test_keep_degenerate_is_an_escape_not_the_default():
     check("--keep-degenerate writes it anyway", kept == [])
 
 
+def test_the_probe_reads_the_whole_record_not_just_the_head():
+    print("\nthe probe samples across the record, not five rows off the front")
+    proj = mop.stride_projection(["waveTime", "waveDm"], 221328, points=400)
+    check("it strides rather than taking a contiguous block",
+          "waveTime[0:553:221327]" in proj, proj.split(",")[0])
+    check("it reaches the last index", proj.endswith("221327]"))
+    check("the brackets still survive encoding",
+          "%5B0:553:221327%5D" in mop.encode(proj))
+    check("a short record does not produce a zero stride",
+          "[0:1:9]" in mop.stride_projection(["waveHs"], 10, points=400))
+
+
 if __name__ == "__main__":
     test_bracket_encoding()
     test_parses_a_real_array_response()
@@ -350,6 +362,7 @@ if __name__ == "__main__":
     test_clean_fill_drops_the_unusable_column_and_keeps_the_good_one()
     test_reported_share_is_honest()
     test_keep_degenerate_is_an_escape_not_the_default()
+    test_the_probe_reads_the_whole_record_not_just_the_head()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")

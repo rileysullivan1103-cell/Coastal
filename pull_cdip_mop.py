@@ -71,6 +71,8 @@ TINY = 1e-20
 # A column with less than this share of usable values at the chosen point is
 # dropped rather than written mostly-empty under a name other sites fill.
 MIN_USABLE = 0.50
+# How many hours the probe reads across the record, spread by stride.
+PROBE_POINTS = 400
 
 # Dataset ids come in two shapes -- B0001 (one letter, four digits) and SC001
 # (two letters, three digits) -- and assuming either one alone silently hides
@@ -236,6 +238,17 @@ def print_audit(audit, dropped, rename=None):
               "this point.\n  CDIP publishes the column; at this point it "
               "holds fill values and\n  denormals, not waves. Pass "
               "--keep-degenerate to write it anyway.")
+
+
+def stride_projection(variables, length, points=None):
+    """Read `points` values spread across the whole array, in one request.
+
+    OPeNDAP subscripts are start:stride:stop, so a stride of length//points
+    walks the entire record. This is what makes the probe honest about a
+    column that only fails after 2013.
+    """
+    stride = max(1, length // (points or PROBE_POINTS))
+    return ",".join(f"{v}[0:{stride}:{length - 1}]" for v in variables)
 
 
 def fetch(dataset, projection):
@@ -518,18 +531,41 @@ def main():
                        + ",waveTime[0:1:4]")
         print("\n  first five rows:")
         for key, values in sample.items():
-            series = pd.Series(values, dtype="float64") if key != "metaSiteLabel" \
-                else None
             note = ""
-            if series is not None and key in RENAME:
+            if key in RENAME:
+                series = pd.Series(to_float(values))
                 bad = int((is_fill(series) | is_denormal(series) |
                            (series == 0)).sum())
                 if bad:
-                    note = f"   <- {bad}/{len(series)} fill or denormal"
+                    note = f"   <- {bad}/{len(series)} fill, denormal or zero"
             print(f"    {key:<22} {values}{note}")
-        print("\n  Five rows is not a verdict; the fill values at SC130 start "
-              "mid-record.\n  The full run audits every column and drops the "
-              "unusable ones.")
+
+        # Five rows from the start of the record is not a verdict. SC130's
+        # waveDm opens with denormals and turns into -999.99 somewhere after
+        # 2013 -- a head sample sees the first failure mode and none of the
+        # second. One strided request reads the whole span for the price of
+        # one round trip.
+        wanted = [v for v in have if v in RENAME]
+        stride = max(1, length // PROBE_POINTS)
+        spread = fetch(f"{mop}_hindcast.nc",
+                       stride_projection(["waveTime"] + wanted, length))
+        stamps = pd.to_datetime(to_float(spread["waveTime"]), unit="s", utc=True)
+        print(f"\n  every {stride}th hour across the whole record "
+              f"({len(stamps):,} samples, {stamps.min():%Y-%m}..{stamps.max():%Y-%m}):")
+        for name in wanted:
+            series = pd.Series(to_float(spread[name]))
+            report = audit_column(series)
+            bad = is_fill(series) | is_denormal(series) | (series == 0)
+            when = ""
+            if bad.any() and not bad.all():
+                first = stamps[bad.idxmax()]
+                when = f"  first bad sample {first:%Y-%m}"
+            verdict = "" if report["share"] >= MIN_USABLE else "   WOULD BE DROPPED"
+            print(f"    {RENAME[name]:<22} {100 * report['share']:5.1f}% usable"
+                  f"{when}{verdict}")
+        print("\n  A column at 0% usable is fill values and denormals end to "
+              "end, not waves.\n  The full run audits every hour and drops "
+              "those columns; --keep-degenerate writes them.")
         print("\nRe-run without --probe to write the CSV.")
         return
 

@@ -1017,3 +1017,9 @@ has nothing in it anywhere would lose real data. `--keep-degenerate` overrides.
 
 This is the same failure this project keeps catching in other people's data — a
 sentinel counted as a measurement — found this time in the checking code itself.
+
+`--probe` now reads **every 553rd hour across the whole record** in one strided
+OPeNDAP request (`waveDm[0:553:221327]`) rather than five rows off the front, and
+prints each column's usable share and the month its first bad sample appears.
+The head sample saw only the denormals; the fill values start after 2013. A probe
+that reads the beginning of a record answers a question nobody asked.
