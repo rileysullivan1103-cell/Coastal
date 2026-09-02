@@ -443,6 +443,53 @@ def test_a_genuinely_missing_variable_still_raises():
         mop.fetch = original
 
 
+# The response that made the SC130 pull look truncated. waveSxx's data line
+# starts with NaN, which has exactly the shape of a scalar declaration
+# ("metaWaterDepth, 10.0"), so the parser filed the whole block under a
+# variable called "NaN" and reported waveSxx as zero values received.
+REAL_NAN_BLOCK = """Dataset {
+    Float32 waveHs[waveTime = 4];
+    Float32 waveSxx[waveTime = 4];
+    Float32 metaWaterDepth;
+} cdip/model/MOP_alongshore/SC130_hindcast.nc;
+---------------------------------------------
+waveHs[4]
+0.466, 0.462, 0.450, 0.447
+
+waveSxx[4]
+NaN, NaN, NaN, NaN
+
+metaWaterDepth, 15.0
+"""
+
+
+def test_a_data_line_starting_with_nan_is_not_a_variable_name():
+    print("\na block of NaNs is missing data, not a variable called NaN")
+    values = mop.parse_ascii(REAL_NAN_BLOCK)
+    check("waveSxx keeps all four of its values",
+          len(values.get("waveSxx", [])) == 4, values.get("waveSxx"))
+    check("nothing was filed under 'NaN'", "NaN" not in values, list(values))
+    check("the scalar on one line still parses",
+          values.get("metaWaterDepth") == ["15.0"])
+    check("the healthy column is untouched", len(values["waveHs"]) == 4)
+    check("and the NaNs convert to missing, not to numbers",
+          all(v != v for v in mop.to_float(values["waveSxx"])))
+
+
+def test_only_names_the_header_declares_are_variables():
+    print("\na name is a variable only if the response's DDS declares it")
+    text = """Dataset {
+    Float32 waveHs[waveTime = 3];
+} x.nc;
+---------------------------------------------
+waveHs[3]
+1.0, Inf, 3.0
+"""
+    values = mop.parse_ascii(text)
+    check("Inf in the middle of a row is a value", len(values["waveHs"]) == 3)
+    check("and does not become a variable", list(values) == ["waveHs"])
+
+
 if __name__ == "__main__":
     test_bracket_encoding()
     test_parses_a_real_array_response()
@@ -466,6 +513,8 @@ if __name__ == "__main__":
     test_a_short_response_falls_back_instead_of_abandoning_the_pull()
     test_a_variable_that_needs_a_smaller_span_is_halved()
     test_a_genuinely_missing_variable_still_raises()
+    test_a_data_line_starting_with_nan_is_not_a_variable_name()
+    test_only_names_the_header_declares_are_variables()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")

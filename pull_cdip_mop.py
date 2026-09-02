@@ -134,28 +134,58 @@ def get_with_retry(url):
     raise RuntimeError("unreachable")
 
 
+# A DDS declaration line: "    Float32 waveSxx[waveTime = 312];" or
+# "    Float32 metaWaterDepth;". The name is what precedes the subscript.
+DDS_NAME_RE = re.compile(r"^\s*\w+\s+(\w+)(?:\[[^\]]*\])*;\s*$", re.M)
+
+
+def looks_numeric(token):
+    """float() accepts 'NaN' and 'Inf'. So does a value line's first token."""
+    try:
+        float(token)
+    except ValueError:
+        return False
+    return True
+
+
 def parse_ascii(text):
     """OPeNDAP .ascii -> {variable: [values]}.
 
     The response is a DDS header, a dashed rule, then for each variable a line
-    'name[N]' or 'name' followed by its comma-separated values.
+    'name[N]' or 'name' followed by its comma-separated values. Scalars come
+    back as 'metaWaterDepth, 10.0' -- name and value on one line.
+
+    That scalar form is a trap. A DATA line reading 'NaN, NaN, NaN, ...' has
+    exactly the same shape, and the first version filed the whole block under
+    a variable called "NaN", leaving waveSxx empty and looking for all the
+    world like a truncated response. So a line only names a variable if the
+    response's own DDS header declares that name, and never if it parses as
+    a number.
     """
     if "Error {" in text:
         raise ValueError(text.strip()[:300])
-    body = text.split("-" * 20, 1)
-    body = body[1] if len(body) > 1 else text
+    parts = text.split("-" * 20, 1)
+    header, body = (parts[0], parts[1]) if len(parts) > 1 else ("", text)
+    known = set(DDS_NAME_RE.findall(header))
+
+    def names_a_variable(token):
+        if looks_numeric(token):
+            return False
+        return token in known if known else True
+
     out, current = {}, None
     for line in body.splitlines():
         line = line.strip()
         if not line:
             continue
         head = re.match(r"^([A-Za-z]\w*)(\[\d+\])?$", line)
-        if head:
+        if head and names_a_variable(head.group(1)):
             current = head.group(1)
             out.setdefault(current, [])
             continue
         inline = re.match(r"^([A-Za-z]\w*),\s*(.*)$", line)
-        if inline and inline.group(1) not in out:
+        if inline and names_a_variable(inline.group(1)) \
+                and inline.group(1) not in out:
             current = inline.group(1)
             out.setdefault(current, [])
             line = inline.group(2)
@@ -166,7 +196,7 @@ def parse_ascii(text):
 
 
 def to_float(values):
-    return [float(v) if v not in ("", "nan") else float("nan") for v in values]
+    return [float(v) if v != "" else float("nan") for v in values]
 
 
 def is_fill(series):

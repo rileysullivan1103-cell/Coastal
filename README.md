@@ -1015,15 +1015,21 @@ sites fill honestly. It never drops rows: the height and period at those
 timestamps are good, and throwing them away to protect a direction column that
 has nothing in it anywhere would lose real data. `--keep-degenerate` overrides.
 
-**A 200 response can be short.** The full SC130 pull died on a ten-variable
-request for 20,000 rows: HTTP 200, no error body, `waveSxx`'s block simply
-absent. The identical request shape had already worked at B1788, so it is a
-server-side limit or truncation rather than a bad projection — and the first
-version raised there, abandoning a pull that was eleven requests from done.
-`fetch_span()` now verifies every response against the count it asked for,
-retries once, then asks for the short variables one at a time, then halves the
-row span. Only a single variable still short over 500 rows is an error, and it
-raises with the byte count and the response tail to diagnose from.
+**A value that looks like a variable name.** The full SC130 pull died claiming
+`waveSxx` returned zero values. It was not a truncated response — the block was
+there, reading `NaN, NaN, NaN, ...`, and CDIP writes a scalar as
+`metaWaterDepth, 10.0`: a name, a comma, a value. A data line beginning `NaN`
+has exactly that shape, so `parse_ascii` filed the whole block under a variable
+called `NaN` and left `waveSxx` empty. A line now names a variable only if the
+response's own DDS header declares that name, and never if it parses as a
+number — `float()` accepts `NaN` and `Inf`.
+
+The first reading of that failure was "the server truncates large multi-variable
+requests", which was wrong: the same bytes would have parsed correctly. The
+recovery built on that reading stayed, because verifying a response against the
+count it asked for is worth having either way. `fetch_span()` retries once, then
+asks for short variables individually, then halves the row span, and raises with
+the byte count and the response tail — which is what identified this bug.
 
 This is the same failure this project keeps catching in other people's data — a
 sentinel counted as a measurement — found this time in the checking code itself.
