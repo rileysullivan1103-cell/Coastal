@@ -188,6 +188,67 @@ def test_distance():
     check("the MOP point is much closer", far / near > 10, round(far / near, 1))
 
 
+def test_region_membership_is_anchored():
+    """'M' must not swallow 'MA' and 'MO'. startswith() would."""
+    print("\nregion membership does not let one prefix absorb another")
+    ids = ["M0001", "M0002", "MA0001", "MO0001", "SC001", "SC328", "B0001"]
+    grouped = mop.regions(ids)
+    check("M holds only its own points", grouped["M"] == ["M0001", "M0002"],
+          grouped.get("M"))
+    check("MA and MO are separate regions",
+          grouped.get("MA") == ["MA0001"] and grouped.get("MO") == ["MO0001"],
+          {k: v for k, v in grouped.items() if k in ("MA", "MO")})
+    check("SC is found", grouped.get("SC") == ["SC001", "SC328"], grouped.get("SC"))
+
+
+def test_every_region_is_scored_not_the_first_that_passes():
+    """The bug this replaces. Regions run hundreds of km south to north, so a
+    region's first point says nothing about whether it contains the site. The
+    old loop took the first region whose first point was within 400 km --
+    for Santa Cruz that was the Santa Barbara series, and it wrote 229,867
+    hours from a point 251 km away under the camera's name."""
+    print("\nthe closest region wins, not the first one within a threshold")
+    walton = (36.960695, -122.0022)
+    coords = {
+        # A long southern region: its first point is nearer than its last,
+        # and both are hundreds of km off. This is what used to win.
+        "B0001": (34.40, -119.70), "B0900": (34.60, -120.20),
+        "B1788": (34.97707, -120.65571),
+        # The right one, sampled anywhere, is close.
+        "SC001": (36.84491, -121.82469), "SC164": (36.94773, -122.00674),
+        "SC328": (37.10123, -122.29775),
+    }
+    ids = sorted(coords)
+
+    real = mop.point_location
+    mop.point_location = lambda dataset, cache: coords[dataset]
+    try:
+        prefix, members = mop.choose_region(*walton, mop.regions(ids), samples=3)
+    finally:
+        mop.point_location = real
+    check("SC is chosen", prefix == "SC", prefix)
+    check("and its members come back", members == ["SC001", "SC164", "SC328"],
+          members)
+    check("B would have been chosen by a first-point-under-400km rule",
+          mop.km_between(*walton, *coords["B0001"]) < 400,
+          round(mop.km_between(*walton, *coords["B0001"]), 1))
+
+
+def test_the_distance_guard_exists():
+    """A point 251 km away wrote a complete-looking 229,867-row file. A wrong
+    file that looks finished is worse than none."""
+    print("\na far point is refused rather than written")
+    check("there is a maximum", isinstance(mop.MAX_KM, float), mop.MAX_KM)
+    check("it is a beach-scale distance, not a regional one",
+          1 < mop.MAX_KM < 60, mop.MAX_KM)
+    walton = (36.960695, -122.0022)
+    bad = mop.km_between(*walton, 34.97707, -120.65571)
+    good = mop.km_between(*walton, 36.94782, -122.00476)
+    check("the point that was actually written would now be refused",
+          bad > mop.MAX_KM, round(bad, 1))
+    check("SC130 still passes", good < mop.MAX_KM, round(good, 2))
+
+
 if __name__ == "__main__":
     test_bracket_encoding()
     test_parses_a_real_array_response()
@@ -198,6 +259,9 @@ if __name__ == "__main__":
     test_rename_keeps_mean_and_peak_apart()
     test_slug_matches_the_rest_of_the_project()
     test_distance()
+    test_region_membership_is_anchored()
+    test_every_region_is_scored_not_the_first_that_passes()
+    test_the_distance_guard_exists()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")

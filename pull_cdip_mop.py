@@ -47,6 +47,13 @@ CANDIDATES_CSV = "camera_candidates.csv"
 TIMEOUT = 180
 MAX_RETRIES = 4
 CHUNK = 20000
+# A MOP point further than this from the site is not that site's waves. The
+# first version of this script had no such floor: it settled on the first
+# region whose FIRST point was within 400 km, which for Santa Cruz was the
+# Santa Barbara series, and wrote 229,867 hours from a point 251 km away
+# under the camera's name. A wrong file that looks complete is worse than no
+# file, so the distance is now checked and the run refuses.
+MAX_KM = 25.0
 
 # Dataset ids come in two shapes -- B0001 (one letter, four digits) and SC001
 # (two letters, three digits) -- and assuming either one alone silently hides
@@ -204,6 +211,48 @@ def save_point_cache(cache, path):
     pd.DataFrame(rows).to_csv(path, index=False)
 
 
+def regions(ids):
+    """prefix -> its points. 'M' must not swallow 'MA' and 'MO', so the
+    membership test is an anchored pattern, not startswith."""
+    out = {}
+    for prefix in sorted({re.match(r"^([A-Z]{1,2})", i).group(1) for i in ids}):
+        members = [i for i in ids if re.match(rf"^{prefix}\d+$", i)]
+        if members:
+            out[prefix] = members
+    return out
+
+
+def choose_region(lat, lon, grouped, samples=5):
+    """Sample a few points from EVERY region and take the closest.
+
+    The earlier version tested only each region's first point against a
+    400 km threshold and took the first that passed. Regions run south to
+    north and are hundreds of kilometres long, so a region's first point says
+    almost nothing about whether it contains the site -- B0001 is 367 km from
+    Santa Cruz and B1788 is 252 km, while the SC series is 1.5 km away and was
+    never reached because the loop had already broken out.
+    """
+    print(f"  {len(grouped)} regions; sampling {samples} points from each")
+    scored = []
+    for prefix, members in grouped.items():
+        cache, path = load_point_cache(prefix)
+        before = len(cache)
+        step = max(1, len(members) // max(samples - 1, 1))
+        probes = members[::step][:samples]
+        if members[-1] not in probes:
+            probes.append(members[-1])
+        best = min(km_between(lat, lon, *point_location(m, cache)) for m in probes)
+        if len(cache) != before:
+            save_point_cache(cache, path)
+        scored.append((best, prefix, len(members)))
+    scored.sort()
+    for best, prefix, count in scored[:4]:
+        print(f"    {prefix:<3} {count:>5} points   nearest sampled {best:8.1f} km")
+    if len(scored) > 4:
+        print(f"    ({len(scored) - 4} further regions, all further away)")
+    return scored[0][1], grouped[scored[0][1]]
+
+
 def nearest_point(lat, lon, ids, stride=10):
     """Coarse scan then refine.
 
@@ -321,6 +370,8 @@ def main():
     ap.add_argument("--lon", type=float)
     ap.add_argument("--name", help="label for --lat/--lon output")
     ap.add_argument("--mop", help="use this MOP id directly, skipping the search")
+    ap.add_argument("--max-km", type=float, default=MAX_KM,
+                    help="refuse a point further than this from the site")
     ap.add_argument("--stride", type=int, default=10,
                     help="coarse scan step when searching for the nearest point")
     ap.add_argument("--probe", action="store_true",
@@ -346,24 +397,18 @@ def main():
         away = km_between(lat, lon, plat, plon)
     else:
         ids = catalog_ids()
-        prefix_ids = None
-        for prefix in sorted({re.match(r"^([A-Z]{1,2})", i).group(1) for i in ids}):
-            candidates = [i for i in ids if i.startswith(prefix)
-                          and re.match(rf"^{prefix}\d+$", i)]
-            if not candidates:
-                continue
-            first = point_location(f"{candidates[0]}", {})
-            if km_between(lat, lon, *first) < 400:
-                prefix_ids = candidates
-                print(f"  {prefix}: {len(candidates)} points, first is "
-                      f"{km_between(lat, lon, *first):.0f} km away")
-                break
-        if prefix_ids is None:
-            sys.exit("No MOP region within 400 km. MOP is California only.")
+        prefix, prefix_ids = choose_region(lat, lon, regions(ids))
         mop, plat, plon, away = nearest_point(lat, lon, prefix_ids, args.stride)
 
     print(f"\nnearest MOP point: {mop}  ({plat:.5f}, {plon:.5f})  "
           f"{away:.2f} km from the site")
+    if away > args.max_km:
+        sys.exit(
+            f"\nREFUSING: {away:.1f} km is further than --max-km {args.max_km:.0f}.\n"
+            "These are not this site's waves. MOP covers California only; if the\n"
+            "site is Californian and this still fires, the region search picked the\n"
+            "wrong series — pass --mop explicitly, or raise --max-km if you really\n"
+            "mean to use a point this far away.")
 
     meta = fetch(f"{mop}_hindcast.nc", ",".join(META_VARS[1:]))
     depth = to_float(meta.get("metaWaterDepth", ["nan"]))[0]
