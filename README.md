@@ -1058,6 +1058,12 @@ column name would let a result about one be read as a result about the other:
 the same mistake the ALL-CAPS/lower_snake convention exists to prevent between
 measured and modelled.
 
+The MOP columns are named in `RIP_PREDICTORS` and `WQ_PREDICTORS` explicitly.
+The first Walton run joined the file at 100% overlap and then showed it in no
+table at all: a predictor is analysed only if a list names it, so loading a
+column and reading it are two separate things, and the join report saying
+"2550 overlapping (100%)" said nothing about whether anything used it.
+
 **The shore normal is now read, not guessed.** CDIP publishes one per point, and
 the file carries it. Where a MOP file exists its value wins, and the run prints
 the gap: **206.0° at SC130 against the 180.0° `SHORE_NORMAL_DEG` assumes for all

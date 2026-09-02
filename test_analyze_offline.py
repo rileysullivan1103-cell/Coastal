@@ -874,6 +874,33 @@ def test_the_published_shore_normal_beats_the_one_read_off_a_map():
         a.MOP_META.clear()
 
 
+def test_every_mop_column_reaches_the_tables():
+    print("\na joined column that no predictor list names is invisible")
+    tmp = tempfile.mkdtemp()
+    old_data = a.DATA_DIR
+    try:
+        a.DATA_DIR = tmp
+        a.MOP_META.clear()
+        hours = pd.date_range("2025-06-01", periods=24, freq="h", tz="UTC")
+        write_mop_fixture(tmp, hours)
+        joined = list(a.load_mop("Test Beach").columns)
+        # A direction is not a predictor itself; its onshore component is.
+        derived = {"mop_wave_direction": "mop_wave_onshore",
+                   "mop_wave_direction_peak": "mop_wave_onshore_peak"}
+        missing = [c for c in joined
+                   if derived.get(c, c) not in a.RIP_PREDICTORS]
+        check("every MOP column is analysed, directly or as an onshore "
+              "component", not missing, missing)
+        check("the full MOP column set is covered, not just the fixture's",
+              all(derived.get(f"mop_{c}", f"mop_{c}") in a.RIP_PREDICTORS
+                  for c in a.MOP_COLUMNS),
+              [c for c in a.MOP_COLUMNS
+               if derived.get(f"mop_{c}", f"mop_{c}") not in a.RIP_PREDICTORS])
+    finally:
+        a.DATA_DIR = old_data
+        a.MOP_META.clear()
+
+
 if __name__ == "__main__":
     test_spearman()
     test_demean_by()
@@ -896,6 +923,7 @@ if __name__ == "__main__":
     test_marine_waves()
     test_mop_columns_are_kept_apart_from_the_reanalysis()
     test_the_published_shore_normal_beats_the_one_read_off_a_map()
+    test_every_mop_column_reaches_the_tables()
     test_distant_station_is_refused()
     test_axial_offset()
     test_positives_only_drops_presence()

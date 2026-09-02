@@ -590,6 +590,13 @@ RIP_PREDICTORS = [
     "WVHT", "DPD", "APD", "swell_onshore", "WTMP",
     "wave_height", "wave_period", "wave_onshore_model",
     "swell_wave_height", "swell_wave_period", "swell_onshore_model",
+    # CDIP MOP, where pull_cdip_mop.py has run. These have to be listed
+    # explicitly: the loader can join a column the analysis never reads, and
+    # the first Walton run did exactly that -- the MOP file merged at 100%
+    # overlap and then appeared in no table, because a predictor is analysed
+    # only if it is named here.
+    "mop_wave_height", "mop_wave_period", "mop_wave_period_peak",
+    "mop_wave_onshore", "mop_wave_onshore_peak",
     "level_m", "rate_m_per_hr", "abs_rate_m_per_hr",
     "wind_speed_10m", "wind_gusts_10m", "wind_onshore", "temperature_2m",
     "precipitation", "rain_24h_mm", "rain_48h_mm", "rain_72h_mm",
@@ -970,6 +977,7 @@ FOCUSED_MIN_N = 15
 WQ_PREDICTORS = ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm", "precip_mm",
                  "level_m", "rate_m_per_hr", "WVHT", "DPD", "WTMP",
                  "wave_height", "wave_period",
+                 "mop_wave_height", "mop_wave_period",
                  "wind_speed_10m", "temperature_2m"]
 
 # Single-sample California standards, in MPN or CFU per 100 mL. Used only to
