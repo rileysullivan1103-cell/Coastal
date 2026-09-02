@@ -1031,6 +1031,23 @@ count it asked for is worth having either way. `fetch_span()` retries once, then
 asks for short variables individually, then halves the row span, and raises with
 the byte count and the response tail — which is what identified this bug.
 
+**A number can be garbage without being a sentinel.** `radiation_stress_sxx`
+survived the fill and denormal checks at 64.3% "usable" and was written. Its
+values run from 1e-11 to **2.3e+29 with a median of 1.6e+19** — a radiation
+stress is O(0.01), and B1788 reads 0.042. Forty orders of magnitude is
+uninitialised memory read as Float32, and the `TINY` floor only caught the small
+end. The fix is not another hand-picked ceiling: CDIP declares `valid_min` and
+`valid_max` per variable in the `.das` (`waveHs` is 0.0–20.0 m), so the puller
+reads the server's own stated range and masks anything outside it. Where a
+variable declares no range, `HUGE = 1e6` is the backstop — nothing here, in
+metres, seconds, degrees or stress, is legitimately larger. Fill values are not
+double-counted: −999.99 is below every declared minimum, and counting it as both
+fill and out-of-range would subtract it from the usable share twice.
+
+Its coverage was also scattered rather than an early gap — full in 2003–2007 and
+2015–2024, zero in 2000–2001 and 2009–2013 — so even physical values would have
+needed an era cut rather than the whole column.
+
 This is the same failure this project keeps catching in other people's data — a
 sentinel counted as a measurement — found this time in the checking code itself.
 

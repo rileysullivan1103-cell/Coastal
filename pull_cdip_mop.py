@@ -73,6 +73,13 @@ TINY = 1e-20
 MIN_USABLE = 0.50
 # How many hours the probe reads across the record, spread by stride.
 PROBE_POINTS = 400
+# The backstop when CDIP declares no valid range for a variable. Nothing this
+# project reads -- a height in metres, a period in seconds, a bearing, a
+# radiation stress -- is legitimately larger. SC130's waveSxx ran to
+# 2.3e+29 with a median of 1.6e+19, forty orders of magnitude of
+# uninitialised memory read as Float32, and the TINY floor only caught the
+# small end of it.
+HUGE = 1e6
 
 # Dataset ids come in two shapes -- B0001 (one letter, four digits) and SC001
 # (two letters, three digits) -- and assuming either one alone silently hides
@@ -222,7 +229,8 @@ def audit_column(series):
             "share": (usable / total) if total else 0.0}
 
 
-def clean_fill(frame, columns, min_usable=MIN_USABLE, keep_degenerate=False):
+def clean_fill(frame, columns, min_usable=MIN_USABLE, keep_degenerate=False,
+               ranges=None):
     """Mask CDIP's fill values, then drop whatever is left unusable.
 
     Returns the frame and the audit, so the caller can print what it lost.
@@ -231,6 +239,7 @@ def clean_fill(frame, columns, min_usable=MIN_USABLE, keep_degenerate=False):
     away good height and period to protect a direction column that has
     nothing in it anywhere.
     """
+    ranges = ranges or {}
     audit, dropped = {}, []
     for column in columns:
         if column not in frame.columns:
@@ -238,7 +247,11 @@ def clean_fill(frame, columns, min_usable=MIN_USABLE, keep_degenerate=False):
         series = pd.to_numeric(frame[column], errors="coerce")
         report = audit_column(series)
         audit[column] = report
-        bad = is_fill(series) | is_denormal(series)
+        outside = out_of_range(series, ranges.get(column))
+        report["out_of_range"] = int(outside.sum())
+        report["usable"] -= report["out_of_range"]
+        report["share"] = (report["usable"] / report["total"]) if report["total"] else 0.0
+        bad = is_fill(series) | is_denormal(series) | outside
         # An exact 0.0 is ambiguous on its own -- 0 degrees is due north --
         # so zeros are only masked in a column already caught holding fill
         # values or denormals. At SC130 the zeros sit inside the same run as
@@ -266,6 +279,8 @@ def print_audit(audit, dropped, rename=None):
             note += f"  fill {report['fill']:,}"
         if report["denormal"]:
             note += f"  denormal {report['denormal']:,}"
+        if report.get("out_of_range"):
+            note += f"  out of range {report['out_of_range']:,}"
         if report["zero"]:
             note += f"  zero {report['zero']:,}"
         if report["blank"]:
@@ -426,6 +441,64 @@ def nearest_point(lat, lon, ids, stride=10):
         print(f"  cached {len(cache)} point locations in {path}")
     plat, plon = cache[best]
     return best, plat, plon, km_between(lat, lon, plat, plon)
+
+
+DAS_BLOCK_RE = re.compile(r"^\s*(\w+)\s*\{\s*$")
+DAS_LIMIT_RE = re.compile(r"^\s*\w+\s+valid_(min|max)\s+([-\d.eE+]+);\s*$")
+
+
+def parse_das_ranges(text):
+    """{variable: (valid_min, valid_max)} from the .das CDIP already publishes.
+
+    waveHs is declared 0.0 to 20.0 metres. Using the server's own stated
+    range beats any threshold picked here, and it is the check that would
+    have caught waveSxx's 1.6e+19 median the first time.
+    """
+    ranges, current, low, high = {}, None, None, None
+    for line in text.splitlines():
+        block = DAS_BLOCK_RE.match(line)
+        if block:
+            if current and (low is not None or high is not None):
+                ranges[current] = (low, high)
+            current, low, high = block.group(1), None, None
+            continue
+        if line.strip().startswith("}"):
+            if current and (low is not None or high is not None):
+                ranges[current] = (low, high)
+            current, low, high = None, None, None
+            continue
+        limit = DAS_LIMIT_RE.match(line)
+        if limit and current:
+            if limit.group(1) == "min":
+                low = float(limit.group(2))
+            else:
+                high = float(limit.group(2))
+    if current and (low is not None or high is not None):
+        ranges[current] = (low, high)
+    return ranges
+
+
+def dataset_ranges(dataset):
+    resp = get_with_retry(f"{DODS}{dataset}.das")
+    resp.raise_for_status()
+    return parse_das_ranges(resp.text)
+
+
+def out_of_range(series, limits):
+    """Outside CDIP's declared range, or absurd when it declares none.
+
+    Only values the audit has not already accounted for count here: -999.99
+    is below every declared valid_min, and counting it as both fill and
+    out-of-range would subtract it from the usable share twice.
+    """
+    low, high = limits if limits else (None, None)
+    bad = series.abs() > HUGE
+    if low is not None:
+        bad = bad | (series < low)
+    if high is not None:
+        bad = bad | (series > high)
+    counted = is_fill(series) | is_denormal(series) | (series == 0) | series.isna()
+    return bad & ~counted
 
 
 def series_length(dataset):
@@ -636,10 +709,15 @@ def main():
         stamps = pd.to_datetime(to_float(spread["waveTime"]), unit="s", utc=True)
         print(f"\n  every {stride}th hour across the whole record "
               f"({len(stamps):,} samples, {stamps.min():%Y-%m}..{stamps.max():%Y-%m}):")
+        ranges = dataset_ranges(f"{mop}_hindcast.nc")
         for name in wanted:
             series = pd.Series(to_float(spread[name]))
             report = audit_column(series)
-            bad = is_fill(series) | is_denormal(series) | (series == 0)
+            outside = out_of_range(series, ranges.get(name))
+            report["usable"] -= int(outside.sum())
+            report["share"] = report["usable"] / report["total"]
+            bad = (is_fill(series) | is_denormal(series) | outside
+                   | (series == 0))
             when = ""
             if bad.any() and not bad.all():
                 first = stamps[bad.idxmax()]
@@ -674,8 +752,10 @@ def main():
         print(f"\n  {before - len(out)} duplicated timestamp(s) at the "
               "hindcast/nowcast seam, dropped")
 
+    ranges = dataset_ranges(f"{mop}_hindcast.nc")
     out, audit, dropped = clean_fill(out, list(RENAME),
-                                     keep_degenerate=args.keep_degenerate)
+                                     keep_degenerate=args.keep_degenerate,
+                                     ranges=ranges)
     print_audit(audit, dropped, RENAME)
 
     out = out.rename(columns=RENAME)

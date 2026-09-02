@@ -490,6 +490,66 @@ waveHs[3]
     check("and does not become a variable", list(values) == ["waveHs"])
 
 
+# The .das CDIP serves for every dataset. It declares the valid range this
+# code should have been checking from the start.
+REAL_DAS = """Attributes {
+    waveHs {
+        String long_name "significant wave height";
+        String units "meter";
+        Float32 _FillValue -999.99;
+        Float32 valid_min 0.0;
+        Float32 valid_max 20.0;
+    }
+    waveSxx {
+        String long_name "radiation stress";
+        Float32 _FillValue -999.99;
+    }
+}
+"""
+
+
+def test_the_declared_valid_range_is_read_from_the_das():
+    print("\nCDIP publishes valid_min/valid_max; use it rather than a guess")
+    ranges = mop.parse_das_ranges(REAL_DAS)
+    check("waveHs's declared range is found", ranges.get("waveHs") == (0.0, 20.0))
+    check("a variable that declares none is absent",
+          "waveSxx" not in ranges, list(ranges))
+
+
+def test_values_outside_the_declared_range_are_masked():
+    print("\na 25 m wave height is outside CDIP's own stated maximum")
+    ranges = mop.parse_das_ranges(REAL_DAS)
+    frame = pd.DataFrame({"waveHs": [0.5, 25.0, 1.2, 0.8]})
+    cleaned, audit, _ = mop.clean_fill(frame, ["waveHs"], ranges=ranges)
+    check("it is masked", bool(pd.isna(cleaned["waveHs"].iloc[1])))
+    check("the audit counts it", audit["waveHs"]["out_of_range"] == 1)
+    check("real heights survive", cleaned["waveHs"].notna().sum() == 3)
+
+
+def test_an_absurd_value_is_caught_with_no_declared_range():
+    print("\nwaveSxx declares no range, so the backstop catches 1.6e+19")
+    frame = pd.DataFrame({"waveSxx": [0.042, 1.6e19, 2.28e29, 0.038]})
+    cleaned, audit, dropped = mop.clean_fill(frame, ["waveSxx"], ranges={})
+    check("both absurd values are masked",
+          int(cleaned["waveSxx"].notna().sum()) == 2)
+    check("the audit counts them", audit["waveSxx"]["out_of_range"] == 2)
+    check("and at 50% usable the column is on the edge, not silently kept",
+          audit["waveSxx"]["share"] == 0.5)
+
+
+def test_fill_is_not_counted_twice():
+    print("\n-999.99 is below every valid_min; it counts once, not twice")
+    ranges = mop.parse_das_ranges(REAL_DAS)
+    frame = pd.DataFrame({"waveHs": [-999.99, -999.99, 1.0, 2.0]})
+    _, audit, _ = mop.clean_fill(frame, ["waveHs"], ranges=ranges,
+                                 keep_degenerate=True)
+    report = audit["waveHs"]
+    check("counted as fill", report["fill"] == 2)
+    check("not also as out of range", report["out_of_range"] == 0)
+    check("so the usable share is 50%, not negative", report["share"] == 0.5,
+          report["share"])
+
+
 if __name__ == "__main__":
     test_bracket_encoding()
     test_parses_a_real_array_response()
@@ -515,6 +575,10 @@ if __name__ == "__main__":
     test_a_genuinely_missing_variable_still_raises()
     test_a_data_line_starting_with_nan_is_not_a_variable_name()
     test_only_names_the_header_declares_are_variables()
+    test_the_declared_valid_range_is_read_from_the_das()
+    test_values_outside_the_declared_range_are_masked()
+    test_an_absurd_value_is_caught_with_no_declared_range()
+    test_fill_is_not_counted_twice()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")
