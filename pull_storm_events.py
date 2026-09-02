@@ -26,7 +26,7 @@ was not curated after the fact.
 Usage:
   python pull_storm_events.py --probe 2023      # pin the real columns, stop
   python pull_storm_events.py --zones           # who logs rip currents, and where
-  python pull_storm_events.py --zone "VIRGINIA BEACH" --start-year 2000
+  python pull_storm_events.py --zone "NEW HANOVER" --exclude INLAND
 """
 import argparse
 import gzip
@@ -412,6 +412,11 @@ def main():
     ap.add_argument("--zones", action="store_true",
                     help="list every zone that logs rip currents, with counts")
     ap.add_argument("--zone", help="substring of CZ_NAME to write a daily table for")
+    ap.add_argument("--exclude", action="append", default=[], metavar="SUBSTRING",
+                    help="drop zone names containing this (repeatable). New "
+                         "Hanover needs it: the substring that pools the coastal "
+                         "beach under both its names also catches INLAND NEW "
+                         "HANOVER, which is not a beach.")
     ap.add_argument("--state", help="restrict to one STATE (works with --zones too,"
                                     " and then every zone in it is listed)")
     ap.add_argument("--start-year", type=int, default=2000)
@@ -444,6 +449,16 @@ def main():
     mask = subset[COL_CZ_NAME].astype(str).str.contains(
         args.zone, case=False, na=False)
     subset = subset[mask]
+    for pattern in args.exclude:
+        dropped = subset[COL_CZ_NAME].astype(str).str.contains(
+            pattern, case=False, na=False)
+        if dropped.any():
+            names = sorted(subset.loc[dropped, COL_CZ_NAME].astype(str).unique())
+            print(f"  --exclude {pattern!r} drops {int(dropped.sum())} events "
+                  f"from: {', '.join(names)}")
+        else:
+            print(f"  --exclude {pattern!r} matched nothing")
+        subset = subset[~dropped]
     if subset.empty:
         sys.exit(f"No rip-current events in a zone matching {args.zone!r}. "
                  "Run --zones to see the real names.")
