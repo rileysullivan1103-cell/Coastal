@@ -774,6 +774,32 @@ def test_distant_station_is_refused():
           40 <= ad.MAX_STATION_KM <= 150, str(ad.MAX_STATION_KM))
 
 
+def test_axial_offset():
+    print("\nrip orientation is a line, not an arrow")
+    normal = 90.0
+    got = a.axial_offset(pd.Series([90.0, 270.0, 0.0, 180.0, 135.0]), normal)
+    check("straight offshore is 0", got.iloc[0] == 0, got.iloc[0])
+    check("the same line pointing back is also 0", got.iloc[1] == 0, got.iloc[1])
+    check("along the beach is 90", got.iloc[2] == 90, got.iloc[2])
+    check("and so is the other way along the beach", got.iloc[3] == 90,
+          got.iloc[3])
+    check("never exceeds 90", float(got.max()) <= 90, float(got.max()))
+
+
+def test_positives_only_drops_presence():
+    print("\n--positives-only keeps the rips and drops the presence question")
+    check("presence targets are named",
+          set(a.PRESENCE_TARGETS) == {"detection_rate", "detections",
+                                      "doubt_rate"},
+          sorted(a.PRESENCE_TARGETS))
+    check("size and orientation are not presence targets",
+          not ({"bbox_area_max", "rip_axis_offset_deg", "score_max"}
+               & set(a.PRESENCE_TARGETS)),
+          sorted(a.PRESENCE_TARGETS))
+    check("orientation is a reported target",
+          "rip_axis_offset_deg" in a.RIP_TARGETS, a.RIP_TARGETS)
+
+
 if __name__ == "__main__":
     test_spearman()
     test_demean_by()
@@ -795,5 +821,7 @@ if __name__ == "__main__":
     test_site_sources()
     test_marine_waves()
     test_distant_station_is_refused()
+    test_axial_offset()
+    test_positives_only_drops_presence()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     raise SystemExit(1 if FAILURES else 0)

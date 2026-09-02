@@ -638,7 +638,11 @@ def assemble_rip(sites, want=None):
         print("  nothing. Re-pull the rip range over the observation window:")
         print("    python pull_rip_detection.py --pull --match-observations")
 
+    # RipAID cameras are named clm-s-01, not "Cala Millor", so the shore
+    # normal is configured against the site they share, not each viewpoint.
     normal = SHORE_NORMAL_DEG.get(name)
+    if normal is None:
+        normal = SHORE_NORMAL_DEG.get(weather)
     if normal is None:
         print("  no shore normal configured; onshore components skipped")
     else:
@@ -656,6 +660,9 @@ def assemble_rip(sites, want=None):
         if "wind_direction_10m" in merged.columns:
             merged["wind_onshore"] = angular_component(
                 merged["wind_direction_10m"], normal)
+        if "rip_axis_deg" in merged.columns:
+            merged["rip_axis_offset_deg"] = axial_offset(
+                merged["rip_axis_deg"], normal)
     if "rate_m_per_hr" in merged.columns:
         merged["abs_rate_m_per_hr"] = pd.to_numeric(
             merged["rate_m_per_hr"], errors="coerce").abs()
@@ -663,6 +670,20 @@ def assemble_rip(sites, want=None):
     merged = merged.reset_index()
     merged["hour_of_day"] = merged["hour"].dt.hour
     return merged, name
+
+
+def axial_offset(angles, normal):
+    """How far a rip's axis lies from straight offshore, in degrees 0-90.
+
+    rip_axis_deg is an orientation, not a bearing: a rip drawn at 10 deg and
+    one at 190 deg lie along the same line. Correlating the raw angle would
+    put those two at opposite ends of the scale and produce noise. Folding the
+    difference from the shore normal onto 0-90 gives a quantity that actually
+    means something -- 0 is a rip running straight out to sea, 90 is one lying
+    along the beach -- and that a rank correlation can be run on.
+    """
+    delta = (pd.to_numeric(angles, errors="coerce") - normal).abs() % 180.0
+    return delta.where(delta <= 90.0, 180.0 - delta)
 
 
 def apply_coverage(frame, stem):
@@ -707,16 +728,37 @@ def apply_coverage(frame, stem):
 # a rip hard to call is a different question from what makes one happen, and
 # no detector confidence can answer it.
 RIP_TARGETS = ["detection_rate", "detections", "score_max", "bbox_area_max",
-               "doubt_rate"]
+               "doubt_rate", "rip_axis_offset_deg"]
+
+# Targets that answer "was a rip there at all". Where a person chose which
+# frames to keep, these measure the choosing as much as the ocean, so
+# --positives-only drops them rather than reporting a number nobody should use.
+PRESENCE_TARGETS = ("detection_rate", "detections", "doubt_rate")
 
 
-def analyze_rip(sites, want=None):
+def analyze_rip(sites, want=None, positives_only=False):
     frame, name = assemble_rip(sites, want=want)
     if frame is None:
         return
     frame, has_coverage = apply_coverage(frame, rip_slug(name))
     observed = (frame.copy() if has_coverage
                 else frame[frame.get("frames", 0) > 0].copy())
+
+    targets = list(RIP_TARGETS)
+    if positives_only:
+        before = len(observed)
+        observed = observed[
+            pd.to_numeric(observed.get("frames_with_detection"),
+                          errors="coerce").fillna(0) > 0].copy()
+        targets = [t for t in targets if t not in PRESENCE_TARGETS]
+        print(f"\n  --positives-only: {len(observed)} of {before} hours contain "
+              "an annotated rip; the rest are dropped.")
+        print("  Presence targets are NOT reported. Where a person chose which")
+        print("  frames to keep, a presence correlation measures that choice at")
+        print("  least as much as the ocean. What is left is a question about")
+        print("  the rips that are there: does the size or the orientation of a")
+        print("  rip somebody drew a box around track the conditions?")
+
     print(f"\n{len(observed)} hours analysed")
 
     hours = sorted(observed["hour_of_day"].unique())
@@ -734,7 +776,7 @@ def analyze_rip(sites, want=None):
             print("  how OFTEN it fires and how confident it is.")
 
     usable = []
-    for target in RIP_TARGETS:
+    for target in targets:
         if target not in observed.columns:
             continue
         series = pd.to_numeric(observed[target], errors="coerce")
@@ -784,11 +826,28 @@ def analyze_rip(sites, want=None):
 
     print("\nCaveats specific to this target:")
     print("  - One camera. Nothing here generalizes to another beach.")
-    print("  - The score is a YOLOv8 model's confidence, not a verified rip.")
-    print("    A driver of the DETECTOR (glare, swell texture, contrast) is")
-    print("    indistinguishable here from a driver of the rip.")
-    print("  - Walton has no observed wind, so every wind column is ERA5 grid,")
-    print("    which compare_wind_sources.py could not validate at this site.")
+    if "score_max" in observed.columns and observed["score_max"].notna().any():
+        print("  - The score is a YOLOv8 model's confidence, not a verified rip.")
+        print("    A driver of the DETECTOR (glare, swell texture, contrast) is")
+        print("    indistinguishable here from a driver of the rip.")
+    else:
+        print("  - These boxes were drawn by people, not a detector, so there is")
+        print("    no confidence score and no detector artefact to worry about.")
+        print("    The trade is that what a person chose to annotate, and when,")
+        print("    is its own selection — see --positives-only.")
+    if "bbox_area_max" in usable:
+        print("  - bbox_area_max is in PIXELS. Cross-shore pixel resolution varies")
+        print("    across a frame and between cameras, so an area is comparable")
+        print("    within this camera and meaningless pooled across cameras.")
+    if "rip_axis_offset_deg" in usable:
+        print("  - rip_axis_offset_deg is degrees from the shore normal, folded")
+        print("    onto 0-90: 0 is a rip running straight offshore, 90 is one")
+        print("    lying along the beach. It inherits whatever error is in the")
+        print("    assumed shore normal.")
+    # This line used to print at every site regardless of which one was run.
+    if "Walton" in name:
+        print("  - Walton has no observed wind, so every wind column is ERA5 grid,")
+        print("    which compare_wind_sources.py could not validate at this site.")
     observed_waves = [c for c in ("WVHT", "DPD", "APD")
                       if c in frame.columns and frame[c].notna().any()]
     model_waves = [c for c in MARINE_COLUMNS
@@ -1165,6 +1224,10 @@ def main():
     ap.add_argument("--target", choices=["rip", "wq", "both"], default="both")
     ap.add_argument("--site", help="substring of the rip table to analyse, when "
                                    "more than one camera has been pulled")
+    ap.add_argument("--positives-only", action="store_true",
+                    help="keep only hours containing an annotated rip and drop "
+                         "the presence targets. Use this wherever a person "
+                         "chose which frames the dataset contains (RipAID).")
     args = ap.parse_args()
     sites = load_sites()
     print(f"{len(sites)} qualifying sites\n")
@@ -1172,7 +1235,7 @@ def main():
         print("=" * 70)
         print("RIP DETECTION")
         print("=" * 70)
-        analyze_rip(sites, want=args.site)
+        analyze_rip(sites, want=args.site, positives_only=args.positives_only)
     if args.target in ("wq", "both"):
         print("\n" + "=" * 70)
         print("WATER QUALITY")
