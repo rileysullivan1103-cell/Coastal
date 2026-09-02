@@ -336,29 +336,6 @@ s.addText("A casualty day in New Hanover is long swell under light wind \u2014 c
     fontSize:13, color:INK, lineSpacing:20 });
 note(s, "Neither zone has a strong driver: the largest controlled correlation in either is 0.09. What is significant is that they point opposite ways on one shoreline \u2014 the wind term is not merely absent at the second beach, it is reversed.", 6.25);
 
-/* --------------------------------------------------------------- 9 method */
-s = pres.addSlide(); light(s);
-head(s, "Why the numbers moved", "Six corrections that changed an answer");
-const fixes = [
-  ["Reconstructed the zeros","The rip feed publishes a file only when the detector fires, so every hour looked like a detection. Enumerating the stills recovered 2,295 observed zero hours at Walton and 1,194 at Virginia Beach."],
-  ["Capped station distance","San Diego\u2019s water temperature was being joined to Virginia Beach \u2014 3,762 km \u2014 because it was the only file of its kind. Beyond 75 km a site now reports no data rather than borrowing someone else\u2019s ocean."],
-  ["Controlled within site","Pooled correlations were ranking beaches. Removing each site\u2019s own mean turned a \u22120.37 wave signal into \u22120.005."],
-  ["Read both bacteria formats","Virginia Beach\u2019s 96 samples sat unread on disk because the analysis knew only the California file format. A California-only result was presenting itself as the whole."],
-  ["Chose the wave model","The default is a forecast model. It wrote 233,664 hours and filled 18% of them \u2014 a wave series starting in 2021, fifteen years after the casualty record. The request had succeeded."],
-  ["Stopped trusting the catalogue","A buoy 10.2 km off Wrightsville Beach publishes no meteorological feed at all; a tide gauge 3.6 km away serves no water level. Both fed the site ranking on distance alone."],
-];
-fixes.forEach((f,i)=>{
-  const col = i % 3, row = Math.floor(i/3);
-  const colw = CW/3 - 0.30;
-  const x = M + col*(CW/3), y = 1.80 + row*2.35;
-  s.addShape(pres.ShapeType.rect, { x:x, y:y, w:colw, h:0.03, fill:{ color: row===0 ? ACC : TEAL } });
-  s.addText(f[0], { x:x, y:y+0.16, w:colw, h:0.62, isTextBox:true, margin:0,
-    fontFace:"Cambria", fontSize:15.5, bold:true, color:INK });
-  s.addText(f[1], { x:x, y:y+0.82, w:colw, h:1.45, isTextBox:true, margin:0,
-    fontFace:"Calibri", fontSize:11.5, color:INK, lineSpacing:17 });
-});
-note(s, "Each was found by checking an output that looked plausible. None announced itself as an error.", 6.55);
-
 /* ----------------------------------------------------------- 10 bottom line */
 s = pres.addSlide(); dark(s);
 s.addText("THE BOTTOM LINE", { x:M, y:1.15, w:CW, h:0.3, isTextBox:true, margin:0,

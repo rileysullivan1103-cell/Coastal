@@ -23,3 +23,10 @@ The z values on the two-coast slide are a Fisher-z test of the difference
 between the two zones' `rho_modow`, season-only. They are not printed by
 `analyze_storm.py`; it reports each zone on its own and the comparison is made
 across two runs.
+
+The deck does not carry a "what we fixed" slide. The corrections that changed
+these numbers — the reconstructed zeros, the station-distance cap, the
+within-site control, the second bacteria format, the wave model whose archive
+began in 2021, the catalogued stations that publish nothing — are recorded in
+the top-level README. They matter for whether the figures are trustworthy; they
+are not findings, and no audience saw the numbers before they were corrected.
