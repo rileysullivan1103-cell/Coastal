@@ -332,7 +332,15 @@ def pull_site(name, lat, lon, start, end, token, probe=False, skip_us=False,
                           "which model\n      covers your span, then pass "
                           "--marine-model.")
 
-    if skip_us or not in_united_states(lat, lon):
+    # These two are different facts and were printing the same sentence.
+    # Wrightsville Beach, NC came back as "outside the US station networks",
+    # which is false -- it has a buoy 10 km out and a tide gauge at 3.6 km,
+    # and the run had simply been told to skip them. A log line that reads as
+    # a data-availability fact must not be a record of a flag.
+    if skip_us:
+        print("    --skip-us-stations: not asking NDBC or CO-OPS "
+              "(neither needs a token; only GHCND rainfall does)")
+    elif not in_united_states(lat, lon):
         print("    outside the US station networks — gridded sources only")
     else:
         notes.extend(pull_us_stations(name, lat, lon, start, end, token))
