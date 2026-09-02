@@ -288,10 +288,10 @@ s.addText("Box area is in pixels, and cross-shore resolution runs 0.2–15 m acr
   { x:M+0.3, y:5.62, w:CW-0.6, h:0.85, isTextBox:true, margin:0, fontFace:"Calibri",
     fontSize:12, color:INK, lineSpacing:18 });
 
-/* ------------------------------------------------- 9 storm: two coasts */
+/* --------------------------------------------- 9 storm: one coastline */
 s = pres.addSlide(); light(s);
-head(s, "An outcome nobody here measured", "Two coasts, opposite answers");
-s.addText("NOAA logs a rip-current event when one hurts somebody. It has real zeros and it was written by people who never saw our cameras \u2014 so it can check them. Both zones are well powered and both are ranked within month and weekday, because Saturday alone holds 31 of New Hanover\u2019s 72 events.",
+head(s, "An outcome nobody here measured", "One coastline, opposite answers");
+s.addText("NOAA logs a rip-current event when one hurts somebody. It has real zeros and it was written by people who never saw our cameras \u2014 so it can check them. These are two Atlantic beaches 800 km apart, not two oceans. Both are ranked within month and weekday, because Saturday alone holds 31 of New Hanover\u2019s 72 events.",
   { x:M, y:1.58, w:CW, h:0.62, isTextBox:true, margin:0, fontFace:"Calibri",
     fontSize:12.5, color:INK, lineSpacing:19 });
 
@@ -334,7 +334,7 @@ zRows.forEach((r,i)=>{
 s.addText("A casualty day in New Hanover is long swell under light wind \u2014 calm-looking. In Palm Beach it is a windy day with a short, steep sea. The seasons agree: July\u2013August in Carolina, April\u2013May in Florida.",
   { x:M, y:5.62, w:CW, h:0.5, isTextBox:true, margin:0, fontFace:"Calibri",
     fontSize:13, color:INK, lineSpacing:20 });
-note(s, "Neither zone has a strong driver: the largest controlled correlation in either is 0.09. What is significant is that they point opposite ways \u2014 the wind term is not merely absent at the second beach, it is reversed.", 6.25);
+note(s, "Neither zone has a strong driver: the largest controlled correlation in either is 0.09. What is significant is that they point opposite ways on one shoreline \u2014 the wind term is not merely absent at the second beach, it is reversed.", 6.25);
 
 /* --------------------------------------------------------------- 9 method */
 s = pres.addSlide(); light(s);
@@ -365,7 +365,7 @@ s.addText("THE BOTTOM LINE", { x:M, y:1.15, w:CW, h:0.3, isTextBox:true, margin:
   fontFace:"Calibri", fontSize:11, bold:true, charSpacing:2.2, color:ACC });
 const bl = [
   ["What replicates","Rain against bacteria at Santa Cruz Wharf: three analytes, same sign, \u03c1 \u2248 0.45 after the season control \u2014 and it repeats at Virginia Beach, an independent sampling programme on the opposite coast.", GOOD],
-  ["What does not transfer","The sign flips between beaches. Rain against enterococcus is +0.47 at Santa Cruz and \u22120.32 at Carpinteria; wind against a rip casualty is \u22120.04 in New Hanover and +0.07 in Palm Beach. Two unrelated outcomes, two unrelated programmes, same conclusion: a driver fitted at one beach should not be deployed at another.", ACC],
+  ["What does not transfer","The sign flips between beaches. Rain against enterococcus is +0.47 at Santa Cruz and \u22120.32 at Carpinteria; wind against a rip casualty is \u22120.04 in New Hanover and +0.07 in Palm Beach, two Atlantic beaches 800 km apart. Unrelated outcomes, unrelated programmes, and the sign reverses within a single coastline as readily as between oceans: a driver fitted at one beach should not be deployed at another.", ACC],
   ["Worth acting on","Nothing yet. The strongest effect anywhere in this project explains under a quarter of the variance in one target at one camera, and no rip driver survives at two beaches at once.", MUTE],
 ];
 bl.forEach((b,i)=>{

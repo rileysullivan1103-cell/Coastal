@@ -836,7 +836,7 @@ overlaps the rip window (`n=39` on the gridded join, `n=1` on the buoy). Until
 more cameras carry the product, or enough time accumulates for a real overlap,
 anything the rip tables show is noise with a p-value.
 
-## Rip-current casualties, and why the two coasts disagree
+## Rip-current casualties, and why two beaches on one coast disagree
 
 Every rip target elsewhere in this project is our own instrument: `detection_rate`
 is a YOLOv8 model's output, RipAID's boxes are a curator's pen. NOAA's Storm
@@ -876,11 +876,13 @@ disjoint (a rename being repaired) or overlapping (two places being conflated).
 `--exclude` drops the ones that are not beaches — `INLAND NEW HANOVER` is caught
 by the same substring that correctly pools the other two.
 
-### Two zones, opposite signs
+### Two zones on the same coastline, opposite signs
 
-Both zones have enough positives to model — 72 and 79 event days over 9,736 —
-and both have complete conditions from `era5_ocean`. Season-only, ranked within
-month and weekday:
+Both are Atlantic beaches, Wrightsville Beach at 34.19N and Jupiter Inlet at
+26.94N — about 800 km apart on one shoreline, not two oceans. Both zones have
+enough positives to model (72 and 79 event days over 9,736) and both have
+complete conditions from `era5_ocean`. Season-only, ranked within month and
+weekday:
 
 | predictor | New Hanover, NC | Palm Beach, FL | do they agree? |
 |---|---|---|---|
@@ -900,7 +902,7 @@ the same month and weekday — the two signatures are different phenomena:
 The seasons differ to match. New Hanover's events peak in July and August and
 there are none at all from November to March. Palm Beach's peak in **April and
 May** (17 and 22 of 79) and it logs events in every month of the year — a
-spring cold-front coast, not a summer swell coast.
+spring cold-front regime, not a summer swell regime.
 
 ### What this does and does not establish
 
@@ -926,8 +928,13 @@ What survives is the same shape as the water-quality result: rain against
 enterococcus is +0.47 at Santa Cruz Wharf and -0.32 at Carpinteria; wind against
 a rip casualty is -0.04 in New Hanover and +0.07 in Palm Beach. Two entirely
 independent outcome types, two independent sampling programmes, and in both the
-sign flips between beaches. **A driver fitted at one beach should not be
-deployed at another.**
+sign flips between beaches.
+
+The rip pair sharpens it rather than weakening it. Santa Cruz and Carpinteria
+are both Californian; New Hanover and Palm Beach are both Atlantic. Nothing here
+is a Pacific-versus-Atlantic contrast, which one would expect to differ. The
+sign reverses **within a single coastline**, between beaches you would model the
+same way. **A driver fitted at one beach should not be deployed at another.**
 
 ### Zones with a camera in them
 
