@@ -44,6 +44,7 @@ import pandas as pd
 DATA_DIR = "data"
 SITES_CSV = "candidate_sites_ranked.csv"
 CANDIDATES_CSV = "camera_candidates.csv"
+RIPAID_SITES_CSV = "ripaid_sites.csv"
 
 # How far a CO-OPS file may be from a site before it is treated as absent.
 # pull_observations searches out to 50 km; the slack here covers a station
@@ -73,6 +74,10 @@ SHORE_NORMAL_DEG = {
     # The Virginia Beach oceanfront runs roughly north-south and faces east.
     # Same status as the others: an assumption from a map, not a survey.
     "Hampton Inn Oceanfront South at Virginia Beach": 90.0,
+    # RipAID / SIRENA. Cala Millor is on Mallorca's east coast; Son Bou runs
+    # east-west along Menorca's south coast. Both read off a map, like the rest.
+    "Cala Millor": 90.0,
+    "Son Bou": 180.0,
 }
 
 # Open-Meteo Marine columns, as returned by pull_site_observations.py. These
@@ -327,6 +332,8 @@ def load_sites():
                 if c in national.columns]
         frames.append(national[keep])
 
+    frames.extend(_ripaid_rows())
+
     if not frames:
         sys.exit(f"Neither {SITES_CSV} nor {CANDIDATES_CSV} exists — run "
                  "find_candidate_sites.py or scan_cameras.py first.")
@@ -335,7 +342,66 @@ def load_sites():
     # The California file wins where a camera is in both: it carries the
     # precipitation and water-quality station ids the national scan does not.
     sites = sites.drop_duplicates(subset=["camera_name"], keep="first")
+    for column in ("buoy_id", "tide_id"):
+        if column in sites.columns:
+            sites[column] = sites[column].map(_station_id)
     return sites.reset_index(drop=True)
+
+
+def _station_id(value):
+    """Station ids are labels that happen to look like numbers.
+
+    Read on its own, a sites file of all-numeric buoy ids comes back as int64.
+    Concatenated with a frame that has no buoy_id at all -- a RipAID site, say,
+    which has no buoy -- the column is promoted to float64 and 46042 becomes
+    46042.0. The loader then looks for buoy_46042.0.csv, finds nothing, and the
+    site reports no wave data whatsoever: a missing-data conclusion produced
+    entirely by a dtype. Rendering whole floats back to integer text fixes that
+    and leaves alphanumeric ids like ptac1 alone.
+    """
+    if pd.isna(value):
+        return value
+    if isinstance(value, float) and float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _ripaid_rows():
+    """RipAID sites, plus a row per camera that shares the site's weather.
+
+    load_ripaid.py --by-camera writes rip_clm_s_01_hourly.csv and friends, but
+    weather is pulled once per SITE (gridded_clm.csv), because five cameras
+    looking at one beach share one grid cell. Each camera therefore carries a
+    weather_name pointing back at its site; without it the camera-level tables
+    would silently find no conditions and report nothing.
+    """
+    if not os.path.exists(RIPAID_SITES_CSV):
+        return []
+    frame = pd.read_csv(RIPAID_SITES_CSV)
+    if "site" not in frame.columns:
+        return []
+
+    rows = []
+    for _, row in frame.iterrows():
+        site = str(row["site"])
+        lat = pd.to_numeric(row.get("latitude"), errors="coerce")
+        lon = pd.to_numeric(row.get("longitude"), errors="coerce")
+        if pd.isna(lat) or pd.isna(lon):
+            print(f"  {RIPAID_SITES_CSV}: {site} has no coordinates yet; "
+                  "fill latitude/longitude to analyse it")
+            continue
+        label = str(row.get("name") or site)
+        rows.append({"camera_name": label, "lat": float(lat), "lon": float(lon),
+                     "weather_name": label})
+        # Cameras at this site, discovered from what load_ripaid actually wrote.
+        # load_ripaid slugs camera names the same way pull_rip_detection does,
+        # so clm_s_01 lands on disk as rip_clm-s-01_hourly.csv.
+        for path in sorted(glob.glob(
+                f"{DATA_DIR}/ripaid/rip_{rip_slug(site)}-*_hourly.csv")):
+            stem = os.path.basename(path)[len("rip_"):-len("_hourly.csv")]
+            rows.append({"camera_name": stem, "lat": float(lat), "lon": float(lon),
+                         "weather_name": label})
+    return [pd.DataFrame(rows)] if rows else []
 
 
 def grid_slug(name):
@@ -524,15 +590,20 @@ def assemble_rip(sites, want=None):
         return None, None
     site = match[0]
     name = site["camera_name"]
+    # Several cameras can share one weather pull; see _ripaid_rows.
+    weather = site.get("weather_name")
+    weather = name if not isinstance(weather, str) or not weather else weather
     print(f"site: {name}")
+    if weather != name:
+        print(f"  conditions come from the site pull for {weather!r}")
     print(f"  {len(frame)} hours of rip output, "
           f"{frame['hour'].min()} to {frame['hour'].max()}")
 
     merged = frame.set_index("hour")
     thin = []
     for label, part in [
-            ("gridded weather", load_gridded(name)),
-            ("marine waves (model)", load_marine(name)),
+            ("gridded weather", load_gridded(weather)),
+            ("marine waves (model)", load_marine(weather)),
             ("buoy", load_buoy(site["buoy_id"]) if pd.notna(site.get("buoy_id")) else None),
             ("tide", load_coops("tide", site["lat"], site["lon"])),
             ("water temp", load_coops("watertemp", site["lat"], site["lon"])),
@@ -624,7 +695,12 @@ def apply_coverage(frame, stem):
 
 # Candidate targets, in preference order. Whichever have real variance get
 # analysed; a constant one is reported as constant rather than correlated.
-RIP_TARGETS = ["detection_rate", "detections", "score_max", "bbox_area_max"]
+# doubt_rate exists only for RipAID: the share of frames where a human marked
+# uncertainty rather than a rip. It is a target in its own right — what makes
+# a rip hard to call is a different question from what makes one happen, and
+# no detector confidence can answer it.
+RIP_TARGETS = ["detection_rate", "detections", "score_max", "bbox_area_max",
+               "doubt_rate"]
 
 
 def analyze_rip(sites, want=None):

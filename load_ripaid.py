@@ -48,6 +48,25 @@ FILENAME = re.compile(
 RIP_LABEL = "rip_current"
 DOUBT_LABEL = "doubt"
 
+# The README names the two SIRENA stations: Cala Millor (Mallorca) and Son Bou
+# (Menorca), Balearic Islands, Spain. The coordinates below are beach-centroid
+# estimates read off a map, not survey positions or camera positions. They are
+# good enough to pick an ERA5 / Marine grid cell, which is all the weather pull
+# needs; they are NOT good enough to trust a shore-normal result on without
+# checking the orientation against Figure 2 of the README.
+KNOWN_SITES = {
+    "clm": {"name": "Cala Millor", "latitude": 39.5965, "longitude": 3.3835},
+    "snb": {"name": "Son Bou", "latitude": 39.9085, "longitude": 4.0755},
+}
+
+
+def slug(text):
+    """The same slug pull_rip_detection.py writes, so every rip table in the
+    project follows one naming rule. Without this a camera named clm_s_01
+    would be written as rip_clm_s_01_hourly.csv while analyze_drivers looked
+    for clm-s-01, and the by-camera tables would silently never be found."""
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
+
 
 def axial_mean_deg(angles):
     """Mean of orientations that are lines, not arrows.
@@ -148,6 +167,43 @@ def summarize(frames):
     print(f"{doubt_only} frames carry ONLY doubt — these are neither a clean "
           "positive nor a clean negative")
 
+    print(f"\n{'!' * 74}")
+    print("HOW THESE FRAMES WERE SELECTED — READ BEFORE CORRELATING ANYTHING")
+    print(f"{'!' * 74}")
+    print("""The RipAID README, section 2.1, describes the sampling:
+
+  Balearic Islands lifeguards logged rip sightings (date, time, beach).
+  Images were pulled from all cameras at that beach for that time +/- 2h.
+  'After visual inspection, most of the images that did not show rip
+  currents were removed.'
+
+Two separate selections, and together they are fatal to a driver analysis
+of rip PRESENCE:
+
+  1. The hours in this dataset are hours a lifeguard was on duty AND
+     reported a rip. That is a sample of lifeguard staffing and of rip
+     occurrence at once, and the two cannot be separated here.
+  2. Frames without a rip were then deliberately deleted. The frames that
+     remain without one are the residue of that deletion, not a control
+     group. They are not the hours when no rip happened.
+
+So 'what conditions predict a rip being present' cannot be asked of this
+data. A correlation would measure the curator's selection at least as much
+as the ocean. This is not a flaw in the dataset — it was built to train
+detectors, and for that the enrichment is a feature.
+
+What the selection does NOT destroy is a question asked WITHIN the frames
+that contain an annotated rip: given that a rip is there and a person drew
+a box round it, does its size or orientation track the conditions? The
+sample of rips is not random, but the measurement of each one is a property
+of that rip rather than of the choice to include it.""")
+
+    print("\nOne more trap in that analysis: bbox area is in PIXELS, and the")
+    print("cameras have very different focal lengths — the README puts clm's")
+    print("cross-shore pixel resolution between 0.2 and 15 m depending on the")
+    print("camera. A pixel area from clm_c01 and one from clm_c05 are not the")
+    print("same physical area. Compare areas WITHIN a camera, never across.")
+
     print("\nper site and camera:")
     for site, group in frames.groupby("site"):
         span_years = group["timestamp"].dt.year.nunique()
@@ -210,7 +266,7 @@ def main():
     print(f"\n{'=' * 74}\nHOURLY TABLES\n{'=' * 74}")
     for name, group in frames.groupby(key):
         hourly = to_hourly(group)
-        path = f"{OUT_DIR}/rip_{name}_hourly.csv"
+        path = f"{OUT_DIR}/rip_{slug(name)}_hourly.csv"
         hourly.to_csv(path, index=False)
         zeros = int((hourly["frames_with_detection"] == 0).sum())
         print(f"  {path}  ({len(hourly)} hours, {zeros} observed-zero hours)")
@@ -223,16 +279,24 @@ def main():
     else:
         # Coordinates are not in the COCO export, and without them there is no
         # weather to fetch. Write a stub rather than inventing a location.
-        stub = pd.DataFrame({"site": codes, "name": ["" for _ in codes],
-                             "latitude": ["" for _ in codes],
-                             "longitude": ["" for _ in codes]})
+        # 'name' is pre-filled with the site code so the weather pull produces
+        # sane filenames even if only latitude/longitude get filled in.
+        stub = pd.DataFrame([{
+            "site": code,
+            "name": KNOWN_SITES.get(code, {}).get("name", code),
+            "latitude": KNOWN_SITES.get(code, {}).get("latitude", ""),
+            "longitude": KNOWN_SITES.get(code, {}).get("longitude", ""),
+        } for code in codes])
         if not os.path.exists(SITES_TEMPLATE):
             stub.to_csv(SITES_TEMPLATE, index=False)
-            print(f"\nThe export carries no coordinates, so I cannot fetch "
-                  f"weather yet.\nWrote {SITES_TEMPLATE} with the site codes "
-                  f"found: {', '.join(codes)}")
-            print("Fill in latitude/longitude (the Zenodo record or its README "
-                  "should name the beaches), then:")
+            unknown = [c for c in codes if c not in KNOWN_SITES]
+            print(f"\nWrote {SITES_TEMPLATE} for: {', '.join(codes)}")
+            if unknown:
+                print(f"  {', '.join(unknown)} have no coordinates — fill them in.")
+            print("  Coordinates for known sites are map estimates, not survey "
+                  "positions. Fine for a weather grid cell; check them before "
+                  "trusting a shore-normal result.")
+            print("Then:")
             print(f"  python pull_site_observations.py --sites-csv {SITES_TEMPLATE} "
                   f"--start {frames['timestamp'].min():%Y-%m-%d} "
                   f"--end {frames['timestamp'].max():%Y-%m-%d}")
