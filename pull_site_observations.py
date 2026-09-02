@@ -304,6 +304,12 @@ def pull_site(name, lat, lon, start, end, token, probe=False, skip_us=False,
     if marine is None:
         notes.append(f"marine failed: {note}")
     else:
+        # Which model produced this file is not recoverable from the numbers,
+        # and the models disagree -- best_match starts in 2021 here while
+        # era5_ocean reaches 2000. A file that does not name its source cannot
+        # be audited later, and two sites pulled under different models cannot
+        # be compared without knowing it.
+        marine["model"] = marine_model or "best_match (default)"
         path = f"{OUT_DIR}/marine_{slug}.csv"
         marine.to_csv(path, index=False)
         have = [c for c in marine.columns if c != "time" and marine[c].notna().any()]
@@ -398,9 +404,10 @@ def main():
     ap.add_argument("--skip-us-stations", action="store_true",
                     help="gridded sources only, even inside the US")
     ap.add_argument("--marine-model",
-                    help="Open-Meteo wave model, e.g. era5_ocean. The default "
-                         "picks a forecast model whose archive may be far "
-                         "shorter than your window.")
+                    help="Open-Meteo wave model. Use era5_ocean for anything "
+                         "historical: the default is a forecast model whose "
+                         "archive can start years after your window does. Run "
+                         "--marine-probe to see each model's real span here.")
     ap.add_argument("--marine-probe", action="store_true",
                     help="ask each wave model what span it actually has at "
                          "this site, then stop")
