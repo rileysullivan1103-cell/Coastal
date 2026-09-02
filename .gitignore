@@ -7,3 +7,5 @@ webcoos_assets_raw.json
 data/
 camera_candidates.csv
 ripaid_sites.csv
+
+data/storm_events/
