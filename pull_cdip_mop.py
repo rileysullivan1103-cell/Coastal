@@ -263,12 +263,13 @@ def stride_projection(variables, length, points=None):
     return ",".join(f"{v}[0:{stride}:{length - 1}]" for v in variables)
 
 
-def fetch(dataset, projection):
+def fetch(dataset, projection, with_text=False):
     url = f"{DODS}{dataset}.ascii?{encode(projection)}"
     resp = get_with_retry(url)
     if resp.status_code != 200:
         raise ValueError(f"HTTP {resp.status_code} for {projection}")
-    return parse_ascii(resp.text)
+    parsed = parse_ascii(resp.text)
+    return (parsed, resp.text) if with_text else parsed
 
 
 def catalog_ids():
@@ -414,21 +415,62 @@ def available(dds_text, wanted):
     return [v for v in wanted if v in present]
 
 
+def short_variables(values, variables, expected):
+    return [v for v in variables if len(values.get(v, [])) != expected]
+
+
+def fetch_span(dataset, variables, start, stop, floor=500):
+    """One chunk of rows for these variables, with the response verified.
+
+    The server answers a ten-variable request for 20,000 rows with the last
+    variable's block missing entirely -- HTTP 200, no error, just short. It
+    did this at SC130 on a request shape that had already worked at B1788,
+    so it is a server-side limit or a truncation, not a bad projection.
+    Raising there abandoned a pull that was twelve requests from done.
+
+    So: retry the same request once, then ask for the short variables one at
+    a time, then halve the row span. Only when a single variable over a span
+    of `floor` rows still comes back short is something actually wrong.
+    """
+    expected = stop - start + 1
+    proj = ",".join(f"{v}[{start}:1:{stop}]" for v in variables)
+    values, text = fetch(dataset, proj, with_text=True)
+    short = short_variables(values, variables, expected)
+    if not short:
+        return values
+
+    values, text = fetch(dataset, proj, with_text=True)
+    short = short_variables(values, variables, expected)
+    if not short:
+        return values
+
+    if len(variables) > 1:
+        print(f"\n    {dataset} rows {start}-{stop}: the combined request came "
+              f"back without {', '.join(short)}; asking one variable at a time")
+        for name in short:
+            values[name] = fetch_span(dataset, [name], start, stop, floor)[name]
+        return values
+
+    name = variables[0]
+    if expected > floor:
+        middle = start + expected // 2
+        first = fetch_span(dataset, [name], start, middle - 1, floor)
+        second = fetch_span(dataset, [name], middle, stop, floor)
+        return {name: first[name] + second[name]}
+
+    raise ValueError(
+        f"{dataset} {name}: asked for {expected} values over rows "
+        f"{start}-{stop} and the server returned {len(values.get(name, []))} "
+        f"in {len(text)} bytes, twice, even alone.\n"
+        f"  response tail: {text[-200:]!r}")
+
+
 def pull_series(dataset, length, variables):
     frames = []
     for start in range(0, length, CHUNK):
         stop = min(start + CHUNK, length) - 1
-        proj = ",".join(f"{v}[{start}:1:{stop}]" for v in variables)
-        values = fetch(dataset, proj)
-        block = {}
-        for name in variables:
-            got = values.get(name, [])
-            if len(got) != stop - start + 1:
-                raise ValueError(
-                    f"{dataset} {name}: expected {stop - start + 1} values, "
-                    f"got {len(got)} — the .ascii layout is not what "
-                    "parse_ascii assumes")
-            block[name] = to_float(got)
+        values = fetch_span(dataset, variables, start, stop)
+        block = {name: to_float(values[name]) for name in variables}
         frames.append(pd.DataFrame(block))
         print(f"    {stop + 1}/{length}", end="\r", flush=True)
     print(" " * 30, end="\r")

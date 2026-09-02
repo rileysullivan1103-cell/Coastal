@@ -1015,6 +1015,16 @@ sites fill honestly. It never drops rows: the height and period at those
 timestamps are good, and throwing them away to protect a direction column that
 has nothing in it anywhere would lose real data. `--keep-degenerate` overrides.
 
+**A 200 response can be short.** The full SC130 pull died on a ten-variable
+request for 20,000 rows: HTTP 200, no error body, `waveSxx`'s block simply
+absent. The identical request shape had already worked at B1788, so it is a
+server-side limit or truncation rather than a bad projection — and the first
+version raised there, abandoning a pull that was eleven requests from done.
+`fetch_span()` now verifies every response against the count it asked for,
+retries once, then asks for the short variables one at a time, then halves the
+row span. Only a single variable still short over 500 rows is an error, and it
+raises with the byte count and the response tail to diagnose from.
+
 This is the same failure this project keeps catching in other people's data — a
 sentinel counted as a measurement — found this time in the checking code itself.
 

@@ -361,6 +361,88 @@ def test_zeros_are_masked_only_where_the_column_is_already_suspect():
           and "zeros_masked" not in audit["waveDm"])
 
 
+def fake_server(drop=(), serve_alone=True, max_span=None):
+    """A stand-in for the THREDDS ascii service that can come back short.
+
+    `drop` names variables the server omits from a MULTI-variable response --
+    which is what SC130 did on a ten-variable request for 20,000 rows, with
+    HTTP 200 and no error. serve_alone/max_span control whether it answers
+    those variables when asked on their own, or only over a short span.
+    """
+    calls = []
+
+    def fetch(dataset, projection, with_text=False):
+        calls.append(projection)
+        out = {}
+        for part in projection.split(","):
+            name, _, rest = part.partition("[")
+            start, _, stop = rest.rstrip("]").split(":")
+            start, stop = int(start), int(stop)
+            span = stop - start + 1
+            alone = "," not in projection
+            withheld = name in drop and (
+                not alone or not serve_alone
+                or (max_span is not None and span > max_span))
+            if not withheld:
+                out[name] = [str(float(i)) for i in range(start, stop + 1)]
+        text = "Dataset { ... } truncated"
+        return (out, text) if with_text else out
+
+    return fetch, calls
+
+
+def test_a_short_response_falls_back_instead_of_abandoning_the_pull():
+    print("\na variable missing from a combined response is fetched alone")
+    original = mop.fetch
+    try:
+        mop.fetch, calls = fake_server(drop=("waveSxx",))
+        values = mop.fetch_span("SC130_hindcast.nc",
+                                ["waveHs", "waveSxx"], 0, 999)
+        check("the missing variable comes back complete",
+              len(values.get("waveSxx", [])) == 1000)
+        check("the variable that was never missing is intact",
+              len(values["waveHs"]) == 1000)
+        check("it retried the combined request before splitting",
+              calls.count("waveHs[0:1:999],waveSxx[0:1:999]") == 2, len(calls))
+        check("and then asked for the short one alone",
+              "waveSxx[0:1:999]" in calls)
+    finally:
+        mop.fetch = original
+
+
+def test_a_variable_that_needs_a_smaller_span_is_halved():
+    print("\na variable the server will only serve in pieces is halved")
+    original = mop.fetch
+    try:
+        mop.fetch, calls = fake_server(drop=("waveSxx",), max_span=600)
+        values = mop.fetch_span("SC130_hindcast.nc", ["waveSxx"], 0, 999)
+        check("every row still arrives", len(values["waveSxx"]) == 1000)
+        check("in order", values["waveSxx"][0] == "0.0"
+              and values["waveSxx"][-1] == "999.0")
+        check("by halving the span", "waveSxx[0:1:499]" in calls
+              and "waveSxx[500:1:999]" in calls)
+    finally:
+        mop.fetch = original
+
+
+def test_a_genuinely_missing_variable_still_raises():
+    print("\na variable the server never serves is an error, not a silent gap")
+    original = mop.fetch
+    try:
+        mop.fetch, _ = fake_server(drop=("waveSxx",), serve_alone=False)
+        try:
+            mop.fetch_span("SC130_hindcast.nc", ["waveSxx"], 0, 99, floor=500)
+            check("it raises", False)
+        except ValueError as exc:
+            check("it raises", True)
+            check("and says what it asked for and got",
+                  "asked for 100 values" in str(exc) and "returned 0" in str(exc))
+            check("and shows the response tail to diagnose with",
+                  "response tail" in str(exc))
+    finally:
+        mop.fetch = original
+
+
 if __name__ == "__main__":
     test_bracket_encoding()
     test_parses_a_real_array_response()
@@ -381,6 +463,9 @@ if __name__ == "__main__":
     test_keep_degenerate_is_an_escape_not_the_default()
     test_the_probe_reads_the_whole_record_not_just_the_head()
     test_zeros_are_masked_only_where_the_column_is_already_suspect()
+    test_a_short_response_falls_back_instead_of_abandoning_the_pull()
+    test_a_variable_that_needs_a_smaller_span_is_halved()
+    test_a_genuinely_missing_variable_still_raises()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")
