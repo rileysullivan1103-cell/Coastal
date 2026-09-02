@@ -344,6 +344,23 @@ def test_the_probe_reads_the_whole_record_not_just_the_head():
           "[0:1:9]" in mop.stride_projection(["waveHs"], 10, points=400))
 
 
+def test_zeros_are_masked_only_where_the_column_is_already_suspect():
+    print("\nan exact zero is garbage in a column that holds fill, data elsewhere")
+    frame = pd.DataFrame({
+        "waveSxx": [0.0, 0.041, -999.99, 0.038, 0.037, 0.039],
+        "waveDm":  [0.0, 180.0, 90.0, 270.0, 45.0, 200.0],
+    })
+    cleaned, audit, dropped = mop.clean_fill(frame, ["waveSxx", "waveDm"])
+    check("the zero in the column that also holds -999.99 is masked",
+          bool(pd.isna(cleaned["waveSxx"].iloc[0])))
+    check("its real values survive", cleaned["waveSxx"].notna().sum() == 4)
+    check("a clean column keeps its 0.0, which is due north",
+          cleaned["waveDm"].iloc[0] == 0.0)
+    check("the audit says the zeros were masked",
+          audit["waveSxx"].get("zeros_masked") is True
+          and "zeros_masked" not in audit["waveDm"])
+
+
 if __name__ == "__main__":
     test_bracket_encoding()
     test_parses_a_real_array_response()
@@ -363,6 +380,7 @@ if __name__ == "__main__":
     test_reported_share_is_honest()
     test_keep_degenerate_is_an_escape_not_the_default()
     test_the_probe_reads_the_whole_record_not_just_the_head()
+    test_zeros_are_masked_only_where_the_column_is_already_suspect()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED: {FAILURES}")

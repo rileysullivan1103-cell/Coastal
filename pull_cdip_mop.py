@@ -208,7 +208,17 @@ def clean_fill(frame, columns, min_usable=MIN_USABLE, keep_degenerate=False):
         series = pd.to_numeric(frame[column], errors="coerce")
         report = audit_column(series)
         audit[column] = report
-        frame[column] = series.mask(is_fill(series) | is_denormal(series))
+        bad = is_fill(series) | is_denormal(series)
+        # An exact 0.0 is ambiguous on its own -- 0 degrees is due north --
+        # so zeros are only masked in a column already caught holding fill
+        # values or denormals. At SC130 the zeros sit inside the same run as
+        # the denormals; they are the same uninitialised buffer. Counting a
+        # zero against usability in the audit and then writing it out anyway
+        # would leave the report and the CSV disagreeing.
+        if bad.any():
+            bad = bad | (series == 0)
+            report["zeros_masked"] = True
+        frame[column] = series.mask(bad)
         if report["share"] < min_usable and not keep_degenerate:
             dropped.append(column)
     if dropped:
@@ -231,6 +241,8 @@ def print_audit(audit, dropped, rename=None):
         if report["blank"]:
             note += f"  blank {report['blank']:,}"
         mark = "  DROPPED" if column in dropped else ""
+        if report.get("zeros_masked") and report["zero"] and column not in dropped:
+            note += "  (zeros masked: this column holds fill values too)"
         print(f"    {label:<22} {100 * report['share']:5.1f}% usable{note}{mark}")
     if dropped:
         names = ", ".join(rename.get(c, c) for c in dropped)

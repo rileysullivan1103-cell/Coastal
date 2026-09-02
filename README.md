@@ -1018,6 +1018,17 @@ has nothing in it anywhere would lose real data. `--keep-degenerate` overrides.
 This is the same failure this project keeps catching in other people's data — a
 sentinel counted as a measurement — found this time in the checking code itself.
 
+SC125 and SC150, 2.2 and 2.8 km along the same coast, return byte-identical
+opening rows and the same 67.8% for `waveSxx`. These columns are not broken at
+one point — they are the same uninitialised buffer across the MOP hindcast, so
+no neighbouring point rescues them.
+
+Zeros are masked only in a column already caught holding fill values or
+denormals. An exact 0.0 is ambiguous alone — 0° is due north — but at SC130 the
+zeros sit inside the same run as the denormals. Counting a zero against
+usability in the report and then writing it to the CSV anyway would leave the
+two disagreeing, which is how a bad number gets into an analysis.
+
 `--probe` now reads **every 553rd hour across the whole record** in one strided
 OPeNDAP request (`waveDm[0:553:221327]`) rather than five rows off the front, and
 prints each column's usable share and the month its first bad sample appears.
