@@ -160,12 +160,34 @@ def report_overlap(storm_frame, conditions):
     for name in PREDICTORS:
         if name not in joined.columns:
             continue
-        have = int(joined[name].notna().sum())
+        present = joined[name].notna()
+        have = int(present.sum())
         on_events = int(joined.loc[joined["any_event"] == 1, name].notna().sum())
+        span = ""
+        if have:
+            dates = joined.index[present]
+            # A predictor missing 80% of days is a different problem depending
+            # on WHERE the gap is. Scattered outages leave the sample
+            # representative; a solid block means the series simply starts
+            # later than the record does, and then it is a shorter study, not
+            # a patchy one. The two need different fixes, so say which it is.
+            covered = (dates.max() - dates.min()).days + 1
+            solid = have >= 0.9 * covered
+            span = (f"  {dates.min():%Y-%m}..{dates.max():%Y-%m}"
+                    + ("  contiguous" if solid else "  scattered"))
         flag = "" if have > 0.8 * len(joined) else "   <- thin"
-        print(f"  {name:<26} {have:>6}/{len(joined)} days "
+        print(f"  {name:<24} {have:>6}/{len(joined)} "
               f"({100 * have / len(joined):>5.1f}%), "
-              f"{on_events}/{events} event days{flag}")
+              f"{on_events:>3}/{events} event days{span}{flag}")
+
+    thin = [c for c in PREDICTORS if c in joined.columns
+            and int(joined.loc[joined["any_event"] == 1, c].notna().sum()) < ad.MIN_N]
+    if thin:
+        print(f"\n  {len(thin)} predictor(s) reach fewer than {ad.MIN_N} event days "
+              "and cannot be\n  reported at all: "
+              + ", ".join(thin[:6]) + ("..." if len(thin) > 6 else ""))
+        print("  This is a coverage problem, not a result. Do not read their "
+              "absence\n  from the tables below as 'waves do not matter here'.")
     return joined
 
 

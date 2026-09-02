@@ -72,7 +72,7 @@ def slugify(text):
     return "".join(c if c.isalnum() else "_" for c in str(text))[:48]
 
 
-def open_meteo(url, lat, lon, start, end, variables, probe=False):
+def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
     """(dataframe, note). Returns (None, note) when the request fails."""
     params = {"latitude": lat, "longitude": lon,
               "start_date": start.strftime("%Y-%m-%d"),
@@ -82,6 +82,8 @@ def open_meteo(url, lat, lon, start, end, variables, probe=False):
               # NDBC and CO-OPS both report wind in m/s; asking for m/s here
               # keeps every wind column in this project in one unit.
               "wind_speed_unit": "ms"}
+    if models:
+        params["models"] = models
     try:
         resp = requests.get(url, params=params, timeout=TIMEOUT)
     except (requests.Timeout, requests.ConnectionError) as exc:
@@ -121,14 +123,15 @@ def open_meteo(url, lat, lon, start, end, variables, probe=False):
     return frame.sort_values("time").reset_index(drop=True), "ok"
 
 
-def fetch_marine(lat, lon, start, end, probe=False):
+def fetch_marine(lat, lon, start, end, probe=False, models=None):
     """Marine reanalysis, nudging seaward if the exact point is a land cell."""
     for nudge in MARINE_NUDGES:
         bearings = [(0, 0)] if nudge == 0 else MARINE_BEARINGS
         for dlat, dlon in bearings:
             try_lat, try_lon = lat + dlat * nudge, lon + dlon * nudge
             frame, note = open_meteo(MARINE, try_lat, try_lon, start, end,
-                                     MARINE_VARS, probe=probe and nudge == 0)
+                                     MARINE_VARS, probe=probe and nudge == 0,
+                                     models=models)
             if frame is not None:
                 # An all-NaN frame is a land cell answering politely.
                 data_cols = [c for c in frame.columns if c != "time"]
@@ -142,6 +145,43 @@ def fetch_marine(lat, lon, start, end, probe=False):
                 print(f"      at the site itself: {note}")
             time.sleep(0.2)
     return None, "no ocean cell found within ~22 km"
+
+
+MARINE_MODELS_TO_TRY = ("best_match", "era5_ocean", "ewam", "gwam",
+                        "meteofrance_wave", "ecmwf_wam025")
+
+
+def probe_marine_models(lat, lon, start, end):
+    """Which marine model actually has data this far back.
+
+    The default returned a full grid of hours for Wrightsville Beach and real
+    numbers in only 18% of them, all at the recent end. A wave series that
+    starts in 2021 cannot be joined to a casualty record that starts in 2000,
+    and the failure is silent: the request succeeds, the file is written, the
+    column is simply mostly NaN. So the model is chosen by asking each one for
+    the actual span rather than by trusting the default.
+    """
+    print(f"probing marine models at ({lat:.3f}, {lon:.3f}) over "
+          f"{start:%Y-%m-%d}..{end:%Y-%m-%d}\n")
+    print(f"  {'model':<20} {'hours with a wave height':>26}  span")
+    for model in MARINE_MODELS_TO_TRY:
+        frame, note = open_meteo(MARINE, lat, lon, start, end,
+                                 ["wave_height"], models=model)
+        if frame is None:
+            print(f"  {model:<20} {'-':>26}  {note}")
+            time.sleep(0.3)
+            continue
+        have = frame["wave_height"].notna()
+        if not have.any():
+            print(f"  {model:<20} {'0':>26}  returned only nulls")
+            time.sleep(0.3)
+            continue
+        stamps = pd.to_datetime(frame.loc[have, "time"], errors="coerce").dropna()
+        print(f"  {model:<20} {int(have.sum()):>26}  "
+              f"{stamps.min():%Y-%m-%d}..{stamps.max():%Y-%m-%d}")
+        time.sleep(0.3)
+    print("\nPick the one whose span covers your record and pass it as "
+          "--marine-model.")
 
 
 def add_rain_windows(frame):
@@ -241,7 +281,8 @@ def _nearest(lat, lon, frame, lat_col, lon_col, max_km):
     return subset.iloc[best], float(dist[best])
 
 
-def pull_site(name, lat, lon, start, end, token, probe=False, skip_us=False):
+def pull_site(name, lat, lon, start, end, token, probe=False, skip_us=False,
+              marine_model=None):
     print(f"\n{name}  ({lat:.4f}, {lon:.4f})")
     slug = slugify(name)
     notes = []
@@ -258,7 +299,8 @@ def pull_site(name, lat, lon, start, end, token, probe=False, skip_us=False):
         print(f"      {len(weather)} hours -> {path}   ({rain:.0f} mm total)")
 
     print("    Marine waves (global)")
-    marine, note = fetch_marine(lat, lon, start, end, probe=probe)
+    marine, note = fetch_marine(lat, lon, start, end, probe=probe,
+                                models=marine_model)
     if marine is None:
         notes.append(f"marine failed: {note}")
     else:
@@ -267,6 +309,22 @@ def pull_site(name, lat, lon, start, end, token, probe=False, skip_us=False):
         have = [c for c in marine.columns if c != "time" and marine[c].notna().any()]
         print(f"      {len(marine)} hours -> {path}")
         print(f"      columns with data: {have}")
+        # A full grid of hours with values in only a fraction of them is the
+        # failure mode that looks like success: the request is fine, the file
+        # is written, and the column is mostly NaN at the old end. Say the
+        # span, not just the row count.
+        if "wave_height" in marine.columns:
+            filled = marine["wave_height"].notna()
+            share = 100.0 * filled.mean() if len(marine) else 0.0
+            if filled.any():
+                stamps = pd.to_datetime(marine.loc[filled, "time"],
+                                        errors="coerce").dropna()
+                print(f"      wave_height populated in {share:.0f}% of hours, "
+                      f"{stamps.min():%Y-%m-%d} to {stamps.max():%Y-%m-%d}")
+                if share < 90:
+                    print("      the rest are empty. Run --marine-probe to see "
+                          "which model\n      covers your span, then pass "
+                          "--marine-model.")
 
     if skip_us or not in_united_states(lat, lon):
         print("    outside the US station networks — gridded sources only")
@@ -339,6 +397,13 @@ def main():
                     help="print the raw response schema for the first site")
     ap.add_argument("--skip-us-stations", action="store_true",
                     help="gridded sources only, even inside the US")
+    ap.add_argument("--marine-model",
+                    help="Open-Meteo wave model, e.g. era5_ocean. The default "
+                         "picks a forecast model whose archive may be far "
+                         "shorter than your window.")
+    ap.add_argument("--marine-probe", action="store_true",
+                    help="ask each wave model what span it actually has at "
+                         "this site, then stop")
     args = ap.parse_args()
 
     end = (datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -354,6 +419,11 @@ def main():
               "so the last few days may come back empty.\n")
 
     targets = load_targets(args)
+    if args.marine_probe:
+        name, lat, lon = targets[0]
+        print(f"{name}")
+        probe_marine_models(lat, lon, start, end)
+        return
     token = os.environ.get("NOAA_CDO_TOKEN")
     os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -364,7 +434,8 @@ def main():
     for index, (name, lat, lon) in enumerate(targets):
         notes = pull_site(name, lat, lon, start, end, token,
                           probe=args.probe and index == 0,
-                          skip_us=args.skip_us_stations)
+                          skip_us=args.skip_us_stations,
+                          marine_model=args.marine_model)
         if notes:
             failed.append((name, notes))
 

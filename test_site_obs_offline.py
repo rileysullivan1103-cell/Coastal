@@ -8,6 +8,7 @@ handle gaps, and that the two scripts name a site's files identically.
 """
 
 import sys
+from datetime import datetime
 
 import pandas as pd
 
@@ -122,9 +123,62 @@ def test_marine_nudges():
           f"{max(pso.MARINE_NUDGES) * 111:.0f} km")
 
 
+def test_marine_model_is_passed_through():
+    """The Wrightsville pull returned 233,664 hours and a wave height in 18%
+    of them, all at the recent end -- a request that succeeded and produced a
+    series too short to join. The model has to be selectable, and the choice
+    has to reach the request."""
+    print("the marine model reaches the query string")
+    sent = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"hourly": {"time": ["2005-01-01T00:00"], "wave_height": [1.0]},
+                    "hourly_units": {"wave_height": "m"}}
+
+    def fake_get(url, params=None, timeout=None):
+        sent.update(params or {})
+        return FakeResponse()
+
+    real_get = pso.requests.get
+    try:
+        pso.requests.get = fake_get
+        frame, note = pso.open_meteo(
+            pso.MARINE, 34.19, -77.81,
+            datetime(2005, 1, 1), datetime(2005, 1, 2),
+            ["wave_height"], models="era5_ocean")
+    finally:
+        pso.requests.get = real_get
+
+    check("the response still parses", frame is not None, note)
+    check("models is in the request", sent.get("models") == "era5_ocean",
+          sent.get("models"))
+
+    sent.clear()
+    try:
+        pso.requests.get = fake_get
+        pso.open_meteo(pso.MARINE, 34.19, -77.81,
+                       datetime(2005, 1, 1), datetime(2005, 1, 2),
+                       ["wave_height"])
+    finally:
+        pso.requests.get = real_get
+    check("and absent when no model is chosen, so the default is unchanged",
+          "models" not in sent, sorted(sent))
+
+    check("the probe list starts with the current default",
+          pso.MARINE_MODELS_TO_TRY[0] == "best_match",
+          pso.MARINE_MODELS_TO_TRY[0])
+    check("and offers a reanalysis that could cover 2000",
+          "era5_ocean" in pso.MARINE_MODELS_TO_TRY, pso.MARINE_MODELS_TO_TRY)
+
+
 def main():
     for test in (test_us_detection, test_column_picking, test_rain_windows,
-                 test_nearest, test_slug_agreement, test_marine_nudges):
+                 test_nearest, test_slug_agreement, test_marine_nudges,
+                 test_marine_model_is_passed_through):
         test()
         print()
     if FAILURES:
