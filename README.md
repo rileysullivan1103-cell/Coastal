@@ -473,6 +473,7 @@ qualifying sites.
     python pull_rip_detection.py --inventory
     python pull_rip_detection.py --probe
     python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01
+    python pull_rip_detection.py --camera Corolla --pull --match-observations
 
 `--inventory` asks the service when it actually has data and downloads
 nothing. Run it first. The catalogue's element count (35,158 for Walton) says
@@ -490,6 +491,65 @@ or CSV payloads into a single table, and if the payloads turn out to be
 imagery it writes only the element index (filename, timestamp, url) rather
 than inventing columns. The index is what you need to join frames to the
 observation tables either way.
+
+### The other seven cameras
+
+`rip-detection-results` exists on **eight cameras nationally**, and for a long
+while this project used one. `--camera` always took a name, so nothing stopped
+the others being pulled except knowing they were there:
+
+    python pull_rip_detection.py --list                 the roster
+    python pull_rip_detection.py --list --inventory     ...and when each has data
+    python pull_rip_detection.py --all-rip --inventory  one request per camera
+    python pull_rip_detection.py --all-rip --pull --match-observations
+
+**The catalogue was being read one page deep.** `load_assets()` GET the
+`/assets/` endpoint once and kept whatever came back, but WebCOOS paginates it,
+so any camera past the first page was invisible — and asking for one produced
+`No camera matching ...`, which reads as *that camera has no rip detection* and
+is a different statement. It now uses `scan_cameras.fetch_assets()`, which
+follows the pagination and caches the complete list, rather than keeping a
+second and shorter copy of the catalogue.
+
+**Judge a camera on its populated bins, not its element count.** Corolla
+catalogues 10,239 elements against Walton's 35,158 and looks like a third the
+size. Its inventory says those elements sit in **46 populated bins of 818**,
+last data 50 days old — a few dense weeks, not a third of a record. The element
+count says how much data exists and never how much of the record it covers, and
+the joinable hours follow the coverage. `--list --inventory` prints the
+populated share beside the count for exactly this reason.
+
+**`--all-rip` isolates each camera.** A missing stills product, a service the
+token cannot reach or a dropped connection ends that camera and nothing else,
+and the run closes with a summary line per camera. `SystemExit` is caught
+alongside ordinary exceptions, because the single-camera helpers exit rather
+than raise, and an uncaught one would abandon the sweep with no record of what
+had already succeeded.
+
+### Making a new camera analysable
+
+The rip feed on its own correlates against nothing. For a camera outside the
+California seven, the conditions come from `pull_site_observations.py`, which
+works from a coordinate rather than a site list and splits its sources by what
+exists there:
+
+    python scan_cameras.py --rip-only --weather grid       # what each one has
+    python pull_site_observations.py --camera "Corolla"    # buoy, tide, ERA5, marine
+    python pull_rip_detection.py --camera Corolla --inventory
+    python pull_rip_detection.py --camera Corolla --coverage --start ... --end ...
+    python pull_rip_detection.py --camera Corolla --pull --match-observations
+    python analyze_drivers.py --target rip --site <slug>
+
+`analyze_drivers.py` globs `data/**/rip_*_hourly.csv`, so a newly pulled camera
+appears in the run without any list to edit. Do not skip `--coverage`: without
+the stills denominator every hour with no detection is *unknown* rather than an
+observed zero, and `detection_rate` collapses to the constant 1.0.
+
+Note what does **not** travel east. CDIP MOP — the 1.45 km nearshore model that
+produced the strongest wave result in this project — is California only. A
+camera in North Carolina or Florida gets Open-Meteo Marine and whatever NDBC
+buoy is within 50 km, which is the distant-wave problem MOP was adopted to fix.
+Any cross-camera wave comparison has to carry that asymmetry explicitly.
 
 ### What the product actually contains
 

@@ -55,6 +55,108 @@ CAPITOLA = asset("Capitola Wharf", products=[
 ASSETS = [WALTON, CAPITOLA]
 
 
+COROLLA = asset("Beachfront from Sailfish Street Beach Access, Corolla, NC",
+                state="North Carolina", products=[
+    ("Raw Video Data", "raw-video-data", "Rip Detection Results",
+     "rip-detection-results", "currituck-rip-svc", 10239),
+])
+# One camera publishing two rip products. The count is what decides whether a
+# pull is worth making, so the larger has to win.
+TWO_RIP = asset("Two Products", state="Florida", products=[
+    ("Raw Video Data", "raw-video-data", "Rip Detection Results",
+     "rip-detection-results", "two-rip-old", 11),
+    ("Raw Video Data", "raw-video-data", "Rip Detection v2",
+     "rip-detection-results-v2", "two-rip-new", 4242),
+])
+
+
+def test_rip_cameras():
+    print("the national rip roster")
+    found = r.rip_cameras([CAPITOLA, COROLLA, WALTON, TWO_RIP])
+    check("a camera with no rip product is left out",
+          "Capitola Wharf" not in [c["label"] for c in found])
+    check("three cameras carry one", len(found) == 3, [c["label"] for c in found])
+    check("sorted by element count, largest first",
+          [c["elements"] for c in found] == [35158, 10239, 4242],
+          [c["elements"] for c in found])
+    check("the state comes through",
+          found[1]["state"] == "North Carolina", found[1]["state"])
+    check("the service slug is carried, so the caller need not re-resolve it",
+          found[0]["service_slug"] == "walton-rip-svc")
+    check("a camera with two rip products keeps the larger",
+          found[2]["service_slug"] == "two-rip-new", found[2]["service_slug"])
+    check("the asset is carried so the sweep can act on it",
+          found[0]["asset"] is WALTON)
+    check("an empty catalogue is not an error", r.rip_cameras([]) == [])
+
+
+def test_list_rip_cameras_survives_a_thin_catalogue():
+    print("the roster prints without a state or a label")
+    thin = asset(None, state=None, products=[
+        ("Raw Video Data", "raw-video-data", "Rip", "rip-detection-results",
+         "thin-svc", None)])
+    rows = r.list_rip_cameras([thin, CAPITOLA], check_inventory=False)
+    check("a camera with no label is still listed", len(rows) == 1)
+    check("a null element count reads as zero, not a crash",
+          rows[0]["elements"] == 0)
+    check("nothing carrying rip means an empty roster, not an exit",
+          r.list_rip_cameras([CAPITOLA], check_inventory=False) == [])
+
+
+def test_sweep_isolates_each_camera():
+    print("one bad camera does not end the sweep")
+    calls = []
+
+    def fake_run(asset_arg, args):
+        label = r.dig(asset_arg, "data", "common", "label")
+        calls.append(label)
+        if "Corolla" in label:
+            # find_stills_service and friends exit rather than raise; a sweep
+            # that did not catch SystemExit would stop here with no summary.
+            raise SystemExit("no stills product on this camera")
+        if "Two Products" in label:
+            raise RuntimeError("connection reset")
+        return "1,234 rows"
+
+    original = r.run_for_camera
+    r.run_for_camera = fake_run
+    try:
+        class Args:
+            state = None
+        outcomes = r.sweep([CAPITOLA, COROLLA, WALTON, TWO_RIP], Args())
+    finally:
+        r.run_for_camera = original
+
+    check("every rip camera was attempted", len(calls) == 3, calls)
+    check("the camera with no rip product was never attempted",
+          "Capitola Wharf" not in calls)
+    statuses = {label: status for label, _, _, status in outcomes}
+    check("a SystemExit is recorded as a skip, not a crash",
+          statuses["Beachfront from Sailfish Street Beach Access, Corolla, NC"]
+          == "skipped: no stills product on this camera")
+    check("an exception is recorded with its type",
+          statuses["Two Products"] == "RuntimeError: connection reset")
+    check("the healthy camera still reports its rows",
+          statuses["Walton Lighthouse, Santa Cruz, CA"] == "1,234 rows")
+    check("the summary covers every camera", len(outcomes) == 3)
+
+
+def test_sweep_filters_by_state():
+    print("the sweep honours --state")
+    seen = []
+    original = r.run_for_camera
+    r.run_for_camera = lambda a, args: seen.append(
+        r.dig(a, "data", "common", "label")) or "ok"
+    try:
+        class Args:
+            state = "North Carolina"
+        r.sweep([COROLLA, WALTON, TWO_RIP], Args())
+    finally:
+        r.run_for_camera = original
+    check("only the matching state runs", len(seen) == 1, seen)
+    check("and it is the right one", "Corolla" in seen[0])
+
+
 def test_slugify():
     print("\nslugify")
     check("spaces and commas collapse",
@@ -432,5 +534,9 @@ if __name__ == "__main__":
     test_inventory_range()
     test_coverage_resumes()
     test_describe_json()
+    test_rip_cameras()
+    test_list_rip_cameras_survives_a_thin_catalogue()
+    test_sweep_isolates_each_camera()
+    test_sweep_filters_by_state()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     raise SystemExit(1 if FAILURES else 0)

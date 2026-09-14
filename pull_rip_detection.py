@@ -1,8 +1,9 @@
-"""Pull WebCOOS's own rip-detection product for the California cameras.
+"""Pull WebCOOS's own rip-detection product, on any camera that carries one.
 
-explore_webcoos_products.py already established that rip-detection-results
-exists on Walton Lighthouse, Santa Cruz (35,158 elements) under the
-raw-video-data feed. This script downloads it.
+explore_webcoos_products.py established that rip-detection-results exists on
+eight cameras nationally, under the raw-video-data feed. Walton Lighthouse,
+Santa Cruz (35,158 elements) is the largest and was the first pulled. This
+script downloads any of them, one at a time or all at once.
 
 It resolves the feed and product by SLUG, not by label. That matters:
 pywebcoos.API._get_camera_products compares
@@ -21,14 +22,22 @@ The output format of the rip product is not assumed. Run --probe first: it
 downloads a short window and reports what actually came down before any
 parsing is attempted.
 
-    python pull_rip_detection.py --list
-    python pull_rip_detection.py --inventory
-    python pull_rip_detection.py --coverage --start 2025-06-01 --end 2025-09-01
-    python pull_rip_detection.py --probe
-    python pull_rip_detection.py --pull --start 2025-06-01 --end 2025-09-01
+    python pull_rip_detection.py --list                 every rip camera
+    python pull_rip_detection.py --list --inventory     ...and when each has data
+    python pull_rip_detection.py --all-rip --inventory  same, one request each
+    python pull_rip_detection.py --camera Corolla --probe
+    python pull_rip_detection.py --all-rip --pull --match-observations
 
-Writes files under data/rip_detection/<camera-slug>/ and, when the payload is
-tabular, a combined CSV alongside them.
+Start with --list --inventory. The catalogued element count says how much data
+exists and never how much of the record it covers: Corolla's 10,239 elements
+sit in 46 populated bins of 818, so it looks a third of Walton's size and is
+really a few dense weeks. Decide what to pull from the populated share, not
+from the count.
+
+--all-rip runs any action once per camera and isolates each one, so a camera
+whose stills product is missing is reported and skipped rather than ending the
+sweep. Writes files under data/rip_detection/<camera-slug>/ and, when the
+payload is tabular, a combined CSV per camera alongside them.
 """
 
 import env  # noqa: F401  -- loads .env into os.environ
@@ -106,15 +115,56 @@ def slugify(text):
 # ---------------------------------------------------------------------------
 
 def load_assets(refresh=False):
-    """Assets list, from the local dump when present so re-runs are free."""
-    if refresh or not os.path.exists(RAW_DUMP):
-        resp = requests.get(f"{API_BASE}/assets/", headers=headers(), timeout=TIMEOUT)
-        resp.raise_for_status()
-        with open(RAW_DUMP, "w") as fh:
-            json.dump(resp.json(), fh, indent=2)
-        print(f"wrote {RAW_DUMP}")
-    with open(RAW_DUMP) as fh:
-        return json.load(fh).get("results", [])
+    """Every asset, paginated — not just the first page.
+
+    This used to GET /assets/ once and keep whatever came back. WebCOOS pages
+    that endpoint, so any camera past page one was invisible: asking this
+    script for a camera it could not see produced "No camera matching ...",
+    which reads as "that camera does not carry rip detection" and is not the
+    same thing. scan_cameras.fetch_assets already follows the pagination and
+    caches the complete list, so use it rather than keep a second, shorter
+    copy of the catalogue.
+    """
+    try:
+        from scan_cameras import fetch_assets
+    except ImportError as exc:  # pragma: no cover - dependency problem, not logic
+        print(f"  cannot import scan_cameras ({exc}); falling back to {RAW_DUMP}, "
+              "which holds only the first page of the catalogue")
+        if not os.path.exists(RAW_DUMP):
+            sys.exit(f"{RAW_DUMP} does not exist either — nothing to read.")
+        with open(RAW_DUMP) as fh:
+            return json.load(fh).get("results", [])
+    return fetch_assets(refresh=refresh)
+
+
+def rip_cameras(assets):
+    """Every camera carrying a rip-detection product, most elements first.
+
+    A camera with more than one rip product keeps the largest: the count is
+    what decides whether a pull is worth making, and the runner-up would
+    understate it.
+    """
+    found = []
+    for asset in assets:
+        label = dig(asset, "data", "common", "label")
+        best = None
+        for _, _, _, product_slug, service_slug, count in camera_products(asset):
+            if "rip" not in (product_slug or "").lower():
+                continue
+            entry = {
+                "label": label,
+                "slug": slugify(label),
+                "state": dig(asset, "data", "properties", "state_or_territory"),
+                "product_slug": product_slug,
+                "service_slug": service_slug,
+                "elements": int(count or 0),
+                "asset": asset,
+            }
+            if best is None or entry["elements"] > best["elements"]:
+                best = entry
+        if best is not None:
+            found.append(best)
+    return sorted(found, key=lambda c: -c["elements"])
 
 
 def camera_products(asset):
@@ -315,22 +365,42 @@ def inventory_range(frame):
     return min(starts), max(ends)
 
 
-def report_inventory(service_slug):
-    """Print what the inventory says, and return its (first, last)."""
+def inventory_stats(service_slug):
+    """What the inventory says, as numbers rather than printed lines.
+
+    `populated` is the one that decides whether a camera is worth pulling.
+    Corolla catalogues 10,239 elements and looks comparable to Walton's 35,158
+    until you see they sit in 46 populated bins of 818: the element count says
+    how much data exists, never how much of the record it covers.
+    """
     frame = fetch_inventory(service_slug)
     first, last = inventory_range(frame)
+    stats = {"first": first, "last": last, "elements": None,
+             "populated": None, "bins": None if frame is None else len(frame),
+             "stale_days": None}
+    if frame is not None and "Count" in frame.columns:
+        counts = pd.to_numeric(frame["Count"], errors="coerce").fillna(0)
+        stats["elements"] = int(counts.sum())
+        stats["populated"] = int((counts > 0).sum())
+    if last is not None:
+        stats["stale_days"] = int((pd.Timestamp.now(tz="UTC") - last).days)
+    return stats
+
+
+def report_inventory(service_slug):
+    """Print what the inventory says, and return its (first, last)."""
+    stats = inventory_stats(service_slug)
+    first, last = stats["first"], stats["last"]
     if first is None:
         print("  inventory gave no usable date range")
         return None, None
     print(f"  data runs {first:%Y-%m-%d %H:%M} to {last:%Y-%m-%d %H:%M} UTC")
-    if "Count" in frame.columns:
-        counts = pd.to_numeric(frame["Count"], errors="coerce").fillna(0)
-        populated = int((counts > 0).sum())
-        print(f"  {int(counts.sum()):,} elements across {populated} populated"
-              f" bins of {len(frame)}")
-    stale = (pd.Timestamp.now(tz="UTC") - last).days
-    if stale > 1:
-        print(f"  last data is {stale} days old — this product is not live")
+    if stats["elements"] is not None:
+        print(f"  {stats['elements']:,} elements across {stats['populated']} "
+              f"populated bins of {stats['bins']}")
+    if stats["stale_days"] and stats["stale_days"] > 1:
+        print(f"  last data is {stats['stale_days']} days old — "
+              "this product is not live")
     return first, last
 
 
@@ -802,6 +872,47 @@ def via_pywebcoos(camera_label, product_label, start, end, interval, save_dir):
 
 # ---------------------------------------------------------------------------
 
+def list_rip_cameras(assets, check_inventory=False):
+    """The national roster of cameras carrying rip detection.
+
+    The element count alone is misleading, so --list --inventory also asks each
+    service when it actually has data. That costs one request per camera and
+    turns "8 cameras carry the product" into "N of them are worth pulling".
+    """
+    cameras = rip_cameras(assets)
+    if not cameras:
+        print("No camera in the catalogue carries a rip-detection product.")
+        return cameras
+    print(f"{len(cameras)} of {len(assets)} cameras carry rip detection\n")
+    header = f"{'camera':<44} {'state':<16} {'elements':>9}"
+    if check_inventory:
+        header += f"  {'covers':<25} {'populated':>10} {'stale':>7}"
+    print(header)
+    print("-" * len(header))
+    for cam in cameras:
+        line = (f"{(cam['label'] or '?')[:44]:<44} "
+                f"{(cam['state'] or '?')[:16]:<16} {cam['elements']:>9,}")
+        if check_inventory:
+            stats = inventory_stats(cam["service_slug"])
+            cam["inventory"] = stats
+            if stats["first"] is None:
+                line += "  " + f"{'no inventory':<25} {'-':>10} {'-':>7}"
+            else:
+                span = f"{stats['first']:%Y-%m-%d} to {stats['last']:%Y-%m-%d}"
+                share = ("-" if not stats["bins"]
+                         else f"{stats['populated']}/{stats['bins']}")
+                stale = ("-" if stats["stale_days"] is None
+                         else f"{stats['stale_days']}d")
+                line += f"  {span:<25} {share:>10} {stale:>7}"
+        print(line)
+    if check_inventory:
+        print("\n'populated' is bins holding data out of bins in the record. A "
+              "camera\nwith a high element count in few bins covers a short "
+              "stretch densely,\nwhich joins to far fewer observation hours "
+              "than the raw count suggests.")
+    return cameras
+
+
 def list_cameras(assets, state="California"):
     for asset in assets:
         if state and dig(asset, "data", "properties", "state_or_territory") != state:
@@ -815,43 +926,14 @@ def list_cameras(assets, state="California"):
             print(f"    {feed_slug} / {product_slug}  ({count or 0:,} elements)")
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--camera", default=DEFAULT_CAMERA)
-    ap.add_argument("--start", help="UTC date, YYYY-MM-DD")
-    ap.add_argument("--end", help="UTC date, YYYY-MM-DD (exclusive)")
-    ap.add_argument("--interval", type=int, default=None,
-                    help="keep only elements on this minute spacing")
-    ap.add_argument("--list", action="store_true", help="list CA cameras and products")
-    ap.add_argument("--probe", action="store_true",
-                    help=f"download {PROBE_HOURS}h and describe the payload")
-    ap.add_argument("--pull", action="store_true", help="download the full range")
-    ap.add_argument("--refresh", action="store_true", help="re-fetch the asset catalogue")
-    ap.add_argument("--inventory", action="store_true",
-                    help="report when this product has data, and download nothing")
-    ap.add_argument("--coverage", action="store_true",
-                    help="enumerate the stills product to find the hours the "
-                         "camera was looking; downloads nothing")
-    ap.add_argument("--match-observations", action="store_true",
-                    help="use the window the observation CSVs already cover, "
-                         "so the pull joins to something")
-    ap.add_argument("--stills-product", default=None,
-                    help=f"product slug to use as denominator (default {STILLS_SLUG})")
-    ap.add_argument("--via-pywebcoos", action="store_true",
-                    help="use the library's download() instead of /elements/")
-    ap.add_argument("--workers", type=int, default=WORKERS,
-                    help=f"parallel downloads (default {WORKERS})")
-    args = ap.parse_args()
+def run_for_camera(asset, args):
+    """Do the requested action for one already-resolved camera.
 
-    assets = load_assets(args.refresh)
-    if args.list:
-        list_cameras(assets)
-        return
-    if not (args.probe or args.pull or args.via_pywebcoos or args.inventory
-            or args.coverage):
-        ap.error("choose one of --list, --inventory, --coverage, --probe, --pull")
-
-    asset = find_camera(assets, args.camera)
+    Split out of main() so that --all-rip can call it once per camera. Returns
+    a one-line status for the run summary; raising is left to the caller to
+    catch, because one camera with a missing stills product must not end a
+    national sweep.
+    """
     camera_label = dig(asset, "data", "common", "label")
     if args.coverage:
         service_slug, product_label = find_stills_service(asset, args.stills_product)
@@ -865,7 +947,9 @@ def main():
     print("\ninventory")
     first, last = report_inventory(service_slug)
     if args.inventory:
-        return
+        if first is None:
+            return "no inventory"
+        return f"{first:%Y-%m-%d} to {last:%Y-%m-%d}"
 
     end = (datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
            if args.end else None)
@@ -904,13 +988,13 @@ def main():
     if args.via_pywebcoos:
         via_pywebcoos(camera_label, product_label, start, end,
                       args.interval or 30, save_dir)
-        return
+        return "pywebcoos path"
 
     if args.coverage:
         print("  enumerating stills day by day (no downloads, resumable)")
         build_coverage(service_slug, start, end, os.path.join(
             OUT_DIR, f"coverage_{slugify(camera_label)}_hourly.csv"))
-        return
+        return "coverage written"
 
     rows = fetch_elements(service_slug, start, end, args.interval)
     if not rows:
@@ -921,7 +1005,7 @@ def main():
         else:
             print("The inventory gave no range either, so this product may be")
             print("catalogued but not actually served on this token.")
-        return
+        return "no elements in range"
     print(f"  first {rows[0]['timestamp']:%Y-%m-%d %H:%M}"
           f"  last {rows[-1]['timestamp']:%Y-%m-%d %H:%M} UTC")
 
@@ -931,6 +1015,102 @@ def main():
     stem = os.path.join(OUT_DIR, f"rip_{slugify(camera_label)}")
     table = build_table(got, stem + ".csv")
     hourly_summary(table, stem + "_hourly.csv")
+    return (f"{len(table):,} rows" if table is not None and len(table)
+            else "downloaded, no table")
+
+
+def sweep(assets, args):
+    """Run the chosen action across every camera carrying rip detection.
+
+    Each camera is isolated. A missing stills product, a service the token
+    cannot reach, or a network failure ends that camera and nothing else --
+    including SystemExit, which the single-camera helpers raise freely and
+    which would otherwise abandon the sweep partway with no summary of what
+    had already succeeded.
+    """
+    cameras = rip_cameras(assets)
+    if not cameras:
+        sys.exit("No camera in the catalogue carries a rip-detection product.")
+    if args.state:
+        cameras = [c for c in cameras if c["state"] == args.state]
+        if not cameras:
+            sys.exit(f"No rip camera in {args.state!r}.")
+
+    print(f"{len(cameras)} camera{'' if len(cameras) == 1 else 's'} "
+          "carrying rip detection\n")
+    outcomes = []
+    for index, cam in enumerate(cameras, 1):
+        banner = f"[{index}/{len(cameras)}] {cam['label']}  ({cam['state']})"
+        print(f"\n{'=' * 74}\n{banner}\n{'=' * 74}")
+        try:
+            status = run_for_camera(cam["asset"], args) or "done"
+        except SystemExit as exc:
+            status = f"skipped: {exc}"
+            print(f"  {status}")
+        except Exception as exc:
+            status = f"{type(exc).__name__}: {exc}"
+            print(f"  failed: {status}")
+        outcomes.append((cam["label"], cam["state"], cam["elements"], status))
+
+    print(f"\n{'=' * 74}\nSWEEP SUMMARY\n{'=' * 74}")
+    width = max(len(label or "") for label, _, _, _ in outcomes)
+    for label, state, elements, status in outcomes:
+        print(f"{(label or '?'):<{width}}  {(state or '?')[:14]:<14} "
+              f"{elements:>9,}  {status}")
+    return outcomes
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--camera", default=DEFAULT_CAMERA)
+    ap.add_argument("--start", help="UTC date, YYYY-MM-DD")
+    ap.add_argument("--end", help="UTC date, YYYY-MM-DD (exclusive)")
+    ap.add_argument("--interval", type=int, default=None,
+                    help="keep only elements on this minute spacing")
+    ap.add_argument("--list", action="store_true",
+                    help="list every camera carrying rip detection, nationally")
+    ap.add_argument("--state", default=None,
+                    help="with --list, show every product on every camera in "
+                         "this state instead of the rip roster")
+    ap.add_argument("--all-rip", action="store_true",
+                    help="run the chosen action once per rip-detection camera")
+    ap.add_argument("--probe", action="store_true",
+                    help=f"download {PROBE_HOURS}h and describe the payload")
+    ap.add_argument("--pull", action="store_true", help="download the full range")
+    ap.add_argument("--refresh", action="store_true", help="re-fetch the asset catalogue")
+    ap.add_argument("--inventory", action="store_true",
+                    help="report when this product has data, and download nothing")
+    ap.add_argument("--coverage", action="store_true",
+                    help="enumerate the stills product to find the hours the "
+                         "camera was looking; downloads nothing")
+    ap.add_argument("--match-observations", action="store_true",
+                    help="use the window the observation CSVs already cover, "
+                         "so the pull joins to something")
+    ap.add_argument("--stills-product", default=None,
+                    help=f"product slug to use as denominator (default {STILLS_SLUG})")
+    ap.add_argument("--via-pywebcoos", action="store_true",
+                    help="use the library's download() instead of /elements/")
+    ap.add_argument("--workers", type=int, default=WORKERS,
+                    help=f"parallel downloads (default {WORKERS})")
+    args = ap.parse_args()
+
+    assets = load_assets(args.refresh)
+    if args.list:
+        if args.state:
+            list_cameras(assets, args.state)
+        else:
+            list_rip_cameras(assets, check_inventory=args.inventory)
+        return
+    if not (args.probe or args.pull or args.via_pywebcoos or args.inventory
+            or args.coverage):
+        ap.error("choose one of --list, --inventory, --coverage, --probe, --pull")
+
+    if args.all_rip:
+        sweep(assets, args)
+        return
+
+    asset = find_camera(assets, args.camera)
+    run_for_camera(asset, args)
 
 
 if __name__ == "__main__":
