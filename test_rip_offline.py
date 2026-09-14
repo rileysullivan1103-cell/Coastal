@@ -494,6 +494,18 @@ def test_inventory_range():
           first3 is not None and str(last3).startswith("2025-05-09"), (first3, last3))
 
 
+def test_duration_format():
+    print("the progress line's clock")
+    check("seconds stay seconds", r._duration(5) == "5s")
+    check("minutes carry seconds", r._duration(75) == "1m15s")
+    check("hours carry minutes", r._duration(3700) == "1h01m")
+    check("a full day does not wrap", r._duration(86400) == "24h00m")
+    # The estimate is elapsed/index * remaining, which is negative for a
+    # moment on the last item if the clock jitters. A negative ETA printed as
+    # "-1s left" reads as a bug in the run rather than in the arithmetic.
+    check("a negative estimate clamps to zero", r._duration(-4) == "0s")
+
+
 def test_coverage_resumes():
     print("\nbuild_coverage resume")
     tmp = tempfile.mkdtemp()
@@ -570,6 +582,7 @@ if __name__ == "__main__":
     test_build_table_binary()
     test_build_table_mixed()
     test_inventory_range()
+    test_duration_format()
     test_coverage_resumes()
     test_describe_json()
     test_rip_cameras()

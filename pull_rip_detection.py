@@ -558,6 +558,16 @@ def _coverage_paths(out_csv):
     return out_csv, out_csv.replace(".csv", "_progress.csv")
 
 
+def _duration(seconds):
+    """h/m/s, for a progress line that has to be read at a glance."""
+    seconds = int(max(seconds, 0))
+    if seconds >= 3600:
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+    if seconds >= 60:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds}s"
+
+
 def load_progress(progress_csv):
     """Dates already enumerated, so a resumed run does not redo them."""
     if not os.path.exists(progress_csv):
@@ -588,6 +598,11 @@ def build_coverage(service_slug, start, end, out_csv):
     else:
         print(f"  {len(todo)} days to enumerate")
 
+    # Several hundred sequential days of paginated listing is indistinguishable
+    # from a hang unless the line says how far through it is and how long the
+    # rest will take. The rate is measured over this run rather than assumed:
+    # days differ enormously in how many pages they hold.
+    started = time.monotonic()
     for index, day in enumerate(todo, 1):
         label = day.strftime("%Y-%m-%d")
         rows = fetch_elements(service_slug, day, day + pd.Timedelta(days=1),
@@ -603,7 +618,10 @@ def build_coverage(service_slug, start, end, out_csv):
         pd.DataFrame([{"date": label, "images": len(rows)}]).to_csv(
             progress_csv, mode="a", header=not os.path.exists(progress_csv),
             index=False)
-        print(f"  {label}: {len(rows)} images  ({index}/{len(todo)})")
+        elapsed = time.monotonic() - started
+        left = (elapsed / index) * (len(todo) - index)
+        print(f"  {label}: {len(rows)} images  ({index}/{len(todo)}, "
+              f"{_duration(elapsed)} in, ~{_duration(left)} left)")
 
     if not os.path.exists(out_csv):
         print("  no imagery in that range at all")
