@@ -1,0 +1,413 @@
+"""Hygiene and pre-registration checks. No network.
+
+Every one of these is a bug that has either already happened in this project
+or is one line of carelessness away:
+
+  '<10' parsed to NaN and then dropped -- deletes the clean samples at a site
+  and keeps the dirty ones, so every beach looks worse than it is and the
+  rain coefficient inflates.
+
+  a non-detect set to zero -- same direction, via a different route.
+
+  a field replicate counted as a second sample -- inflates n, and n is the
+  number every coefficient in this study is reported beside.
+
+  a stratum added to the manifest after the coefficients were seen -- the
+  thing the whole pre-registration exists to prevent.
+
+    python wq/test_wq_offline.py
+"""
+
+import json
+import os
+import sys
+import tempfile
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from wq import clean, config, manifest, pull, strata  # noqa: E402
+
+FAILURES = []
+
+
+def check(name, condition, detail=""):
+    print(("  ok   " if condition else "  FAIL ") + name
+          + (f"  {detail}" if detail else ""))
+    if not condition:
+        FAILURES.append(name)
+
+
+# ---------------------------------------------------------------------------
+
+def test_value_parsing():
+    print("\ncensored and awkward values")
+    cases = {
+        "<10": (10.0, "below"),
+        "< 10": (10.0, "below"),
+        ">24196": (24196.0, "above"),
+        "2,400": (2400.0, ""),
+        "15.5": (15.5, ""),
+        "": (None, ""),
+        "ND": (None, ""),
+        10: (10.0, ""),
+    }
+    for raw, (expected, censoring) in cases.items():
+        value, mark = clean.parse_value(raw)
+        ok = (np.isnan(value) if expected is None else value == expected)
+        check(f"{raw!r} -> {expected}, {censoring!r}",
+              ok and mark == censoring, f"got {value}, {mark!r}")
+
+
+def test_nondetects_are_substituted_not_dropped():
+    print("\nnon-detects survive at DL/2 (B3)")
+    raw = pd.DataFrame({
+        pull.COL_STATION: ["S1"] * 4,
+        pull.COL_DATE: ["2024-06-01", "2024-06-02", "2024-06-03", "2024-06-04"],
+        pull.COL_ANALYTE: ["Enterococcus"] * 4,
+        pull.COL_VALUE: ["<10", "40", "", "100"],
+        pull.COL_UNIT: ["MPN/100mL"] * 4,
+        pull.COL_NONDETECT: [None, None, "Not Detected", None],
+        pull.COL_DETECTION_LIMIT: [np.nan, np.nan, 20.0, np.nan],
+    })
+    frame, log = clean.normalize(raw, clean.Log())
+    for step in (clean.drop_rejected, clean.drop_non_samples,
+                 clean.collapse_replicates, clean.drop_duplicates,
+                 clean.normalize_units, clean.substitute_nondetects,
+                 clean.add_log_value):
+        frame, log = step(frame, log)
+
+    check("all four samples survive", len(frame) == 4, f"kept {len(frame)}")
+    check("two flagged as non-detects", int(frame["nondetect"].sum()) == 2)
+    reported = dict(zip(frame["date"].dt.day, frame["value"]))
+    check("'<10' became 5.0, not 0 and not NaN", reported.get(1) == 5.0,
+          f"got {reported.get(1)}")
+    check("blank + 'Not Detected' + DL 20 became 10.0", reported.get(3) == 10.0,
+          f"got {reported.get(3)}")
+    check("no substituted value is zero", not (frame["value"] == 0).any())
+
+    shares = clean.nondetect_shares(frame)
+    check("non-detect fraction recorded per site/analyte",
+          abs(float(shares["nondetect_fraction"].iloc[0]) - 0.5) < 1e-9,
+          str(shares["nondetect_fraction"].tolist()))
+    check("50% is over the flag fraction", bool(shares["nondetect_flag"].iloc[0]))
+
+
+def test_over_range_is_kept():
+    print("\nover-range results survive (they land on the wet days)")
+    raw = pd.DataFrame({
+        pull.COL_STATION: ["S1", "S1"],
+        pull.COL_DATE: ["2024-06-01", "2024-06-02"],
+        pull.COL_ANALYTE: ["Enterococcus"] * 2,
+        pull.COL_VALUE: [">24196", "10"],
+        pull.COL_UNIT: ["MPN/100mL"] * 2,
+    })
+    frame, log = clean.normalize(raw, clean.Log())
+    frame, log = clean.normalize_units(frame, log)
+    frame, log = clean.substitute_nondetects(frame, log)
+    check("both rows kept", len(frame) == 2, f"kept {len(frame)}")
+    check("'>24196' kept at the limit", float(frame["value"].max()) == 24196.0)
+    check("flagged as over-range", int(frame["over_range"].sum()) == 1)
+
+
+def test_units_convert_but_estimators_do_not():
+    print("\nunits (B2)")
+    raw = pd.DataFrame({
+        pull.COL_STATION: ["S1"] * 4,
+        pull.COL_DATE: ["2024-06-0" + str(i) for i in range(1, 5)],
+        pull.COL_ANALYTE: ["Enterococcus"] * 4,
+        pull.COL_VALUE: ["10", "10", "10", "10"],
+        pull.COL_UNIT: ["MPN/100mL", "CFU/100mL", "cfu/mL", "furlongs"],
+    })
+    frame, log = clean.normalize(raw, clean.Log())
+    frame, log = clean.normalize_units(frame, log)
+    check("unrecognised unit dropped", len(frame) == 3, f"kept {len(frame)}")
+    values = sorted(frame["value"].tolist())
+    check("per-mL scaled by 100", values == [10.0, 10.0, 1000.0], str(values))
+    check("CFU and MPN both left at factor 1",
+          set(frame.loc[frame["unit_factor"] == 1.0, "estimator"]) == {"CFU", "MPN"})
+    counted = log.frame()
+    converted = counted[(counted["step"] == "units")
+                        & counted["detail"].str.startswith("converted")]
+    check("conversion count logged", int(converted["records"].iloc[0]) == 1,
+          str(converted["records"].tolist()))
+
+    shares = clean.nondetect_shares(
+        clean.add_log_value(clean.substitute_nondetects(frame, log)[0], log)[0])
+    check("mixed estimators flagged on the site", bool(shares["mixed_estimators"].iloc[0]))
+
+
+def test_rejected_and_replicates():
+    print("\nQA/QC codes and field replicates (B2)")
+    raw = pd.DataFrame({
+        pull.COL_STATION: ["S1"] * 5,
+        pull.COL_DATE: ["2024-06-01", "2024-06-01", "2024-06-02", "2024-06-03",
+                        "2024-06-04"],
+        pull.COL_TIME: ["09:00:00"] * 5,
+        pull.COL_ANALYTE: ["Enterococcus"] * 5,
+        pull.COL_VALUE: ["10", "30", "50", "70", "90"],
+        pull.COL_UNIT: ["MPN/100mL"] * 5,
+        pull.COL_STATUS: ["Final", "Final", "Rejected", "Final", "Final"],
+        pull.COL_ACTIVITY_TYPE: ["Sample-Routine",
+                                 "Quality Control Sample-Field Replicate",
+                                 "Sample-Routine", "Quality Control Sample-Blank",
+                                 "Sample-Routine"],
+    })
+    frame, log = clean.normalize(raw, clean.Log())
+    frame, log = clean.drop_rejected(frame, log)
+    check("rejected result dropped", len(frame) == 4, f"kept {len(frame)}")
+    frame, log = clean.drop_non_samples(frame, log)
+    check("blank dropped", len(frame) == 3, f"kept {len(frame)}")
+    frame, log = clean.collapse_replicates(frame, log)
+    check("replicate merged into its sample, not counted twice",
+          len(frame) == 2, f"kept {len(frame)}")
+    merged = frame.sort_values("date")["value_reported"].tolist()
+    check("merged pair averaged to 20", merged[0] == 20.0, str(merged))
+
+
+def test_exact_duplicates():
+    print("\nduplicate records (B2)")
+    raw = pd.DataFrame({
+        pull.COL_STATION: ["S1"] * 3,
+        pull.COL_DATE: ["2024-06-01"] * 3,
+        pull.COL_TIME: ["09:00:00"] * 3,
+        pull.COL_ANALYTE: ["Enterococcus"] * 3,
+        pull.COL_VALUE: ["10", "10", "20"],
+        pull.COL_UNIT: ["MPN/100mL"] * 3,
+    })
+    frame, log = clean.normalize(raw, clean.Log())
+    frame, log = clean.drop_duplicates(frame, log)
+    check("identical record dropped once", len(frame) == 2, f"kept {len(frame)}")
+    counted = log.frame()
+    row = counted[counted["step"] == "duplicates"]
+    check("duplicate count logged", int(row["records"].iloc[0]) == 1)
+
+
+def test_cross_source_dedup():
+    print("\nCA appears in both sources (B1)")
+    frame = pd.DataFrame({
+        "source": ["WQP", "CKAN", "CKAN"],
+        "station_id": ["W1", "C1", "C1"],
+        "analyte": ["ENT"] * 3,
+        "date": pd.to_datetime(["2024-06-01", "2024-06-01", "2024-06-02"]),
+        "value": [40.0, 40.0, 90.0],
+    })
+    sites = pd.DataFrame({"station_id": ["W1", "C1"],
+                          "lat": [33.0, 33.0005], "lon": [-117.3, -117.3]})
+    out, log = clean.dedupe_across_sources(frame, sites, clean.Log())
+    check("the duplicated reading is dropped once", len(out) == 2,
+          f"kept {len(out)}")
+    check("the CKAN-only reading survives",
+          set(out["value"]) == {40.0, 90.0}, str(sorted(out["value"])))
+    counted = log.frame()
+    co_located = counted[counted["detail"].str.contains("co-located")]
+    check("co-located stations reported",
+          int(co_located["records"].iloc[0]) == 1)
+
+
+def test_analyte_mapping():
+    print("\nanalyte names")
+    for name, expected in (("Enterococcus", "ENT"), ("Enterococci", "ENT"),
+                           ("Escherichia coli", "ECOLI"),
+                           ("Coliform, fecal", "FECAL"),
+                           ("Total Coliform", "TOTAL"),
+                           ("Nitrate", None)):
+        check(f"{name} -> {expected}", clean.analyte_key(name) == expected,
+              f"got {clean.analyte_key(name)}")
+
+
+def test_wqp_columns_match_the_existing_puller():
+    print("\nWQP column names agree with pull_wqp_results.py")
+    try:
+        import pull_wqp_results as legacy
+    except ImportError as exc:
+        print(f"  skip   pull_wqp_results not importable here ({exc})")
+        return
+    for mine, theirs in ((pull.COL_STATION, legacy.COL_STATION),
+                         (pull.COL_DATE, legacy.COL_DATE),
+                         (pull.COL_ANALYTE, legacy.COL_ANALYTE),
+                         (pull.COL_VALUE, legacy.COL_VALUE),
+                         (pull.COL_UNIT, legacy.COL_UNIT),
+                         (pull.COL_NONDETECT, legacy.COL_NONDETECT)):
+        check(f"{mine}", mine == theirs, f"theirs is {theirs}")
+
+
+def test_strata_are_metadata_only():
+    print("\nstrata assignment (A2)")
+    sites = pd.DataFrame([
+        {"station_id": "A", "station_name": "Storm Drain at 5th",
+         "site_type": "Ocean", "lat": 33.0, "lon": -117.3, "state": "CA"},
+        {"station_id": "B", "station_name": "Newport Harbor",
+         "site_type": "Estuary", "lat": 33.6, "lon": -117.9, "state": "CA"},
+        {"station_id": "C", "station_name": "Ocean Beach",
+         "site_type": "Great Lake", "lat": 41.9, "lon": -87.6, "state": "IL"},
+        {"station_id": "D", "station_name": "Gulf Shores",
+         "site_type": "Ocean", "lat": 30.2, "lon": -87.7, "state": "AL"},
+    ])
+    neighbours = pd.DataFrame([
+        {"lat": 33.0005, "lon": -117.3, "site_type": "Stream"},
+        {"lat": 40.0, "lon": -80.0, "site_type": "Facility"},
+    ])
+    out = strata.assign(sites, neighbours=neighbours, datums=pd.DataFrame(),
+                        overrides=pd.DataFrame())
+    regions = dict(zip(out["station_id"], out["region"]))
+    check("Pacific", regions["A"] == "Pacific", regions["A"])
+    check("Great Lakes beats the state code", regions["C"] == "Great Lakes",
+          regions["C"])
+    check("Gulf", regions["D"] == "Gulf", regions["D"])
+    check("Great Lakes site is fresh water",
+          out.loc[out["station_id"] == "C", "water_class"].iloc[0] == "fresh")
+
+    kinds = dict(zip(out["station_id"], out["beach_type"]))
+    check("storm drain wins over the Ocean site type",
+          kinds["A"] == "storm_drain_adjacent", str(kinds["A"]))
+    check("harbour reads as enclosed", kinds["B"] == "enclosed_bay", str(kinds["B"]))
+
+    fresh = dict(zip(out["station_id"], out["freshwater_input"]))
+    check("a stream 55 m away is freshwater input", fresh["A"] == "yes")
+    check("no stream nearby is 'no', not missing", fresh["B"] == "no")
+
+    check("watershed_area has no source and stays empty",
+          out["watershed_area_km2"].isna().all())
+    check("impervious_frac has no source and stays empty",
+          out["impervious_frac"].isna().all())
+
+    # The unchecked case: nothing supplied at all is NaN, never 'no'.
+    bare = strata.assign(sites, neighbours=pd.DataFrame(),
+                         datums=pd.DataFrame(), overrides=pd.DataFrame())
+    check("unchecked freshwater is NaN, not 'no'",
+          bare["freshwater_input"].isna().all(),
+          str(bare["freshwater_input"].tolist()))
+
+
+def test_tidal_range():
+    print("\ntidal range from CO-OPS datums")
+    sites = pd.DataFrame([
+        {"station_id": "A", "lat": 33.0, "lon": -117.3},
+        {"station_id": "B", "lat": 20.0, "lon": -60.0},
+    ])
+    datums = pd.DataFrame([{"station_id": "9410230", "lat": 33.01,
+                            "lon": -117.31, "mhhw": 1.62, "mllw": 0.0}])
+    values, gauges = strata.tidal_range(sites, datums)
+    check("nearest gauge supplies the range",
+          abs(float(values.iloc[0]) - 1.62) < 1e-9, str(values.iloc[0]))
+    check("gauge recorded", gauges.iloc[0] == "9410230")
+    check("a site 5,000 km away gets nothing", np.isnan(values.iloc[1]))
+
+
+def test_coverage_rule_drops_before_fitting():
+    print("\nthe A2 coverage rule (drop before, never add after)")
+    sites = pd.DataFrame([
+        {"station_id": str(i), "station_name": "Ocean Beach",
+         "site_type": "Ocean", "lat": 33.0 + i / 100, "lon": -117.3,
+         "state": "CA"} for i in range(10)
+    ])
+    out = strata.assign(sites, neighbours=pd.DataFrame(), datums=pd.DataFrame(),
+                        overrides=pd.DataFrame())
+    table = strata.coverage(out)
+    keeps = dict(zip(table["stratum"], table["keeps"]))
+    check("region survives", keeps["region"])
+    check("beach_type survives", keeps["beach_type"])
+    check("watershed_area is dropped for coverage", not keeps["watershed_area_km2"])
+    check("tidal_range is dropped when no datums were pulled",
+          not keeps["tidal_range_m"])
+
+    path = tempfile.mktemp(suffix=".json")
+    payload = manifest.write(out, path)
+    check("manifest records what was dropped and why",
+          "watershed_area_km2" in payload["strata"]["dropped_for_coverage"])
+    check("manifest carries a timestamp", bool(payload["written_at"]))
+    check("manifest carries the spec hash",
+          payload["spec_hash"] == config.spec_hash())
+    check("active strata exclude the dropped ones",
+          "watershed_area_km2" not in manifest.active_strata(payload))
+    os.remove(path)
+
+
+def test_manifest_guard_catches_a_moved_goalpost():
+    print("\nthe pre-registration guard")
+    sites = pd.DataFrame([{"station_id": "A", "station_name": "Ocean Beach",
+                           "site_type": "Ocean", "lat": 33.0, "lon": -117.3,
+                           "state": "CA"}])
+    out = strata.assign(sites, neighbours=pd.DataFrame(), datums=pd.DataFrame(),
+                        overrides=pd.DataFrame())
+    path = tempfile.mktemp(suffix=".json")
+    manifest.write(out, path)
+    check("a matching manifest authorises the fit",
+          manifest.require_manifest(path)["spec_hash"] == config.spec_hash())
+
+    # Move the goalpost the way a tempted analyst would: lower the sample
+    # floor until an interesting site qualifies.
+    original = config.MIN_SAMPLES_PER_SITE
+    config.MIN_SAMPLES_PER_SITE = 5
+    try:
+        caught = False
+        try:
+            manifest.require_manifest(path)
+        except SystemExit as exc:
+            caught = "config.py has changed" in str(exc)
+        check("lowering the sample floor after registration fails the run", caught)
+    finally:
+        config.MIN_SAMPLES_PER_SITE = original
+
+    # A manifest written with no station table cannot authorise a fit either.
+    bare = tempfile.mktemp(suffix=".json")
+    manifest.write(None, bare)
+    caught = False
+    try:
+        manifest.require_manifest(bare)
+    except SystemExit as exc:
+        caught = "never evaluated" in str(exc)
+    check("a manifest with no strata coverage cannot authorise a fit", caught)
+    os.remove(path)
+    os.remove(bare)
+
+
+def test_thresholds_file_is_readable_and_cited():
+    print("\nthresholds config (C4)")
+    with open(config.THRESHOLDS_PATH) as handle:
+        payload = json.load(handle)
+    check("a default block exists", "_default" in payload)
+    check("California is configured separately", "CA" in payload["states"])
+    for water_class in ("marine", "fresh"):
+        for analyte in config.ANALYTES:
+            entry = payload["_default"][water_class].get(analyte)
+            check(f"_default/{water_class}/{analyte} has a threshold",
+                  entry is not None and entry.get("threshold") is not None)
+            check(f"_default/{water_class}/{analyte} cites its basis",
+                  bool(entry and entry.get("basis")))
+    check("every entry is marked unverified until someone checks it",
+          payload["_default"]["_verified"] is False)
+    check("no threshold is hardcoded in fit.py",
+          "104" not in open(os.path.join(os.path.dirname(
+              os.path.abspath(__file__)), "fit.py")).read())
+
+
+def main():
+    for test in (test_value_parsing,
+                 test_nondetects_are_substituted_not_dropped,
+                 test_over_range_is_kept,
+                 test_units_convert_but_estimators_do_not,
+                 test_rejected_and_replicates,
+                 test_exact_duplicates,
+                 test_cross_source_dedup,
+                 test_analyte_mapping,
+                 test_wqp_columns_match_the_existing_puller,
+                 test_strata_are_metadata_only,
+                 test_tidal_range,
+                 test_coverage_rule_drops_before_fitting,
+                 test_manifest_guard_catches_a_moved_goalpost,
+                 test_thresholds_file_is_readable_and_cited):
+        test()
+    print()
+    if FAILURES:
+        print(f"{len(FAILURES)} FAILED: {', '.join(FAILURES)}")
+        return 1
+    print("all offline hygiene and pre-registration checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

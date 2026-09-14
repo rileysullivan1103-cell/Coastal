@@ -4,6 +4,44 @@ Site-discovery pipeline for coastal monitoring: find WebCOOS camera locations
 that also have a nearby NDBC buoy, a high-coverage NOAA precipitation station,
 and a water-quality station.
 
+## National water quality: wq/
+
+`wq/` is a separate study with its own question. The rest of this repo asks
+what drives one site; `wq/` asks **how much the coefficient varies between sites,
+and whether site type explains the variation** — fitting the same
+specification at every coastal station nationally that has enough data, and
+reporting the distribution rather than a headline number.
+
+```bash
+./wq/run_wq.sh --all
+```
+
+It reuses the pullers on this branch rather than repeating them: the WQP
+column names `pull_wqp_results.py` verified, `scan_cameras.get_with_retry`,
+`pull_observations`' CO-OPS and buoy pulls, `pull_site_observations`' ERA5 and
+wave model, and `analyze_drivers.spearman` / `demean_by` for the statistics —
+so the month control there and the month control here are the same code.
+
+Two things it adds that the rest of the pipeline does not have:
+
+**A pre-registration that fails the run.** `wq_manifest.json` is written before
+any model runs and hashes every pre-registered constant. Change the predictor
+list or the sample floor afterwards and `wq/fit.py` stops rather than fitting
+under a specification nobody wrote down.
+
+**An n assertion on every coefficient.** The `n` a fit reports is compared
+against the count of joined rows with both sides non-null, printed beside it,
+and a mismatch is fatal. That is the `n=730` bug, made impossible to repeat
+quietly.
+
+`fetch_marine()` in `pull_site_observations.py` grew an optional `return_cell`
+argument for this: the cell it lands on after nudging is by construction water,
+so the bearing to it estimates which way a beach faces. The default return
+shape is unchanged.
+
+See `wq/README.md` for the study design, the hygiene counts, and how to read
+the distribution.
+
 ## Setup
 
 ```bash

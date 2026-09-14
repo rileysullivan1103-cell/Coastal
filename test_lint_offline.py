@@ -98,7 +98,11 @@ def check_module(path):
 
 
 def main():
-    paths = sorted(p for p in glob.glob("*.py") if p != os.path.basename(__file__))
+    # wq/ is a package rather than a root-level script, and a module the
+    # checker cannot see is a module where a deleted constant survives to the
+    # user's terminal -- which is the exact bug this file exists for.
+    paths = sorted(p for p in glob.glob("*.py") + glob.glob("wq/*.py")
+                   if os.path.basename(p) != os.path.basename(__file__))
     print(f"checking {len(paths)} modules for undefined names\n")
     for path in paths:
         missing = check_module(path)

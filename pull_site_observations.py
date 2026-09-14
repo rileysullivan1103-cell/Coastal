@@ -123,8 +123,19 @@ def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
     return frame.sort_values("time").reset_index(drop=True), "ok"
 
 
-def fetch_marine(lat, lon, start, end, probe=False, models=None):
-    """Marine reanalysis, nudging seaward if the exact point is a land cell."""
+def fetch_marine(lat, lon, start, end, probe=False, models=None,
+                 return_cell=False):
+    """Marine reanalysis, nudging seaward if the exact point is a land cell.
+
+    With return_cell, also returns the coordinate that actually answered. That
+    cell is by construction water, so when the site's own cell was land the
+    bearing to it is a free estimate of which way the beach faces -- which is
+    what wq/covariates.py uses when nothing better is available. The default
+    keeps the original two-value shape, so existing callers are unaffected.
+    """
+    def done(frame, note, cell=None):
+        return (frame, note, cell) if return_cell else (frame, note)
+
     for nudge in MARINE_NUDGES:
         bearings = [(0, 0)] if nudge == 0 else MARINE_BEARINGS
         for dlat, dlon in bearings:
@@ -140,11 +151,11 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None):
                         km = nudge * 111
                         print(f"      exact point has no wave data; used a cell "
                               f"~{km:.0f} km away ({try_lat:.3f}, {try_lon:.3f})")
-                    return frame, "ok"
+                    return done(frame, "ok", (try_lat, try_lon))
             elif nudge == 0:
                 print(f"      at the site itself: {note}")
             time.sleep(0.2)
-    return None, "no ocean cell found within ~22 km"
+    return done(None, "no ocean cell found within ~22 km")
 
 
 MARINE_MODELS_TO_TRY = ("best_match", "era5_ocean", "ewam", "gwam",

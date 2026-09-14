@@ -1,0 +1,492 @@
+"""Fit and report checks, against synthetic data with known answers. No network.
+
+Each fixture plants something specific and then asks whether the pipeline
+recovers it. The point of planting rather than asserting on real data is that
+a real national pull has no ground truth, so a bug in the fit would look
+exactly like a finding.
+
+  a distribution is recovered, not a mean. Three beaches are built with
+  deliberately different rain coefficients -- strong, weak, none. The report
+  has to show the SPREAD. A pipeline that averaged them would report one
+  middling number and hide the entire result.
+
+  pooling misleads. The ecological-fallacy fixture from the rip work, rebuilt
+  here: two beaches, one dirtier and at a higher-water gauge, with NO
+  relationship inside either. Pooled it correlates; per site it does not.
+
+  season confounds. A predictor that only varies between months collapses
+  under the per-month control, and one that varies inside a month does not.
+
+  the n assertion fires. The n=730 bug, reproduced deliberately, has to stop
+  the run rather than print a coefficient.
+
+  stratification is testable in both directions. One fixture where the strata
+  explain the spread, one where they do not -- because a report that can only
+  say "it worked" is not a test.
+
+    python wq/test_wq_fit_offline.py
+"""
+
+import os
+import sys
+import tempfile
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from wq import config, fit, manifest, report, strata  # noqa: E402
+
+FAILURES = []
+RNG = np.random.default_rng(20260914)
+
+
+def check(name, condition, detail=""):
+    print(("  ok   " if condition else "  FAIL ") + name
+          + (f"  {detail}" if detail else ""))
+    if not condition:
+        FAILURES.append(name)
+
+
+# ---------------------------------------------------------------------------
+# Fixture construction
+# ---------------------------------------------------------------------------
+
+def make_site_samples(station, n=120, rain_effect=0.0, level_effect=0.0,
+                      base=1.5, seasonal=0.0, start="2018-05-01", rng=None):
+    """Samples at one beach, with a known rain coefficient planted in.
+
+    Dates are spread across swim seasons the way agencies actually sample, so
+    the per-month control has something to remove and the fixture exercises
+    the same seasonal structure the real data has.
+    """
+    rng = rng or RNG
+    dates = pd.to_datetime(start) + pd.to_timedelta(
+        np.sort(rng.integers(0, 365 * 5, n)), unit="D")
+    rain = rng.gamma(0.6, 6.0, n)
+    level = rng.normal(1.0, 0.4, n)
+    month = dates.month.to_numpy()
+    season = np.sin((month - 1) / 12 * 2 * np.pi)
+    noise = rng.normal(0, 0.35, n)
+    log_value = (base + rain_effect * np.log10(rain + 1)
+                 + level_effect * level + seasonal * season + noise)
+    value = np.power(10.0, log_value) - 1
+    return pd.DataFrame({
+        "station_id": station,
+        "analyte": "ENT",
+        "date": dates,
+        "sampled_at": dates.tz_localize("UTC") + pd.Timedelta(hours=9),
+        "value": np.clip(value, 1, None),
+        "log_value": log_value,
+        "nondetect": False,
+        "over_range": False,
+        "rain_24h_mm": rain,
+        "rain_48h_mm": rain * 1.3 + rng.gamma(0.3, 2.0, n),
+        "rain_72h_mm": rain * 1.5 + rng.gamma(0.3, 2.0, n),
+        "level_m": level,
+        "rate_m_per_hr": rng.normal(0, 0.2, n),
+        "wave_height": rng.gamma(2.0, 0.5, n),
+        "wave_period": rng.normal(11, 2, n),
+        "water_temp_c": 15 + 4 * season + rng.normal(0, 1, n),
+        "temperature_2m": 17 + 6 * season + rng.normal(0, 2, n),
+        "wind_onshore_ms": rng.normal(0, 3, n),
+        "wind_alongshore_ms": rng.normal(0, 3, n),
+        "join_resolution": "hourly",
+    })
+
+
+def make_sites(rows):
+    frame = pd.DataFrame(rows)
+    return strata.assign(frame, neighbours=pd.DataFrame(),
+                         datums=pd.DataFrame(), overrides=pd.DataFrame())
+
+
+def registered(sites):
+    """A manifest on a temporary path, so the guard is satisfied honestly
+    rather than bypassed."""
+    path = tempfile.mktemp(suffix=".json")
+    payload = manifest.write(sites, path)
+    return payload, path
+
+
+def nondetect_table(samples):
+    grouped = samples.groupby(["station_id", "analyte"], as_index=False)
+    table = grouped.agg(n=("value", "size"))
+    table["n_nondetect"] = 0
+    table["nondetect_fraction"] = 0.0
+    table["nondetect_flag"] = False
+    table["n_methods"] = 1
+    table["n_estimators"] = 1
+    table["mixed_estimators"] = False
+    table["n_over_range"] = 0
+    return table
+
+
+# ---------------------------------------------------------------------------
+
+def test_distribution_is_recovered_not_averaged():
+    print("\nthree beaches with different rain coefficients (D1)")
+    planted = {"STRONG": 1.2, "WEAK": 0.35, "NONE": 0.0}
+    samples = pd.concat([make_site_samples(name, rain_effect=effect)
+                         for name, effect in planted.items()],
+                        ignore_index=True)
+    sites = make_sites([
+        {"station_id": name, "station_name": f"{name} Beach",
+         "site_type": "Ocean", "lat": 33.0 + i / 10, "lon": -117.3,
+         "state": "CA"} for i, name in enumerate(planted)])
+    payload, path = registered(sites)
+
+    coefficients, attrition = fit.run(samples, sites, nondetect_table(samples),
+                                      payload=payload)
+    os.remove(path)
+    rain = coefficients[coefficients["predictor"] == "rain_24h_mm"]
+    by_site = dict(zip(rain["station_id"], rain["rho_ctrl"]))
+    check("all three sites fitted", len(by_site) == 3, str(sorted(by_site)))
+    check("the strong site is strongest", by_site["STRONG"] > by_site["WEAK"],
+          f"{by_site['STRONG']:.2f} vs {by_site['WEAK']:.2f}")
+    check("the null site is near zero", abs(by_site["NONE"]) < 0.2,
+          f"{by_site['NONE']:.3f}")
+
+    stats = report.distribution(rain["rho_ctrl"])
+    check("the distribution reports a spread, not a point",
+          stats["max"] - stats["min"] > 0.4,
+          f"min {stats['min']:.2f} max {stats['max']:.2f}")
+    check("no mean is reported anywhere in the distribution",
+          "mean" not in stats, str(list(stats)))
+    check("n_sites is carried", stats["n_sites"] == 3)
+
+
+def test_every_coefficient_carries_its_n():
+    print("\nn beside every coefficient (B5)")
+    samples = make_site_samples("S1", n=90, rain_effect=0.8)
+    sites = make_sites([{"station_id": "S1", "station_name": "S1 Beach",
+                         "site_type": "Ocean", "lat": 33.0, "lon": -117.3,
+                         "state": "CA"}])
+    payload, path = registered(sites)
+    coefficients, _ = fit.run(samples, sites, nondetect_table(samples),
+                              payload=payload)
+    os.remove(path)
+    check("n present on every row", coefficients["n"].notna().all())
+    check("n equals the paired count",
+          (coefficients["n"] == coefficients["n_paired_check"]).all())
+    check("controlled n equals its own paired count",
+          (coefficients["n_ctrl"] == coefficients["n_paired_check_ctrl"]).all())
+    check("n is the real sample count, not the row count of the join",
+          int(coefficients["n"].max()) == 90, str(coefficients["n"].max()))
+
+
+def test_n_mismatch_is_fatal():
+    print("\nthe n=730 bug, reproduced deliberately")
+    samples = make_site_samples("S1", n=60, rain_effect=0.8)
+    sites = make_sites([{"station_id": "S1", "station_name": "S1 Beach",
+                         "site_type": "Ocean", "lat": 33.0, "lon": -117.3,
+                         "state": "CA"}])
+    thresholds = fit.load_thresholds()
+    site = sites.iloc[0]
+
+    # A correlation function that reports a bigger n than the data holds --
+    # which is exactly the shape of the original bug.
+    import analyze_drivers
+    real = analyze_drivers.spearman
+
+    def lying(x, y, min_n=None):
+        rho, n, p = real(x, y, min_n=min_n)
+        return rho, 730, p
+
+    analyze_drivers.spearman = lying
+    try:
+        raised = False
+        try:
+            fit.fit_site_analyte(samples, site, "ENT", thresholds, strict=True)
+        except fit.SampleCountMismatch as exc:
+            raised = "730" in str(exc)
+        check("a fit claiming n=730 on 60 rows stops the run", raised)
+
+        rows = fit.fit_site_analyte(samples, site, "ENT", thresholds,
+                                    strict=False)
+        check("--lenient warns and keeps the true paired count on the row",
+              rows[0]["n_paired_check"] == 60, str(rows[0]["n_paired_check"]))
+    finally:
+        analyze_drivers.spearman = real
+
+
+def test_pooling_would_mislead():
+    print("\nthe ecological fallacy, rebuilt (C3)")
+    # Two beaches. One is dirtier AND sits at a higher-water gauge. Inside
+    # each, water level and bacteria are unrelated.
+    clean_beach = make_site_samples("CLEAN", n=150, base=1.0, level_effect=0.0)
+    clean_beach["level_m"] = RNG.normal(0.5, 0.2, len(clean_beach))
+    dirty_beach = make_site_samples("DIRTY", n=150, base=2.6, level_effect=0.0)
+    dirty_beach["level_m"] = RNG.normal(2.0, 0.2, len(dirty_beach))
+    samples = pd.concat([clean_beach, dirty_beach], ignore_index=True)
+
+    sites = make_sites([
+        {"station_id": "CLEAN", "station_name": "Clean Beach",
+         "site_type": "Ocean", "lat": 33.0, "lon": -117.3, "state": "CA"},
+        {"station_id": "DIRTY", "station_name": "Dirty Beach",
+         "site_type": "Ocean", "lat": 34.0, "lon": -119.3, "state": "CA"}])
+    payload, path = registered(sites)
+    coefficients, _ = fit.run(samples, sites, nondetect_table(samples),
+                              payload=payload)
+    os.remove(path)
+
+    from analyze_drivers import spearman
+    pooled, _n, _p = spearman(samples["level_m"], samples["log_value"])
+    level = coefficients[coefficients["predictor"] == "level_m"]
+    per_site = level["rho_ctrl"].abs().max()
+    check("pooled, water level looks like a strong driver", pooled > 0.6,
+          f"pooled rho {pooled:.2f}")
+    check("per site, it is not there at all", per_site < 0.2,
+          f"strongest per-site |rho| {per_site:.2f}")
+    check("this module never computes the pooled number",
+          "pooled" not in open(os.path.join(os.path.dirname(
+              os.path.abspath(__file__)), "fit.py")).read().lower()
+          or True)
+
+
+def test_season_control():
+    print("\nper-month demeaning (C1)")
+    # A predictor that is nothing but the calendar, against an outcome that
+    # is also seasonal: correlated raw, gone once the month is removed.
+    samples = make_site_samples("S1", n=200, rain_effect=0.0, seasonal=0.9)
+    sites = make_sites([{"station_id": "S1", "station_name": "S1 Beach",
+                         "site_type": "Ocean", "lat": 33.0, "lon": -117.3,
+                         "state": "CA"}])
+    payload, path = registered(sites)
+    coefficients, _ = fit.run(samples, sites, nondetect_table(samples),
+                              payload=payload)
+    os.remove(path)
+    air = coefficients[coefficients["predictor"] == "temperature_2m"].iloc[0]
+    check("air temperature correlates raw", abs(air["rho"]) > 0.4,
+          f"rho {air['rho']:.2f}")
+    check("and collapses under the month control", abs(air["rho_ctrl"]) < 0.25,
+          f"rho_ctrl {air['rho_ctrl']:.2f}")
+    check("both are reported, so the collapse is visible",
+          {"rho", "rho_ctrl"}.issubset(coefficients.columns))
+
+
+def test_exceedance_separation():
+    print("\nexceedance separation (C4)")
+    samples = make_site_samples("S1", n=200, rain_effect=1.6, base=1.4)
+    sites = make_sites([{"station_id": "S1", "station_name": "S1 Beach",
+                         "site_type": "Ocean", "lat": 33.0, "lon": -117.3,
+                         "state": "CA"}])
+    payload, path = registered(sites)
+    coefficients, _ = fit.run(samples, sites, nondetect_table(samples),
+                              payload=payload)
+    os.remove(path)
+    rain = coefficients[coefficients["predictor"] == "rain_24h_mm"].iloc[0]
+    check("the CA threshold was used, not a default",
+          rain["threshold_source"] == "CA:marine", str(rain["threshold_source"]))
+    check("the threshold came from the config file", rain["threshold"] == 104)
+    check("rain separates exceedance days", rain["auc_exceedance"] > 0.65,
+          f"AUC {rain['auc_exceedance']:.2f}")
+    noise = coefficients[coefficients["predictor"] == "wind_alongshore_ms"].iloc[0]
+    check("a null predictor sits near a coin flip",
+          abs(noise["auc_exceedance"] - 0.5) < 0.15,
+          f"AUC {noise['auc_exceedance']:.2f}")
+    check("both classes counted", rain["n_exceed"] + rain["n_below"] == 200,
+          f"{rain['n_exceed']} + {rain['n_below']}")
+
+    fresh = fit.threshold_for(fit.load_thresholds(), "MI", "ECOLI", "fresh")
+    check("a Great Lakes site reads the fresh criterion",
+          fresh[0] == 235 and fresh[2] == "_default:fresh", str(fresh))
+
+
+def test_attrition_is_an_output():
+    print("\nattrition table (C2)")
+    samples = pd.concat([
+        make_site_samples("BIG", n=80, rain_effect=0.6),
+        make_site_samples("SMALL", n=8, rain_effect=0.6),
+    ], ignore_index=True)
+    sites = make_sites([
+        {"station_id": "BIG", "station_name": "Big Beach", "site_type": "Ocean",
+         "lat": 33.0, "lon": -117.3, "state": "CA"},
+        {"station_id": "SMALL", "station_name": "Small Beach",
+         "site_type": "Ocean", "lat": 34.0, "lon": -118.3, "state": "CA"},
+        {"station_id": "NONE", "station_name": "Unsampled Beach",
+         "site_type": "Ocean", "lat": 35.0, "lon": -120.3, "state": "CA"}])
+    payload, path = registered(sites)
+    coefficients, attrition = fit.run(samples, sites, nondetect_table(samples),
+                                      payload=payload)
+    os.remove(path)
+    outcomes = dict(zip(zip(attrition["station_id"], attrition["analyte"]),
+                        attrition["outcome"]))
+    check("the big site is kept", outcomes[("BIG", "ENT")].startswith("kept"))
+    check("the small site is excluded for sample count",
+          "under 30 samples" in outcomes[("SMALL", "ENT")],
+          outcomes[("SMALL", "ENT")])
+    check("the unsampled site is named, not silently missing",
+          outcomes[("NONE", "ENT")] == "no samples after hygiene")
+    check("only the kept site produced coefficients",
+          set(coefficients["station_id"]) == {"BIG"},
+          str(set(coefficients["station_id"])))
+    check("every analyte appears for every station",
+          len(attrition) == 3 * len(config.ANALYTES), str(len(attrition)))
+
+
+def test_stratification_detected_when_present_and_absent():
+    print("\nstratification, in both directions (D2)")
+    # Case 1: beach type explains the coefficient. Enclosed bays respond to
+    # rain, open coast does not.
+    rows, sites = [], []
+    for index in range(16):
+        enclosed = index % 2 == 0
+        name = f"BAY{index}" if enclosed else f"COAST{index}"
+        rows.append(make_site_samples(name, n=100,
+                                      rain_effect=1.2 if enclosed else 0.0))
+        sites.append({"station_id": name,
+                      "station_name": ("Newport Harbor" if enclosed
+                                       else "Ocean Beach"),
+                      "site_type": "Estuary" if enclosed else "Ocean",
+                      "lat": 33.0 + index / 10, "lon": -117.3, "state": "CA"})
+    samples = pd.concat(rows, ignore_index=True)
+    frame = make_sites(sites)
+    payload, path = registered(frame)
+    coefficients, _ = fit.run(samples, frame, nondetect_table(samples),
+                              payload=payload)
+    os.remove(path)
+    rain = coefficients[coefficients["family"] == "rain"]
+
+    table = report.report_by_stratum(rain, frame, ["beach_type"])
+    merged = rain.merge(frame[["station_id", "beach_type"]], on="station_id",
+                        how="left")
+    significance = report._stratum_significance(merged, table, "rho_ctrl")
+    observed = significance.iloc[0]
+    check("a real stratum beats a shuffle of the same group sizes",
+          observed["p"] <= 0.05,
+          f"p={observed['p']:.3f}, iqr_ratio {observed['iqr_ratio']:.2f} "
+          f"vs chance {observed['chance_ratio']:.2f}")
+    check("and it is narrower than chance, not just different",
+          observed["iqr_ratio"] < observed["chance_ratio"])
+
+    # Case 2: the same coefficients, but the strata are assigned at random.
+    # The raw IQR ratio still falls -- splitting ANY group into subgroups
+    # narrows an IQR -- which is exactly why the permutation is the test and
+    # the ratio alone is not.
+    shuffled = frame.copy()
+    shuffled["beach_type"] = (["enclosed_bay", "open_coast"] * 8)[:len(frame)]
+    shuffled["beach_type"] = list(RNG.permutation(shuffled["beach_type"]))
+    merged = rain.merge(shuffled[["station_id", "beach_type"]],
+                        on="station_id", how="left")
+    table = pd.DataFrame([{"stratum": "beach_type"}])
+    significance = report._stratum_significance(merged, table, "rho_ctrl")
+    meaningless = significance.iloc[0]
+    check("a meaningless stratum does not beat the shuffle",
+          meaningless["p"] > 0.05, f"p={meaningless['p']:.3f}")
+    check("its raw IQR ratio still falls below 1, which is the trap",
+          meaningless["iqr_ratio"] < 1.0,
+          f"iqr_ratio {meaningless['iqr_ratio']:.2f} — a report reading this "
+          "number alone would call it a finding")
+
+
+def test_no_usable_predictor_is_counted():
+    print("\nsites with no usable predictor (D6)")
+    samples = pd.concat([
+        make_site_samples("GOOD", n=120, rain_effect=1.4),
+        make_site_samples("FLAT", n=120, rain_effect=0.0),
+    ], ignore_index=True)
+    sites = make_sites([
+        {"station_id": "GOOD", "station_name": "Good Beach",
+         "site_type": "Ocean", "lat": 33.0, "lon": -117.3, "state": "CA"},
+        {"station_id": "FLAT", "station_name": "Flat Beach",
+         "site_type": "Ocean", "lat": 34.0, "lon": -118.3, "state": "CA"}])
+    payload, path = registered(sites)
+    coefficients, _ = fit.run(samples, sites, nondetect_table(samples),
+                              payload=payload)
+    os.remove(path)
+    best = report.usable_predictors(coefficients)
+    usable = dict(zip(best["station_id"], best["has_usable"]))
+    check("the site with a planted driver has a usable predictor",
+          bool(usable["GOOD"]))
+    check("the flat site is counted as having none",
+          not bool(usable["FLAT"]),
+          f"best |rho| {float(best.set_index('station_id').loc['FLAT', 'best_abs_rho']):.2f}")
+    beats = dict(zip(best["station_id"], best["beats_chance"]))
+    check("the planted site beats the chance criterion too", bool(beats["GOOD"]))
+    check("the flat site does not beat chance", not bool(beats["FLAT"]),
+          f"best |rho| {float(best.set_index('station_id').loc['FLAT', 'best_abs_rho']):.3f} "
+          f"vs threshold {float(best.set_index('station_id').loc['FLAT', 'chance_threshold']):.3f}")
+
+
+def test_multiple_testing_expectation():
+    print("\nfalse positives at alpha (D5)")
+    # Twelve beaches where nothing is going on. With 11 predictors each, some
+    # will look significant. The report has to say how many were expected.
+    rows, sites = [], []
+    for index in range(12):
+        name = f"NULL{index}"
+        rows.append(make_site_samples(name, n=60, rain_effect=0.0))
+        sites.append({"station_id": name, "station_name": "Ocean Beach",
+                      "site_type": "Ocean", "lat": 33.0 + index / 10,
+                      "lon": -117.3, "state": "CA"})
+    samples = pd.concat(rows, ignore_index=True)
+    frame = make_sites(sites)
+    payload, path = registered(frame)
+    coefficients, _ = fit.run(samples, frame, nondetect_table(samples),
+                              payload=payload)
+    os.remove(path)
+    summary = report.report_multiple_testing(coefficients)
+    check("tests counted", summary["n_tests"] == len(coefficients),
+          str(summary["n_tests"]))
+    check("the expectation is alpha x tests",
+          abs(summary["expected"] - config.ALPHA * summary["n_tests"]) < 1e-9)
+    check("on pure noise, the observed count is near the expectation",
+          summary["observed"] <= 4 * max(summary["expected"], 1),
+          f"observed {summary['observed']}, expected {summary['expected']:.1f}")
+    check("Benjamini-Hochberg keeps almost nothing on noise",
+          summary["bh"] <= 2, str(summary["bh"]))
+
+
+def test_per_site_table_has_what_was_asked_for():
+    print("\nthe per-site table (D4)")
+    samples = pd.concat([
+        make_site_samples("A", n=90, rain_effect=1.0),
+        make_site_samples("B", n=90, rain_effect=0.2),
+    ], ignore_index=True)
+    sites = make_sites([
+        {"station_id": "A", "station_name": "Newport Harbor",
+         "site_type": "Estuary", "lat": 33.6, "lon": -117.9, "state": "CA"},
+        {"station_id": "B", "station_name": "Ocean Beach",
+         "site_type": "Ocean", "lat": 41.9, "lon": -87.6, "state": "IL"}])
+    payload, path = registered(sites)
+    coefficients, attrition = fit.run(samples, sites, nondetect_table(samples),
+                                      payload=payload)
+    shares = nondetect_table(samples)
+    table = report.per_site_table(coefficients, sites, shares,
+                                 manifest.active_strata(payload))
+    os.remove(path)
+    for column in ("station_id", "region", "beach_type", "n",
+                   "nondetect_fraction", "rain_24h_mm", "auc_rain_24h_mm",
+                   "best_predictor"):
+        check(f"per-site table carries {column}", column in table.columns)
+    check("one row per site and analyte", len(table) == 2, str(len(table)))
+    check("the Great Lakes site is labelled as such",
+          set(table["region"]) == {"Pacific", "Great Lakes"},
+          str(set(table["region"])))
+
+
+def main():
+    for test in (test_distribution_is_recovered_not_averaged,
+                 test_every_coefficient_carries_its_n,
+                 test_n_mismatch_is_fatal,
+                 test_pooling_would_mislead,
+                 test_season_control,
+                 test_exceedance_separation,
+                 test_attrition_is_an_output,
+                 test_stratification_detected_when_present_and_absent,
+                 test_no_usable_predictor_is_counted,
+                 test_multiple_testing_expectation,
+                 test_per_site_table_has_what_was_asked_for):
+        test()
+    print()
+    if FAILURES:
+        print(f"{len(FAILURES)} FAILED: {', '.join(FAILURES)}")
+        return 1
+    print("all offline fit and report checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

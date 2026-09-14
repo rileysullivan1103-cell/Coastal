@@ -1,0 +1,26 @@
+# Hand-classified sites. Anything here beats the automatic assignment in
+# wq/strata.py, which is keyword matching and proximity proxies -- a beach
+# somebody has actually looked at is better evidence than either.
+#
+# station_id must be the WQP MonitoringLocationIdentifier (or the CKAN
+# StationCode for a California-only site), exactly as it appears in
+# data/wq/stations.csv.
+#
+# Any of these columns may be filled in; leave the rest empty:
+#   beach_type         open_coast | enclosed_bay | storm_drain_adjacent
+#   freshwater_input   yes | no
+#   outfall_present    yes | no
+#   tidal_range_m      metres, MHHW - MLLW
+#   watershed_area_km2 upstream drainage area
+#   impervious_frac    0-1
+#   region             Pacific | Atlantic | Gulf | Great Lakes
+#   shore_normal_deg   compass bearing you face looking out to sea. This is
+#                      the one the wind predictors need, and the rip pipeline
+#                      has already shown what a wrong one costs: Santa Cruz
+#                      was computed on 180 degrees until CDIP MOP published
+#                      206, so every onshore figure there was off by 26.
+#
+# The file ships empty on purpose. A stratum filled in from a map rather than
+# from a site visit belongs here too -- but write down which, because a
+# coefficient stratified on a guess is a coefficient stratified on a guess.
+station_id,beach_type,freshwater_input,outfall_present,tidal_range_m,watershed_area_km2,impervious_frac,region,shore_normal_deg
