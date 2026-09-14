@@ -140,8 +140,100 @@ def test_as_float():
     check("garbage becomes None", s._as_float("n/a") is None)
 
 
+def qualification_fixture():
+    """Four cameras, each failing a different requirement, plus one that passes.
+
+    Written as literal cells rather than built from a loop so that what each
+    row is testing stays readable.
+    """
+    return pd.DataFrame([
+        # everything present
+        {"camera": "complete", "buoy_id": "46236", "tide_id": "9413450",
+         "wq_within_2km": True, "precip_id": "GHCND:USC00048558"},
+        # gauge is the only gap -- this is the row --weather grid rescues
+        {"camera": "no gauge", "buoy_id": "46236", "tide_id": "9413450",
+         "wq_within_2km": True, "precip_id": None},
+        # bacteria station exists but sits outside the 2 km radius
+        {"camera": "bacteria too far", "buoy_id": "46236", "tide_id": "9413450",
+         "wq_within_2km": False, "precip_id": "GHCND:USC00048558"},
+        # nothing offshore
+        {"camera": "no buoy", "buoy_id": None, "tide_id": "9413450",
+         "wq_within_2km": True, "precip_id": "GHCND:USC00048558"},
+        # fails two at once, so it is evidence against neither on its own
+        {"camera": "no buoy or gauge", "buoy_id": None, "tide_id": "9413450",
+         "wq_within_2km": True, "precip_id": None},
+    ])
+
+
+def test_missing_sources():
+    print("which requirement a camera fails")
+    table = qualification_fixture()
+    rows = {r["camera"]: r for _, r in table.iterrows()}
+    check("a complete camera is missing nothing",
+          s.missing_sources(rows["complete"]) == [])
+    check("a camera with no gauge fails on precipitation",
+          s.missing_sources(rows["no gauge"]) == ["precipitation"])
+    check("under the grid that same camera fails nothing",
+          s.missing_sources(rows["no gauge"], weather="grid") == [])
+    check("a bacteria station at 9 km is not coverage",
+          s.missing_sources(rows["bacteria too far"]) == ["water quality"])
+    check("the grid does not rescue a water quality gap",
+          s.missing_sources(rows["bacteria too far"], weather="grid")
+          == ["water quality"])
+    check("two gaps are both reported",
+          s.missing_sources(rows["no buoy or gauge"]) == ["buoy", "precipitation"])
+    # NaN is what an id becomes after a round trip through a CSV, and `is None`
+    # does not catch it.
+    nan_row = {"buoy_id": float("nan"), "tide_id": "9413450",
+               "wq_within_2km": True, "precip_id": "GHCND:X"}
+    check("a NaN id counts as absent, not present",
+          s.missing_sources(nan_row) == ["buoy"])
+
+
+def test_qualify_by_weather_source():
+    print("what swapping the gauge for the grid buys")
+    table = qualification_fixture()
+    gauge = s.qualify(table, "gauge")
+    grid = s.qualify(table, "grid")
+    check("one camera qualifies on the gauge", int(gauge["qualifies"].sum()) == 1)
+    check("two qualify on the grid", int(grid["qualifies"].sum()) == 2)
+    check("the one it rescues is the gauge-only failure",
+          list(grid[grid["qualifies"]]["camera"]) == ["complete", "no gauge"])
+    check("the missing column names the gap",
+          gauge.set_index("camera").loc["no gauge", "missing"] == "precipitation")
+    check("and is empty where nothing is missing",
+          gauge.set_index("camera").loc["complete", "missing"] == "")
+    check("the input frame is not mutated",
+          "qualifies" not in table.columns)
+    try:
+        s.qualify(table, "accuweather")
+    except ValueError:
+        check("an unknown weather source is refused", True)
+    else:
+        check("an unknown weather source is refused", False,
+              "no ValueError raised")
+
+
+def test_gate_cost():
+    print("what each requirement costs on its own")
+    cost = s.gate_cost(qualification_fixture())
+    check("precipitation alone blocks one camera", cost["precipitation"] == 1)
+    check("water quality alone blocks one", cost["water quality"] == 1)
+    check("buoy alone blocks one", cost["buoy"] == 1)
+    check("tide blocks none", cost["tide"] == 0)
+    # The double-failure row must not be counted against either gate: relaxing
+    # one of them would not qualify that camera, so charging it to both would
+    # overstate what the change buys.
+    check("a camera failing two is charged to neither",
+          cost["buoy"] + cost["precipitation"] == 2)
+    check("every requirement is reported, even the free ones",
+          set(cost) == set(s.REQUIREMENTS))
+
+
 def main():
-    for test in (test_coordinate_order, test_nearest, test_load_cameras, test_as_float):
+    for test in (test_coordinate_order, test_nearest, test_load_cameras,
+                 test_as_float, test_missing_sources,
+                 test_qualify_by_weather_source, test_gate_cost):
         test()
         print()
     if FAILURES:

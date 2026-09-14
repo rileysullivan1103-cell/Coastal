@@ -127,6 +127,47 @@ def check_gridded_rain_windows():
     print("gridded hourly rain windows OK")
 
 
+def check_gridded_site_lists():
+    import pull_gridded_weather as g
+
+    california = pd.DataFrame([
+        {"camera_name": "Walton Lighthouse", "lat": 36.96, "lon": -122.00,
+         "has_all_four": True},
+        {"camera_name": "Point Reyes", "lat": 38.00, "lon": -122.98,
+         "has_all_four": False},
+    ])
+    national = pd.DataFrame([
+        {"camera": "Corolla Sailfish", "state": "North Carolina",
+         "lat": 36.37, "lon": -75.83, "qualifies": True},
+        {"camera": "Somewhere Dry", "state": "Florida",
+         "lat": 26.94, "lon": -80.07, "qualifies": False},
+    ])
+
+    ca = g.load_sites(california)
+    assert list(ca["camera_name"]) == ["Walton Lighthouse"], list(ca["camera_name"])
+    nat = g.load_sites(national)
+    assert list(nat["camera_name"]) == ["Corolla Sailfish"], list(nat["camera_name"])
+    assert list(nat.columns) == ["camera_name", "lat", "lon"], list(nat.columns)
+
+    # A list with no qualification column is somebody's hand-picked set. Using
+    # it whole is right; quietly returning nothing would look like a bad filter.
+    plain = g.load_sites(pd.DataFrame([{"camera": "Manual", "lat": 1.0, "lon": 2.0}]))
+    assert len(plain) == 1, len(plain)
+
+    for bad, why in (
+        (pd.DataFrame([{"name": "x", "lat": 1.0, "lon": 2.0}]), "no name column"),
+        (pd.DataFrame([{"camera": "x", "lat": 1.0}]), "no lon column"),
+    ):
+        try:
+            g.load_sites(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{why} was accepted")
+
+    print("gridded site lists OK")
+
+
 def check_wind_circular_maths():
     """Direction is circular. Ordinary arithmetic on degrees is wrong in ways
     that look plausible: 359 and 1 differ by 2, and their mean is 0, not 180."""
@@ -165,5 +206,6 @@ if __name__ == "__main__":
     check_tide_state()
     check_wind_parsing()
     check_gridded_rain_windows()
+    check_gridded_site_lists()
     check_wind_circular_maths()
     print("\nAll offline pull assertions passed.")

@@ -596,6 +596,83 @@ Water quality previously shared the precipitation radius. It has its own
 constant, `MAX_WQ_DISTANCE_KM`, because 30 km was letting a station anywhere in
 the same town qualify a site.
 
+## Widening the funnel: which requirement is actually shut
+
+    python scan_cameras.py                    # rainfall must come from a gauge
+    python scan_cameras.py --weather grid     # rainfall comes from Open-Meteo
+    python scan_cameras.py --rip-only --weather grid
+
+A camera qualifies on four sources: a buoy within 50 km, a tide gauge within
+50 km, a bacteria station within **2 km**, and precipitation within 30 km. The
+run used to print only how many cleared all four, which says nothing about
+*which* requirement is doing the excluding — so relaxing one was guesswork.
+
+Every run now prints both totals and a per-requirement cost:
+
+```
+N/86 qualify with a GHCND rain gauge
+M/86 qualify with gridded precipitation (+K)
+
+what each requirement is costing ON ITS OWN
+(cameras failing that one and nothing else — the rest fail several)
+  water quality   ...
+  precipitation   ...
+```
+
+`gate_cost()` counts only cameras failing **exactly one** requirement. A camera
+with no buoy *and* no gauge is not evidence against either: relaxing one would
+not qualify it, and charging it to both would overstate what the change buys.
+
+### Why the grid may be dropped in as a gate, and why it is not a lower bar
+
+`--weather grid` removes precipitation from the gate entirely, because
+Open-Meteo's ERA5 archive answers on a latitude and longitude — there is no
+station to be absent, stale, or 30 km inland. `pull_gridded_weather.py` already
+supplies it for every analysed site; the gate was requiring a *second*,
+redundant rainfall source and failing cameras that have perfectly good rainfall.
+
+It is also not obviously the worse number. `compare_precip_sources.py` found the
+gauge measuring the wrong place at two of the seven California sites —
+Carpinteria's is **Juncal Dam**, inland and up in the Santa Ynez range, and
+Sausalito's is **Muir Woods**, in a coastal redwood canyon — both collecting
+orographic rain that a beach a few kilometres away never sees. Where a gauge
+sits well above its grid cell, the gauge is the one in the wrong place.
+
+The nearest gauge is still recorded in every row either way, so
+`compare_precip_sources.py` keeps working. Only the gate changes.
+
+### Why not AccuWeather or the Weather Channel
+
+Both are commercial APIs behind a key, with short free retention and terms that
+restrict storing or redistributing the series. Neither publishes a multi-decade
+hourly archive on an arbitrary coordinate. Open-Meteo does, needs no key, and is
+already wired in — for hourly rainfall at a point, a commercial forecast API
+would be a downgrade paid for with a signup.
+
+### What the grid does not rescue
+
+Water quality. A bacteria station has to be **at** the beach the camera
+watches, so no gridded product substitutes for it, and nationally it is the
+requirement that excludes the most cameras — 68 of 86 have one within 2 km,
+and the four-source count is 58. The rain gauge is worth perhaps ten cameras;
+the 2 km bacteria radius is worth eighteen. In California specifically the
+gauge is worth **nothing**: all three non-qualifying cameras (Crescent City,
+Humboldt Bay/Arcata, Point Reyes) fail on water quality and have a rain gauge
+already.
+
+### Feeding the wider list forward
+
+`pull_gridded_weather.py` reads `candidate_sites_ranked.csv` (the California
+run) by default and `camera_candidates.csv` (the national scan) with `--sites`:
+
+    python pull_gridded_weather.py --sites camera_candidates.csv
+
+`load_sites()` accepts either column convention — `camera_name`/`has_all_four`
+or `camera`/`qualifies` — and a list carrying neither qualification column is
+used whole, on the grounds that it is a hand-picked set rather than a scan.
+Running `--weather grid` and then not pulling the grid would qualify cameras on
+a promise nothing kept.
+
 ## Scoring
 
 `combined_score` is `has_all_four` minus a distance term, so qualifying sites

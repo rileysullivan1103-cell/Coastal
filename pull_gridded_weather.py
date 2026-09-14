@@ -17,6 +17,13 @@ No API key. Free for non-commercial use.
 
     python pull_gridded_weather.py
     python pull_gridded_weather.py --probe    one site, print the raw schema
+    python pull_gridded_weather.py --sites camera_candidates.csv
+
+The default site list is the California run's candidate_sites_ranked.csv.
+--sites takes the national scan's camera_candidates.csv instead, which is the
+point of running scan_cameras.py --weather grid: that mode qualifies cameras
+on the understanding that their rainfall comes from here, and this is the step
+that actually fetches it.
 """
 
 import env  # noqa: F401  -- loads .env into os.environ
@@ -30,6 +37,11 @@ import requests
 
 ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
 SITES_CSV = "candidate_sites_ranked.csv"
+# The two site lists name the same columns differently: find_candidate_sites.py
+# writes camera_name/has_all_four, scan_cameras.py writes camera/qualifies.
+# Reading either by name beats maintaining two pullers.
+NAME_COLUMNS = ("camera_name", "camera")
+QUALIFY_COLUMNS = ("has_all_four", "qualifies")
 OUT_DIR = "data"
 DAYS_BACK = 365
 
@@ -122,15 +134,42 @@ def add_rain_windows(df):
     return out.reset_index()
 
 
+def load_sites(frame):
+    """Normalise either site list to name/lat/lon, keeping only qualifiers.
+
+    A list with no qualification column at all is used whole rather than
+    silently emptied — that is a hand-written list of sites, not a scan.
+    """
+    name_col = next((c for c in NAME_COLUMNS if c in frame.columns), None)
+    if name_col is None:
+        raise ValueError(
+            f"no camera name column; expected one of {NAME_COLUMNS}, "
+            f"got {list(frame.columns)}")
+    missing = [c for c in ("lat", "lon") if c not in frame.columns]
+    if missing:
+        raise ValueError(f"site list is missing {missing}")
+
+    qual_col = next((c for c in QUALIFY_COLUMNS if c in frame.columns), None)
+    if qual_col is not None:
+        frame = frame[frame[qual_col].astype(bool)]
+    out = frame.rename(columns={name_col: "camera_name"})
+    return out[["camera_name", "lat", "lon"]].reset_index(drop=True)
+
+
 def main():
     probe = "--probe" in sys.argv
-    if not os.path.exists(SITES_CSV):
-        sys.exit(f"{SITES_CSV} not found — run find_candidate_sites.py first.")
+    sites_csv = SITES_CSV
+    if "--sites" in sys.argv:
+        sites_csv = sys.argv[sys.argv.index("--sites") + 1]
+    if not os.path.exists(sites_csv):
+        sys.exit(f"{sites_csv} not found — run find_candidate_sites.py "
+                 f"(or scan_cameras.py) first.")
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    sites = pd.read_csv(SITES_CSV)
-    if "has_all_four" in sites.columns:
-        sites = sites[sites["has_all_four"]]
+    sites = load_sites(pd.read_csv(sites_csv))
+    print(f"{len(sites)} qualifying sites from {sites_csv}")
+    if sites.empty:
+        sys.exit("Nothing to pull.")
     if probe:
         sites = sites.head(1)
 

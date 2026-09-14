@@ -22,9 +22,12 @@ cameras already done.
     python scan_cameras.py --limit 5          # try it on five cameras first
     python scan_cameras.py                    # the whole country
     python scan_cameras.py --rip-only         # only cameras carrying rip detection
+    python scan_cameras.py --weather grid     # rainfall from Open-Meteo, not a gauge
     python scan_cameras.py --refresh          # ignore the cache
 
-Writes camera_candidates.csv, ranked.
+Writes camera_candidates.csv, ranked. The run reports the qualifying count
+under BOTH precipitation sources and what each requirement costs on its own,
+so which gate is actually holding the funnel shut is visible without a re-run.
 """
 
 import env  # noqa: F401  -- loads .env into os.environ
@@ -447,6 +450,81 @@ def scan(cameras, buoys, tide_stations, token, cache, refresh):
     return pd.DataFrame(results)
 
 
+# ---------------------------------------------------------------------------
+# Qualification
+# ---------------------------------------------------------------------------
+
+# Two ways to satisfy the precipitation requirement, and they are not equally
+# restrictive. A GHCND gauge has to exist, be within MAX_PRECIP_KM, clear the
+# datacoverage floor and still be reporting. Open-Meteo's ERA5 archive answers
+# on a latitude and longitude, so under "grid" every camera has hourly rainfall
+# by construction and precipitation stops being a gate at all.
+#
+# That is a widening of the funnel, not a lowering of the bar. compare_precip_
+# sources.py already found the gauge measuring the wrong place at two of the
+# seven California sites — Carpinteria's is Juncal Dam, up in the Santa Ynez
+# range, and Sausalito's is Muir Woods, in a redwood canyon — both collecting
+# orographic rain no beach a few km away ever sees. Where a gauge sits well
+# above its grid cell, dropping it loses nothing worth keeping.
+#
+# The nearest gauge is still recorded either way. Only the gate changes.
+WEATHER_SOURCES = ("gauge", "grid")
+
+REQUIREMENTS = ("buoy", "tide", "water quality", "precipitation")
+
+
+def _present(value):
+    """True when a cell actually holds an id rather than None or NaN."""
+    if value is None:
+        return False
+    try:
+        return not pd.isna(value)
+    except (TypeError, ValueError):
+        return True
+
+
+def missing_sources(row, weather="gauge"):
+    """Which requirements this camera fails, in report order."""
+    gaps = []
+    if not _present(row.get("buoy_id")):
+        gaps.append("buoy")
+    if not _present(row.get("tide_id")):
+        gaps.append("tide")
+    # A bacteria station 9 km away is recorded but is not coverage of this
+    # beach, so the presence of wq_id is the wrong test — wq_within_2km is.
+    if not bool(row.get("wq_within_2km")):
+        gaps.append("water quality")
+    if weather == "gauge" and not _present(row.get("precip_id")):
+        gaps.append("precipitation")
+    return gaps
+
+
+def qualify(table, weather="gauge"):
+    """Add `missing` and `qualifies` for the chosen precipitation source."""
+    if weather not in WEATHER_SOURCES:
+        raise ValueError(f"weather must be one of {WEATHER_SOURCES}, got {weather!r}")
+    out = table.copy()
+    gaps = [missing_sources(row, weather) for _, row in out.iterrows()]
+    out["missing"] = [", ".join(g) for g in gaps]
+    out["qualifies"] = [not g for g in gaps]
+    return out
+
+
+def gate_cost(table):
+    """Cameras each requirement is costing ON ITS OWN.
+
+    A camera missing three sources is not evidence against any one of them, so
+    only cameras that fail exactly one requirement are counted. That is the
+    number that answers "what would relaxing this buy me".
+    """
+    cost = {gate: 0 for gate in REQUIREMENTS}
+    for _, row in table.iterrows():
+        gaps = missing_sources(row, weather="gauge")
+        if len(gaps) == 1:
+            cost[gaps[0]] += 1
+    return cost
+
+
 def main():
     ap = argparse.ArgumentParser(description="Scan WebCOOS cameras for nearby data sources.")
     ap.add_argument("--limit", type=int, help="scan only the first N cameras")
@@ -455,6 +533,11 @@ def main():
     ap.add_argument("--state", help="restrict to one state or territory")
     ap.add_argument("--refresh", action="store_true",
                     help="ignore the cache and re-fetch everything")
+    ap.add_argument("--weather", choices=WEATHER_SOURCES, default="gauge",
+                    help=f"gauge: require a GHCND rain gauge within "
+                         f"{MAX_PRECIP_KM} km (default). grid: take "
+                         f"precipitation from Open-Meteo, which answers on any "
+                         f"coordinate, so it stops being a requirement.")
     args = ap.parse_args()
 
     token = os.environ.get("NOAA_CDO_TOKEN")
@@ -487,34 +570,57 @@ def main():
                         + table["wq_within_2km"].astype(int)
                         + table["precip_id"].notna().astype(int))
     table["instrumentable"] = table["sources"] == 4
-    table = table.sort_values(["has_rip", "sources", "wq_km"],
-                              ascending=[False, False, True])
+    table = qualify(table, args.weather)
+    table = table.sort_values(["has_rip", "qualifies", "sources", "wq_km"],
+                              ascending=[False, False, False, True])
     table.to_csv(OUT_CSV, index=False)
+    report(table, args.weather)
+    print(f"\nwrote {OUT_CSV}")
 
-    print(f"\n{'=' * 74}\nRESULTS\n{'=' * 74}")
+
+def report(table, weather):
+    print(f"\n{'=' * 74}\nRESULTS  (precipitation from the {weather})\n{'=' * 74}")
     print(f"{int(table['wq_within_2km'].sum())}/{len(table)} cameras have a bacteria "
           f"station within {MAX_WQ_KM} km")
     print(f"{int(table['wq_id'].notna().sum())}/{len(table)} have one within "
           f"{WQ_QUERY_KM} km")
-    print(f"{int(table['instrumentable'].sum())}/{len(table)} have all four sources")
 
-    cols = ["camera", "state", "sources", "wq_km", "buoy_km", "precip_km", "tide_km"]
+    # Both gates, always, so the cost of requiring a gauge is visible rather
+    # than something you would have to re-run the scan to discover.
+    by_gauge = int(qualify(table, "gauge")["qualifies"].sum())
+    by_grid = int(qualify(table, "grid")["qualifies"].sum())
+    print(f"\n{by_gauge}/{len(table)} qualify with a GHCND rain gauge")
+    print(f"{by_grid}/{len(table)} qualify with gridded precipitation "
+          f"({by_grid - by_gauge:+d})")
+
+    print("\nwhat each requirement is costing ON ITS OWN")
+    print("(cameras failing that one and nothing else — the rest fail several)")
+    for gate, count in sorted(gate_cost(table).items(), key=lambda kv: -kv[1]):
+        print(f"  {gate:<15} {count}")
+
+    cols = ["camera", "state", "sources", "wq_km", "buoy_km", "precip_km",
+            "tide_km", "missing"]
     rip = table[table["has_rip"]]
     if not rip.empty:
-        print(f"\n--- cameras carrying rip detection ({len(rip)}) ---")
-        with pd.option_context("display.width", 200, "display.max_columns", 20):
+        ready = int(rip["qualifies"].sum())
+        print(f"\n--- cameras carrying rip detection ({len(rip)}, "
+              f"{ready} fully instrumented) ---")
+        with pd.option_context("display.width", 220, "display.max_columns", 20):
             print(rip[cols].to_string(index=False))
 
-    full = table[table["instrumentable"]]
+    full = table[table["qualifies"]]
     if not full.empty:
-        print(f"\n--- every camera with all four sources ({len(full)}) ---")
-        with pd.option_context("display.width", 200, "display.max_columns", 20):
+        print(f"\n--- every qualifying camera ({len(full)}) ---")
+        with pd.option_context("display.width", 220, "display.max_columns", 20):
             print(full[["camera", "state", "has_rip", "wq_km", "buoy_km",
                         "precip_km", "tide_km"]].to_string(index=False))
 
-    print(f"\nwrote {OUT_CSV}")
-    print(f"Water quality is the binding constraint — it is required within "
-          f"{MAX_WQ_KM} km, the others at {MAX_PRECIP_KM}-{MAX_BUOY_KM} km.")
+    worst = max(gate_cost(table).items(), key=lambda kv: kv[1])
+    if worst[1]:
+        plural = "camera fails" if worst[1] == 1 else "cameras fail"
+        print(f"Binding constraint: {worst[0]} — {worst[1]} {plural} on it "
+              f"alone. Water quality is required within {MAX_WQ_KM} km, the "
+              f"others at {MAX_PRECIP_KM}-{MAX_BUOY_KM} km.")
 
 
 if __name__ == "__main__":
