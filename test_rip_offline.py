@@ -180,6 +180,43 @@ def test_find_camera():
         check("unknown camera exits", True)
 
 
+def test_find_camera_by_slug():
+    print("resolving one of two cameras that share a substring")
+    hampton = asset("Beachfront from Hampton Inn, Corolla, NC",
+                    state="North Carolina", products=[
+        ("Raw Video Data", "raw-video-data", "Rip", "rip-detection-results",
+         "hampton-rip", 10766)])
+    sailfish = asset("Beachfront from Sailfish Street Beach Access, Corolla, NC",
+                     state="North Carolina", products=[
+        ("Raw Video Data", "raw-video-data", "Rip", "rip-detection-results",
+         "sailfish-rip", 10239)])
+    both = [hampton, sailfish]
+
+    check("the slug picks one out of an ambiguous pair",
+          r.find_camera(both, "beachfront-from-hampton-inn-corolla-nc") is hampton)
+    check("and the other one",
+          r.find_camera(both, "beachfront-from-sailfish-street-beach-access-corolla-nc")
+          is sailfish)
+    check("an exact label still wins",
+          r.find_camera(both, "Beachfront from Hampton Inn, Corolla, NC") is hampton)
+    check("a unique substring still works",
+          r.find_camera(both, "Sailfish") is sailfish)
+
+    # The whole point of the message is that you can paste something out of it.
+    try:
+        r.find_camera(both, "Corolla")
+    except SystemExit as exc:
+        text = str(exc)
+        check("an ambiguous name names both slugs",
+              "beachfront-from-hampton-inn-corolla-nc" in text
+              and "beachfront-from-sailfish-street-beach-access-corolla-nc" in text,
+              text)
+        check("and points at --all-rip as the other way out",
+              "--all-rip" in text)
+    else:
+        check("an ambiguous name is refused", False, "no SystemExit")
+
+
 def test_find_rip_service():
     print("\nfind_rip_service")
     svc, label = r.find_rip_service(WALTON)
@@ -522,6 +559,7 @@ def test_describe_json():
 if __name__ == "__main__":
     test_slugify()
     test_find_camera()
+    test_find_camera_by_slug()
     test_find_rip_service()
     test_flatten_real_record()
     test_flatten_no_detection()

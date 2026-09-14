@@ -533,12 +533,25 @@ California seven, the conditions come from `pull_site_observations.py`, which
 works from a coordinate rather than a site list and splits its sources by what
 exists there:
 
-    python scan_cameras.py --rip-only --weather grid       # what each one has
-    python pull_site_observations.py --camera "Corolla"    # buoy, tide, ERA5, marine
-    python pull_rip_detection.py --camera Corolla --inventory
-    python pull_rip_detection.py --camera Corolla --coverage --start ... --end ...
-    python pull_rip_detection.py --camera Corolla --pull --match-observations
+    python scan_cameras.py --rip-only --weather grid        # what each one has
+    python pull_site_observations.py --camera "Corolla"     # ERA5, marine, buoy, tide
+    python pull_rip_detection.py --camera <slug> --inventory
+    python pull_rip_detection.py --camera <slug> --coverage
+    python pull_rip_detection.py --camera <slug> --pull --match-observations
     python analyze_drivers.py --target rip --site <slug>
+
+`--coverage` and `--pull` need no dates: with neither `--start` nor `--end` the
+run takes the last year the inventory says the product actually covers, which
+is what you want and is not what "now" would give you.
+
+**Name the camera by slug.** `--camera` takes a label, a slug, or a unique
+substring, and a substring is often not unique — Corolla has *two* rip cameras,
+`beachfront-from-hampton-inn-corolla-nc` and
+`beachfront-from-sailfish-street-beach-access-corolla-nc`, so `--camera Corolla`
+cannot mean anything on its own. An ambiguous name now prints the slugs rather
+than the labels, so the fix is a paste. The slug is also what
+`analyze_drivers.py --site` takes and what the output directories are named
+after: one identifier across the pipeline.
 
 `analyze_drivers.py` globs `data/**/rip_*_hourly.csv`, so a newly pulled camera
 appears in the run without any list to edit. Do not skip `--coverage`: without

@@ -186,10 +186,24 @@ def camera_products(asset):
 
 
 def find_camera(assets, name):
-    """Exact label match, else a unique case-insensitive substring match."""
+    """Resolve a camera by label, by slug, or by a unique substring.
+
+    The slug is accepted because substrings are not always unique and a label
+    is awkward to type: Corolla has TWO rip cameras, "Beachfront from Hampton
+    Inn, Corolla, NC" and "Beachfront from Sailfish Street Beach Access,
+    Corolla, NC", so --camera Corolla cannot mean anything on its own. The slug
+    is also what analyze_drivers.py --site takes and what the output
+    directories are named after, so one identifier now works across the whole
+    pipeline.
+    """
     labels = [dig(a, "data", "common", "label") or "" for a in assets]
     for asset, label in zip(assets, labels):
         if label == name:
+            return asset
+    wanted = slugify(name)
+    for asset, label in zip(assets, labels):
+        if slugify(label) == wanted:
+            print(f"camera {name!r} -> {label!r}")
             return asset
     hits = [(a, l) for a, l in zip(assets, labels) if name.lower() in l.lower()]
     if len(hits) == 1:
@@ -197,8 +211,11 @@ def find_camera(assets, name):
         return hits[0][0]
     if not hits:
         sys.exit(f"No camera matching {name!r}. Run --list to see the names.")
-    sys.exit("Ambiguous camera name; matches:\n  " +
-             "\n  ".join(l for _, l in hits))
+    # Print the slugs, not just the labels: an ambiguous match is only useful
+    # if the message hands you something you can paste straight back in.
+    sys.exit(f"{name!r} matches {len(hits)} cameras. Pass one of these slugs "
+             "to --camera, or use --all-rip to do every one:\n  " +
+             "\n  ".join(f"{slugify(l):<56} {l}" for _, l in hits))
 
 
 def find_service(asset, exact_slug, hint, label="product"):
