@@ -359,6 +359,99 @@ def coastline_sanity(lines, join_tolerance_m=JOIN_TOLERANCE_M):
     return True, f"{joins} two-way junction(s) all chain head to tail{extra}"
 
 
+def stitch_ways(lines, join_tolerance_m=JOIN_TOLERANCE_M):
+    """Join ways that chain head-to-tail into continuous polylines.
+
+    OpenStreetMap splits a shoreline into many short ways -- an estuary shore
+    is hundreds of them, a few hundred metres each. Every covariate that WALKS
+    along the shore has to follow that chain, and the first version did not:
+    it walked within one way and gave up at its end. shore_normal needs only
+    +/-250 m and usually fits inside a single way, so it worked; curvature
+    needs +/-1000 m and embayment +/-2000 m, so on real linework they came
+    back empty at 89% and 95% of stations. That is not the geography, it is
+    this function having been missing.
+
+    Only nodes where EXACTLY two way-ends meet are joined, and only when one
+    is an end and the other a start. A fork is left alone: there is no single
+    continuation, and inventing one would put a made-up shoreline into the
+    curvature.
+
+    Direction is preserved, which is the whole point -- land stays on the
+    left of the result.
+    """
+    usable = [line for line in lines if len(line) >= 2]
+    if not usable:
+        return []
+
+    # Cluster the endpoints, exactly as the direction check does, so the two
+    # agree about what a junction is.
+    ends = []
+    for index, line in enumerate(usable):
+        ends.append((line[0], index, False))
+        ends.append((line[-1], index, True))
+    parent = list(range(len(ends)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(ends)):
+        for j in range(i + 1, len(ends)):
+            if math.hypot(ends[i][0][0] - ends[j][0][0],
+                          ends[i][0][1] - ends[j][0][1]) <= join_tolerance_m:
+                a, b = find(i), find(j)
+                if a != b:
+                    parent[a] = b
+
+    clusters = {}
+    for i in range(len(ends)):
+        clusters.setdefault(find(i), []).append(ends[i])
+
+    successor = {}
+    predecessor = {}
+    for members in clusters.values():
+        if len(members) != 2:
+            continue
+        (_p1, i1, end1), (_p2, i2, end2) = members
+        if i1 == i2 or end1 == end2:
+            continue          # a closed ring meeting itself, or a reversal
+        tail, head = (i1, i2) if end1 else (i2, i1)
+        if tail in successor or head in predecessor:
+            continue
+        successor[tail] = head
+        predecessor[head] = tail
+
+    def chain_from(start):
+        points = list(usable[start])
+        seen = {start}
+        current = start
+        while current in successor:
+            nxt = successor[current]
+            if nxt in seen:
+                break                      # a closed loop; stop where it began
+            points.extend(usable[nxt][1:])  # the shared node is already there
+            seen.add(nxt)
+            current = nxt
+        return points, seen
+
+    stitched, visited = [], set()
+    # Heads first, so an open chain comes out whole rather than in pieces.
+    for start in range(len(usable)):
+        if start in visited or start in predecessor:
+            continue
+        points, used = chain_from(start)
+        stitched.append(points)
+        visited |= used
+    for start in range(len(usable)):
+        if start not in visited:            # a ring with no head at all
+            points, used = chain_from(start)
+            stitched.append(points)
+            visited |= used
+    return stitched
+
+
 def _walk(line, start_index, start_t, distance_m):
     """Point `distance_m` along a polyline from a position on it.
 

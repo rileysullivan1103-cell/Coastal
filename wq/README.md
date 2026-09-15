@@ -207,6 +207,19 @@ wrong. Nodes of degree three or more are counted and reported, never judged.
 > precisely because a check that cannot fail is worse than no check: it gets
 > read as evidence.
 
+**The ways are stitched into chains first.** OpenStreetMap splits a shoreline
+into many short ways — an estuary shore is hundreds of them, a few hundred
+metres each — and every covariate that *walks* along the shore has to follow
+that chain. `shore_normal` walks ±250 m and usually stays inside one way;
+`curvature` walks ±1000 m and `embayment` ±2000 m, so on real linework they
+ran off the end of a way and returned nothing. Against Rhode Island that was
+`shore_normal` at 116/120 while curvature managed 13 and embayment 6.
+`stitch_ways()` joins only nodes where **exactly two** way-ends meet, one an
+end and one a start — a fork is left alone, because there is no single
+continuation and inventing one would put a made-up shoreline into the
+curvature. Stitching runs *after* the direction check, which reads the ways as
+they arrived; otherwise it would hide the very defect that check looks for.
+
 **The queries go through a grid index.** Every land/water sample takes the
 nearest coastline segment, and the covariates make roughly eleven hundred
 samples per station — 288 for `land_fraction`, the rest for the tangent,

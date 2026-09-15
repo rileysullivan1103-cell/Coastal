@@ -320,6 +320,61 @@ def test_fetch_sees_a_spit_thinner_than_a_step():
     check("the other way is open to the cap", distances["S"] == 25.0)
 
 
+def test_the_walk_follows_the_chain_across_ways():
+    """OSM splits a shoreline into many short ways, and the walk has to follow.
+
+    Run against Rhode Island, shore_normal populated 116 of 120 stations while
+    curvature managed 13 and embayment 6. That is not geography -- they read
+    the same linework. shore_normal walks +/-250 m and usually stays inside a
+    single OSM way; curvature walks +/-1000 m and embayment +/-2000 m, and an
+    estuary shore is hundreds of ways a few hundred metres long, so the walk
+    ran off the end of one and gave up.
+    """
+    print("\nwalking along a shoreline that OSM split into pieces")
+    whole = bay()                       # one closed ring, radius 3 km
+    points = whole[0]
+    pieces = [points[i:i + 16 + 1] for i in range(0, len(points) - 1, 16)]
+    check("the fixture really is split", len(pieces) > 30, f"{len(pieces)} ways")
+
+    curvature, _radius = geo.curvature_per_km(pieces, (2995.0, 0.0))
+    check("curvature cannot be had from the pieces alone", curvature is None)
+    check("nor can embayment",
+          geo.embayment_ratio(pieces, (2995.0, 0.0)) is None)
+
+    stitched = geo.stitch_ways(pieces)
+    check("the pieces stitch back into one chain", len(stitched) == 1,
+          f"{len(stitched)} chain(s)")
+    curvature, radius = geo.curvature_per_km(stitched, (2995.0, 0.0))
+    check("and the bay's curvature comes back as -1/R",
+          near(curvature, -0.3333, 0.002), str(curvature))
+    check("with the radius recovered", near(radius, 3000.0, 5.0), str(radius))
+    check("embayment too",
+          near(geo.embayment_ratio(stitched, (2995.0, 0.0)), 0.9275, 0.01))
+
+    # A fork has no single continuation, and inventing one would put a
+    # made-up shoreline into the curvature.
+    fork = [[(0.0, -2000.0), (0.0, 0.0)],
+            [(0.0, 0.0), (-2000.0, 1500.0)],
+            [(0.0, 0.0), (2000.0, 1500.0)]]
+    check("a node where three ways meet is not stitched through",
+          len(geo.stitch_ways(fork)) == 3, f"{len(geo.stitch_ways(fork))}")
+
+    # Two ways meeting end-to-end are a reversal, not a chain.
+    reversed_pair = [[(0.0, -2000.0), (0.0, 0.0)],
+                     [(0.0, 2000.0), (0.0, 0.0)]]
+    check("and neither is a reversed junction",
+          len(geo.stitch_ways(reversed_pair)) == 2)
+
+    # Direction is the whole point: land has to stay on the left.
+    north = [[(0.0, -2000.0), (0.0, 0.0)], [(0.0, 0.0), (0.0, 2000.0)]]
+    joined = geo.stitch_ways(north)
+    check("the stitched chain keeps the ways' direction",
+          joined[0][0] == (0.0, -2000.0) and joined[0][-1] == (0.0, 2000.0),
+          str(joined[0]))
+    check("so land is still on the left",
+          geo.is_land((-500.0, 0.0), joined) is True)
+
+
 def test_closed_rings_wrap():
     print("\nclosed ways wrap instead of running out")
     lines = bay()
@@ -764,6 +819,7 @@ def main():
                  test_a_far_away_defect_does_not_void_the_whole_tile,
                  test_the_index_answers_exactly_what_the_scan_would,
                  test_fetch_sees_a_spit_thinner_than_a_step,
+                 test_the_walk_follows_the_chain_across_ways,
                  test_shore_normal,
                  test_curvature_sign_and_magnitude,
                  test_embayment_and_land_fraction,

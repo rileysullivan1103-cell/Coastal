@@ -388,10 +388,6 @@ def coastline_covariates(lat, lon, lines, vintage=None):
         return out
     local = geo.project_lines(lines, lat, lon)
     station = (0.0, 0.0)
-    # Built once and reused by every query below. Without it the ~300
-    # land/water samples each scan every segment in a 30 km box, and on an
-    # estuary shore that does not finish in any useful time.
-    index = geo.SegmentIndex(local)
     out["coastline_segments"] = sum(len(line) - 1 for line in local)
 
     ok, detail = geo.coastline_sanity(local)
@@ -421,6 +417,17 @@ def coastline_covariates(lat, lon, lines, vintage=None):
             f"{detail} — but the nearest such way is "
             f"{distance / 1000.0:.1f} km away, beyond everything read here, "
             "so the covariates are kept")
+
+    # Everything below WALKS along the shore, and OSM splits a shoreline into
+    # many short ways -- so the walk has to follow the chain across them.
+    # Stitching happens after the direction check, which reads the ways as
+    # they came, and joins only the junctions that check agrees are sound.
+    local = geo.stitch_ways(local)
+    out["coastline_chains"] = len(local)
+    # Built once and reused by every query below. Without it the ~300
+    # land/water samples each scan every segment in a 30 km box, and on an
+    # estuary shore that does not finish in any useful time.
+    index = geo.SegmentIndex(local)
 
     found = geo.nearest_segment(station, local, index)
     out["dist_to_coastline_m"] = round(found[0], 1) if found else None
@@ -1116,6 +1123,17 @@ def report_outcomes(frame, want=None):
         print("  nothing to report — no sites.")
         return table
     print(table.to_string(index=False))
+
+    # The table has to fit a terminal, so a long reason is cut -- and a
+    # service's error body is exactly where the answer usually is. Print the
+    # cut ones in full underneath rather than making someone open the CSV.
+    full = outcomes(frame, want=want, width=10 ** 6)
+    cut = [row["reason"] for _, row in full.iterrows()
+           if len(row["reason"]) > 150]
+    if cut:
+        print("\n  in full, for the reasons the table had to cut:")
+        for reason in cut:
+            print(f"    - {reason}")
     silent = table[table["reason"] == "EMPTY, NO REASON RECORDED"]
     if not silent.empty:
         print("\n  A layer that is empty with no reason recorded is a bug in "
