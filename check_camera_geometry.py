@@ -80,6 +80,20 @@ LAND_FRACTION = 0.55
 STEP_PX = 3.0
 PERSIST = 3          # samples on each side that must agree
 MIN_CONFIDENCE = 0.05  # phase-correlation peak sharpness below this is fog
+# Temporal spread, in grey levels, below which a patch is not scene at all.
+# Real imagery weeks apart never repeats exactly: sun angle, haze and JPEG
+# noise alone put the median absolute deviation well above one level. A region
+# that is byte-identical across months is composited after capture -- a
+# timestamp bar, a logo, a letterbox -- and it does NOT move when the camera
+# does, so registering against it reports a rock-steady camera no matter what
+# the camera did. It is the most dangerous thing in the frame for this test
+# and the most attractive to a picker that rewards stillness.
+OVERLAY_SPREAD = 0.5
+# And how much of a patch may be composited before the patch is unusable.
+# Essentially none: an overlay's edges are the sharpest content in the frame,
+# so even a sliver of banner inside a patch dominates its correlation peak and
+# pins it to zero. There is always clean scene elsewhere to use instead.
+MAX_DEAD_FRACTION = 0.02
 
 
 # ---------------------------------------------------------------------------
@@ -316,9 +330,24 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
     # maximise sharpness among them. Sky passes the stability test and then
     # loses on sharpness, which is the behaviour that was missing.
     calm = patch_spread <= np.percentile(patch_spread[usable], 50)
-    score = np.where(usable & calm, patch_structure, 0.0)
+
+    # ...but not TOO still. See OVERLAY_SPREAD. The test has to be the SHARE OF
+    # DEAD PIXELS inside the patch, not the patch's mean variation: a patch
+    # straddling the bottom edge of a banner averages the banner's zero against
+    # live scene below and passes comfortably, while half its body still cannot
+    # move. That is exactly the patch the picker reaches for, because the
+    # banner's edge is the sharpest thing in the frame.
+    dead = spread <= OVERLAY_SPREAD
+    dead_fraction = uniform_filter(dead.astype(float), window)
+    alive = dead_fraction < MAX_DEAD_FRACTION
+    dead_share = float((usable & ~alive).sum()) / max(int(usable.sum()), 1)
+    if dead_share > 0.005:
+        print(f"  {dead_share:.0%} of the searchable area is composited rather "
+              "than scene — never varies between frames, excluded")
+    score = np.where(usable & calm & alive, patch_structure, 0.0)
     if not score.any():
-        score = np.where(usable, patch_structure, 0.0)
+        print("  nothing is both calm and alive; dropping the calm test")
+        score = np.where(usable & alive, patch_structure, 0.0)
 
     rois = []
     working = score.copy()
@@ -328,7 +357,12 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
         cy, cx = np.unravel_index(int(np.argmax(working)), working.shape)
         rois.append({"name": f"feature{len(rois) + 1}",
                      "x": int(cx * 2 - size // 2), "y": int(cy * 2 - size // 2),
-                     "w": size, "h": size})
+                     "w": size, "h": size,
+                     # Carried so the run can print why each patch was chosen.
+                     # A patch reported with near-zero variation is an overlay
+                     # whatever else the output says.
+                     "structure": float(patch_structure[cy, cx]),
+                     "spread": float(patch_spread[cy, cx])})
         # Suppress a generous neighbourhood so the patches are not all one
         # corner of one roof.
         y0, y1 = max(0, cy - half * 3), cy + half * 3
@@ -663,8 +697,22 @@ def main():
         if not rois:
             sys.exit("could not choose features; pass --roi name:x,y,w,h")
     for roi in rois:
+        extra = ""
+        if "spread" in roi:
+            extra = (f"  structure={roi['structure']:.2f} "
+                     f"variation={roi['spread']:.2f}")
         print(f"  {roi['name']:<10} x={roi['x']} y={roi['y']} "
-              f"{roi['w']}x{roi['h']}")
+              f"{roi['w']}x{roi['h']}{extra}")
+
+    # Four patches in one band of rows are four samples of one thing. They will
+    # agree with each other beautifully and say nothing about the camera.
+    rows = [roi["y"] for roi in rois]
+    if len(rois) > 2 and max(rows) - min(rows) < ROI_SIZE:
+        print(f"\n  WARNING: every patch sits within {max(rows) - min(rows)} px "
+              "of the same row. They are")
+        print("  sampling one band of the frame, so their agreement is not "
+              "independent evidence.")
+        print("  Spread them by hand with --roi before believing a verdict.")
     preview = draw_rois(paths[0], rois,
                         os.path.join(OUT_DIR, f"rois_{slug}.jpg"))
     if preview:

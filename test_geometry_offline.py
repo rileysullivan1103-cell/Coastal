@@ -49,8 +49,20 @@ def scene(width=384, height=256, seed=0):
 
 
 def water(image, seed):
-    out = image.copy()
+    """Re-randomise the lower band, and jitter the whole frame slightly.
+
+    The jitter matters: real land is not byte-identical between frames weeks
+    apart -- sun angle, haze and JPEG noise all move it a little. A fixture
+    without it makes every static pixel look like a composited overlay to
+    OVERLAY_SPREAD, which is a property of the fixture and not of the code.
+    """
+    # The noise has to be big enough to survive a JPEG round trip and the
+    # downsample-by-2 the picker applies, or a flat region compresses to a
+    # constant and the fixture claims to be an overlay. Real scenes clear this
+    # easily: sun angle alone reshades a wall by far more than this between
+    # one week and the next.
     rng = np.random.default_rng(seed)
+    out = image + rng.normal(0, 6.0, image.shape) + rng.normal(0, 4.0)
     height = out.shape[0]
     out[int(height * 0.6):, :] = rng.normal(120, 40,
                                             out[int(height * 0.6):, :].shape)
@@ -171,6 +183,60 @@ def test_the_picker_avoids_sky():
             check(f"{roi['name']} recovers a planted shift",
                   got is not None and abs(got[0] + 4) < 1.0
                   and abs(got[1] - 6) < 1.0, got)
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_the_picker_rejects_a_burned_in_overlay():
+    """The failure that survived the sky fix: a composited banner.
+
+    Walton's second run put all four patches at y=0 and then reported 0.03 px
+    of disagreement -- a perfect score from a region that cannot move. An
+    overlay is byte-identical between frames (zero temporal spread) and full
+    of text edges (high structure), so a picker that rewards stillness and
+    sharpness will choose it every time. It is welded to the sensor, not the
+    world: register against it and the camera reads as rock steady whatever it
+    actually did.
+    """
+    print("\nfeature proposal against a composited overlay")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene()
+        banner = np.zeros((28, 512))
+        rng = np.random.default_rng(99)
+        banner[:, :] = 15
+        for start in range(10, 500, 26):          # blocky "text"
+            banner[6:22, start:start + 14] = 245
+        paths = []
+        for index in range(12):
+            frame = water(base, seed=index)
+            # Lighting drifts across the record, as it really does...
+            frame = frame + rng.normal(0, 4)
+            # ...but the banner is composited afterwards, so it never varies.
+            frame[:28, :] = banner
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        rois = g.propose_rois(paths, size=64, count=3, land_fraction=0.6)
+        check("it still proposes features", len(rois) == 3, len(rois))
+        on_banner = [r for r in rois if r["y"] < 28]
+        check("no patch lands on the overlay", not on_banner,
+              [(r["name"], r["y"]) for r in rois])
+        check("every chosen patch actually varies over time",
+              all(r["spread"] > g.OVERLAY_SPREAD for r in rois),
+              [(r["name"], round(r["spread"], 3)) for r in rois])
+        check("and each carries the numbers that justify it",
+              all("structure" in r and "spread" in r for r in rois))
+
+        # The overlay must be rejected on stillness, not on position: the same
+        # banner anywhere in the searchable area has to lose.
+        for roi in rois:
+            got = g.phase_shift(g.crop(base, roi), g.crop(shifted(base, 5, -3), roi))
+            check(f"{roi['name']} tracks the scene, not the banner",
+                  got is not None and abs(got[0] - 5) < 1.0
+                  and abs(got[1] + 3) < 1.0, got)
     finally:
         shutil.rmtree(tmp)
 
@@ -300,6 +366,7 @@ def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
                  test_the_picker_avoids_sky,
+                 test_the_picker_rejects_a_burned_in_overlay,
                  test_roi_preview_is_written,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
