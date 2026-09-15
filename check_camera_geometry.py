@@ -447,6 +447,85 @@ def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
     return frame
 
 
+def contact_sheet(paths, dates, out_path, columns=12, thumb_width=200,
+                  flagged=()):
+    """Every sampled frame as one labelled grid.
+
+    Numbers said the early record does not register and the late record does.
+    Numbers cannot say WHY, and the reasons are all things a person sees at a
+    glance and a correlator cannot: a different field of view, a lens change, a
+    camera that returns to a different preset, a dirty dome, night frames from
+    a season when local noon is not the sampled hour.
+
+    Dates whose registration was not confident are marked, so the question
+    "what do the failing frames have in common" can be answered by looking at
+    them rather than by inference.
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    label_height = 16
+    flagged = {pd.Timestamp(d) for d in flagged}
+    cells = []
+    for path, date in zip(paths, dates):
+        try:
+            with Image.open(path) as source:
+                image = source.convert("RGB")
+                height = max(1, int(image.height * thumb_width / image.width))
+                cells.append((image.resize((thumb_width, height)), date))
+        except Exception:
+            continue
+    if not cells:
+        return None
+    thumb_height = max(cell.height for cell, _ in cells)
+    rows = (len(cells) + columns - 1) // columns
+    sheet = Image.new("RGB", (columns * thumb_width,
+                              rows * (thumb_height + label_height)),
+                      (18, 33, 43))
+    draw = ImageDraw.Draw(sheet)
+    for index, (cell, date) in enumerate(cells):
+        column, row = index % columns, index // columns
+        x = column * thumb_width
+        y = row * (thumb_height + label_height)
+        sheet.paste(cell, (x, y))
+        bad = pd.Timestamp(date) in flagged
+        draw.text((x + 3, y + thumb_height + 2),
+                  f"{date:%Y-%m-%d}" + ("  X" if bad else ""),
+                  fill=(228, 87, 46) if bad else (220, 226, 230))
+        if bad:
+            draw.rectangle([x, y, x + thumb_width - 1, y + cell.height - 1],
+                           outline=(228, 87, 46), width=3)
+    sheet.save(out_path, quality=85)
+    return out_path
+
+
+def registration_quality(direct, sequential, dates, min_confidence=MIN_CONFIDENCE):
+    """Share of dates that registered confidently, by half-year.
+
+    A record that fails everywhere is a broken method. A record that fails for
+    two years and then works is telling you something happened to the camera,
+    and this says WHEN to look.
+    """
+    index = pd.DatetimeIndex(dates)
+    table = pd.DataFrame(index=index)
+    table["direct"] = direct["confidence"].reindex(index) \
+        if direct is not None and not direct.empty else np.nan
+    table["sequential"] = sequential["confidence"].reindex(index) \
+        if sequential is not None and not sequential.empty else np.nan
+    # tz_localize(None) first: to_period drops the timezone and warns, and a
+    # warning in the middle of a report reads like a problem with the data.
+    table["period"] = index.tz_localize(None).to_period("Q")
+    rows = []
+    for period, group in table.groupby("period"):
+        rows.append({
+            "period": str(period),
+            "frames": len(group),
+            "direct_ok": float((group["direct"] >= min_confidence).mean()),
+            "seq_ok": float((group["sequential"] >= min_confidence).mean())})
+    return pd.DataFrame(rows)
+
+
 def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
                       min_confidence=MIN_CONFIDENCE):
     """Each frame against the one BEFORE it, rather than against a reference.
@@ -750,30 +829,47 @@ def crop(image, roi):
     return patch if patch.shape == (roi["h"], roi["w"]) else None
 
 
-def sharpest(paths, rois):
-    """Index of the frame with the most structure inside the chosen patches.
+def best_reference(paths, probes=8, downsample=8):
+    """Index of the frame the REST OF THE RECORD can register against.
 
-    Not the first frame. Walton's record opens on 2023-07-02, which is heavy
-    fog: the far shore is barely visible, so every patch is being matched
-    against a reference that has almost nothing in it. Everything is measured
-    relative to the reference, so a soft reference degrades every measurement
-    in the run, not just its own.
+    Two wrong answers came before this one. The first frame is wrong: Walton's
+    record opens on its foggiest day, and everything is measured relative to
+    the reference, so a soft reference degrades every measurement in the run.
+    The sharpest frame is also wrong, and worse, because sharpness was scored
+    as mean gradient magnitude and NOTHING maximises that like noise -- a rainy
+    frame, a high-ISO dusk frame, or a corrupted one beats any real scene, and
+    then nothing in the record registers against the anchor.
+
+    The property actually wanted is not sharpness at all. The reference is
+    whichever frame the most other frames can be matched to, so that is what is
+    measured: correlate every frame against a handful of probes spread through
+    the record and keep the one with the best median peak-to-sidelobe ratio.
+    Noise scores near chance against everything and loses; a clear frame from a
+    period the camera held still wins, which is exactly the anchor wanted.
+
+    Done at downsample 8 so the whole record fits in memory at once and the
+    comparison is a few thousand small FFTs rather than a third pass over the
+    JPEGs.
     """
-    best, best_score = 0, -1.0
-    for index, path in enumerate(paths):
-        image = load_gray(path)
-        if image is None:
-            continue
-        score = 0.0
-        for roi in rois:
-            patch = crop(image, roi)
-            if patch is None:
+    images = [load_gray(path, downsample=downsample) for path in paths]
+    usable = [index for index, image in enumerate(images) if image is not None]
+    if len(usable) < 3:
+        return 0
+    shape = min((images[i].shape for i in usable), key=lambda s: (s[0], s[1]))
+    step = max(1, len(usable) // probes)
+    sample = usable[::step][:probes]
+    scores = []
+    for index in usable:
+        base = images[index][:shape[0], :shape[1]]
+        peaks = []
+        for other in sample:
+            if other == index:
                 continue
-            gy, gx = np.gradient(patch)
-            score += float(np.hypot(gy, gx).mean())
-        if score > best_score:
-            best, best_score = index, score
-    return best
+            got = phase_shift(base, images[other][:shape[0], :shape[1]])
+            if got is not None:
+                peaks.append(got[2])
+        scores.append((float(np.median(peaks)) if peaks else 0.0, index))
+    return max(scores)[1]
 
 
 def track(paths, dates, rois, pick=0, min_confidence=MIN_CONFIDENCE,
@@ -1417,6 +1513,11 @@ def main():
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--contact-sheet", action="store_true",
+                    help="write every sampled frame as one labelled grid. "
+                         "Written automatically when the registration does "
+                         "not agree with itself, because that is when the "
+                         "answer is in the pictures rather than the numbers.")
     ap.add_argument("--open", dest="open_images", action="store_true",
                     help="open the plots and previews when the run finishes, "
                          "in whatever this machine uses for images")
@@ -1512,9 +1613,10 @@ def main():
             print(f"  {roi['name']:<6} x={roi['x']:>5} y={roi['y']:>5} "
                   f"{roi['w']}x{roi['h']}{extra}")
 
-    pick = sharpest(paths, rois)
+    pick = best_reference(paths)
     print(f"\n  reference frame: {dates[pick]:%Y-%m-%d} "
-          f"({os.path.basename(paths[pick])}), the sharpest of {len(paths)}")
+          f"({os.path.basename(paths[pick])}) — of {len(paths)} frames, the "
+          "one\n  the rest of the record matches best")
     preview = wrote(draw_rois(paths[pick], rois,
                               os.path.join(OUT_DIR, f"candidates_{slug}.jpg")))
     if preview:
@@ -1576,10 +1678,25 @@ def main():
                     print(f"    {date:%Y-%m-%d}  {value:8.1f} px")
                 print(f"  the two passes differ by a median of {gap:.1f} px")
                 reliable = gap <= max(args.step_px * 2, 10.0)
-                if reliable:
+                covered = len(coarse) / max(len(paths), 1)
+                if reliable and covered >= 0.7:
                     print("  They agree, so one translation describes the "
                           "record and the")
                     print("  discontinuities above are the camera.")
+                elif reliable:
+                    # Agreement among the frames that registered says nothing
+                    # about the ones that did not, and an earlier version
+                    # announced that one translation described the record while
+                    # half of it had been dropped.
+                    print(f"  They agree — but only {covered:.0%} of the "
+                          "sampled frames registered at all.")
+                    print("  The verdict below covers THAT subset. The rest of "
+                          "the record is not")
+                    print("  stable and is not moving; it is unmeasured, and "
+                          "the quarters below")
+                    print("  say which part. Treat any epoch here as provisional "
+                          "until the")
+                    print("  unregistered frames are explained.")
                 else:
                     print("\n" + "!" * 74)
                     print("THE TWO PASSES DISAGREE. Registering each frame "
@@ -1623,6 +1740,34 @@ def main():
             wrote(plot_registration(
                 coarse, sequential, coarse_steps if reliable else [],
                 os.path.join(OUT_DIR, f"registration_{slug}.png")))
+
+            quality = registration_quality(coarse, sequential, dates)
+            if len(quality) > 1:
+                print("\nWHERE THE RECORD REGISTERS  (share of frames whose "
+                      "peak beat chance)")
+                print("  quarter   frames   vs reference   vs previous frame")
+                for _, row in quality.iterrows():
+                    print(f"  {row['period']:<9} {row['frames']:>6}   "
+                          f"{row['direct_ok']:>11.0%}   {row['seq_ok']:>16.0%}")
+                print("  A record that fails everywhere is a broken method. "
+                      "One that fails for a")
+                print("  while and then works is telling you when to look at "
+                      "the camera.")
+
+            if args.contact_sheet or not reliable:
+                weak = []
+                if sequential is not None and not sequential.empty:
+                    weak = list(sequential.index[
+                        sequential["confidence"] < MIN_CONFIDENCE])
+                sheet = wrote(contact_sheet(
+                    paths, dates,
+                    os.path.join(OUT_DIR, f"frames_{slug}.jpg"),
+                    flagged=weak))
+                if sheet:
+                    print(f"\n  every sampled frame, labelled: {sheet}")
+                    print("  Frames boxed in orange did not register against "
+                          "their neighbour.")
+                    print("  What they have in common is the thing to fix.")
 
             print("\nDISPLACEMENT FROM THE REFERENCE, by date")
             for line in spark(coarse["offset"],

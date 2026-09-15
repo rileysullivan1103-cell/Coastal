@@ -442,11 +442,16 @@ def test_the_margin_excludes_the_whole_patch():
         shutil.rmtree(tmp)
 
 
-def test_the_reference_is_the_sharpest_frame():
-    """Not the first. Walton's record opens on its foggiest frame.
+def test_the_reference_is_the_one_the_record_matches():
+    """Not the first frame, and not the sharpest either.
 
-    Everything is measured relative to the reference, so a soft reference
-    degrades every measurement in the run and not only its own.
+    Everything is measured relative to the reference, so a bad one degrades
+    every measurement in the run. The first frame is wrong because Walton's
+    record opens on its foggiest day. The SHARPEST frame is wrong too, and
+    worse: sharpness scored as gradient magnitude is maximised by noise, so a
+    rainy or corrupted frame beats every real scene and then nothing registers
+    against the anchor. What is wanted is the frame the rest of the record can
+    be matched to, which is what gets measured.
     """
     print("\nthe reference frame is chosen, not assumed")
     tmp = tempfile.mkdtemp()
@@ -466,13 +471,43 @@ def test_the_reference_is_the_sharpest_frame():
             Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
             paths.append(path)
 
-        check("it picks the one clear frame", g.sharpest(paths, rois) == 3,
-              g.sharpest(paths, rois))
+        check("it picks the one clear frame", g.best_reference(paths) == 3,
+              g.best_reference(paths))
         frame, reference = g.track(paths, list(dates), rois,
-                                   g.sharpest(paths, rois))
+                                   g.best_reference(paths))
         check("and registers against it", reference == dates[3], reference)
         check("every frame is still measured",
               set(frame["feature"]) == {"a", "b"}, set(frame["feature"]))
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_noise_never_becomes_the_reference():
+    """The failure that made the quality table read 0% in a period that worked.
+
+    A frame of pure noise has enormous gradient magnitude, so a picker scoring
+    sharpness chooses it over any real scene -- and then every genuine frame
+    fails to register against the anchor, and the run reports that the record
+    does not register when what does not register is the reference.
+    """
+    print("\na noisy frame must not become the reference")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene(width=512, height=384)
+        rng = np.random.default_rng(4)
+        paths = []
+        for index in range(8):
+            if index == 5:
+                frame = rng.normal(128, 60, (384, 512))   # rain, dusk, junk
+            else:
+                frame = water(base, seed=index)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+        pick = g.best_reference(paths, downsample=2)
+        check("the noise frame is not chosen", pick != 5, pick)
+        check("and a real frame is", pick in range(8) and pick != 5, pick)
     finally:
         shutil.rmtree(tmp)
 
@@ -873,6 +908,61 @@ def test_frame_to_frame_agrees_with_the_reference():
         shutil.rmtree(tmp)
 
 
+def test_the_contact_sheet_and_quality_table():
+    """When the numbers cannot say why, show the frames.
+
+    The sheet exists for one job: making it possible to see what the frames
+    that failed to register have in common. So it must contain every frame,
+    label each with its date, and mark the failures -- a grid that silently
+    dropped the unreadable ones would hide exactly the evidence it is for.
+    """
+    print("\nthe contact sheet and the quality table")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        dates = list(pd.date_range("2024-01-07", periods=14, freq="30D",
+                                   tz="UTC"))
+        paths = []
+        for index, _ in enumerate(dates):
+            frame = water(scene(width=320, height=240), seed=index)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+        out = os.path.join(tmp, "sheet.jpg")
+        made = g.contact_sheet(paths, dates, out, columns=5, thumb_width=100,
+                               flagged=dates[3:6])
+        check("a sheet is written", made is not None and os.path.exists(out))
+        with Image.open(out) as sheet:
+            width, height = sheet.size
+        check("it is five thumbnails wide", width == 500, width)
+        check("and three rows tall for fourteen frames",
+              height > 3 * 75 and height < 4 * 120, height)
+
+        # An unreadable file must not silently shrink the sheet's job.
+        broken = os.path.join(tmp, "broken.jpg")
+        with open(broken, "w") as handle:
+            handle.write("not an image")
+        made = g.contact_sheet(paths + [broken], dates + [dates[-1]],
+                               os.path.join(tmp, "sheet2.jpg"), columns=5,
+                               thumb_width=100)
+        check("an unreadable frame does not stop the sheet", made is not None)
+
+        direct = pd.DataFrame(
+            {"confidence": [20.0] * 7 + [2.0] * 7}, index=pd.DatetimeIndex(dates))
+        sequential = pd.DataFrame(
+            {"confidence": [2.0] * 7 + [20.0] * 7}, index=pd.DatetimeIndex(dates))
+        table = g.registration_quality(direct, sequential, dates)
+        check("the table is per quarter", len(table) >= 4, len(table))
+        check("it separates the good period from the bad",
+              table["direct_ok"].iloc[0] > 0.9 and table["direct_ok"].iloc[-1] < 0.1,
+              list(table["direct_ok"].round(2)))
+        check("and reports both passes independently",
+              table["seq_ok"].iloc[0] < 0.1 and table["seq_ok"].iloc[-1] > 0.9,
+              list(table["seq_ok"].round(2)))
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_the_text_chart():
     """The chart exists so the finding survives not opening a PNG.
 
@@ -1053,7 +1143,8 @@ def main():
                  test_explicit_margins_exclude_the_banner,
                  test_roi_preview_is_written,
                  test_the_margin_excludes_the_whole_patch,
-                 test_the_reference_is_the_sharpest_frame,
+                 test_the_reference_is_the_one_the_record_matches,
+                 test_noise_never_becomes_the_reference,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_disagreement_is_measured_as_a_vector,
@@ -1063,6 +1154,7 @@ def main():
                  test_a_move_bigger_than_a_patch,
                  test_frame_to_frame_agrees_with_the_reference,
                  test_the_text_chart,
+                 test_the_contact_sheet_and_quality_table,
                  test_the_survey_tiles_the_whole_frame,
                  test_a_large_survey_still_finds_the_rigid_block,
                  test_a_changed_frame_size_is_reported,
