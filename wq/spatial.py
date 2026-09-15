@@ -388,6 +388,11 @@ def coastline_covariates(lat, lon, lines, vintage=None):
         return out
     local = geo.project_lines(lines, lat, lon)
     station = (0.0, 0.0)
+    # Built once and reused by every query below. Without it the ~300
+    # land/water samples each scan every segment in a 30 km box, and on an
+    # estuary shore that does not finish in any useful time.
+    index = geo.SegmentIndex(local)
+    out["coastline_segments"] = sum(len(line) - 1 for line in local)
 
     ok, detail = geo.coastline_sanity(local)
     out["coastline_sane"] = ok
@@ -417,27 +422,28 @@ def coastline_covariates(lat, lon, lines, vintage=None):
             f"{distance / 1000.0:.1f} km away, beyond everything read here, "
             "so the covariates are kept")
 
-    found = geo.nearest_segment(station, local)
+    found = geo.nearest_segment(station, local, index)
     out["dist_to_coastline_m"] = round(found[0], 1) if found else None
 
-    normal, points = geo.shore_normal(local, station)
+    normal, points = geo.shore_normal(local, station, index=index)
     out["shore_normal_deg"] = None if normal is None else round(normal, 1)
     out["shore_normal_fit_points"] = points
     out["shore_normal_source"] = "coastline_tangent" if normal is not None else None
 
-    curvature, radius = geo.curvature_per_km(local, station)
+    curvature, radius = geo.curvature_per_km(local, station, index=index)
     out["curvature_1_per_km"] = None if curvature is None else round(curvature, 4)
     out["curvature_radius_m"] = (None if radius in (None, float("inf"))
                                  else round(radius, 1))
 
-    ratio = geo.embayment_ratio(local, station)
+    ratio = geo.embayment_ratio(local, station, index=index)
     out["embayment_ratio"] = None if ratio is None else round(ratio, 4)
 
-    fraction = geo.land_fraction(local, station, radius_m=5000.0)
+    fraction = geo.land_fraction(local, station, radius_m=5000.0,
+                                 index=index)
     out["land_fraction_5km"] = None if fraction is None else round(fraction, 4)
 
     distances, capped = geo.fetch_by_octant(local, station,
-                                            max_km=FETCH_CAP_KM)
+                                            max_km=FETCH_CAP_KM, index=index)
     for octant, value in distances.items():
         out[f"fetch_km_{octant}"] = round(value, 2)
         out[f"fetch_capped_{octant}"] = bool(capped[octant])

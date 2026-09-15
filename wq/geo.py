@@ -80,30 +80,144 @@ def _closest_on_segment(point, start, end):
             (vx / length, vy / length))
 
 
-def nearest_segment(point, lines):
+# How coarse the segment index is. 500 m is a compromise: small enough that a
+# cell holds a handful of segments even on a crinkly estuary shore, large
+# enough that a query 25 km out to sea does not walk thousands of empty rings.
+INDEX_CELL_M = 500.0
+
+
+def _closer(distance, line_index, segment_index, best):
+    """Is this segment nearer than the best so far, ties broken by identity?
+
+    Two segments at EXACTLY the same distance is the ordinary case, not a
+    freak one: it is what a shared vertex looks like, and every way has one at
+    every interior node. Left to scan order, the brute-force and indexed paths
+    pick different members of the tie -- same distance, different DIRECTION,
+    and is_land reads the direction. So the tie is ordered explicitly and both
+    paths return the same segment.
+    """
+    if best is None:
+        return True
+    if distance != best[0]:
+        return distance < best[0]
+    return (line_index, segment_index) < (best[1], best[2])
+
+
+class SegmentIndex:
+    """A uniform grid over the coastline segments, for nearest-segment queries.
+
+    Without it, every query scans every segment, and the covariates below make
+    roughly eleven hundred queries per station: 288 for land_fraction, up to
+    800 for fetch_by_octant, and a handful for the tangent and curvature. On a
+    30 km box of Narragansett Bay at OpenStreetMap detail that is on the order
+    of 10^8 distance computations PER STATION, which does not finish -- and it
+    does not fail either, which is worse. It sits there.
+
+    The answers are identical to the brute-force scan; only the number of
+    segments looked at changes. The offline tests assert that on random points
+    against the unindexed path, because an index that quietly disagrees with
+    the thing it replaces is not an optimisation, it is a different answer.
+    """
+
+    def __init__(self, lines, cell_m=INDEX_CELL_M):
+        self.lines = lines
+        self.cell = cell_m
+        self.cells = {}
+        self.min_i = self.min_j = self.max_i = self.max_j = None
+        for line_index, line in enumerate(lines):
+            for segment_index in range(len(line) - 1):
+                ax, ay = line[segment_index]
+                bx, by = line[segment_index + 1]
+                for i in range(int(math.floor(min(ax, bx) / cell_m)),
+                               int(math.floor(max(ax, bx) / cell_m)) + 1):
+                    for j in range(int(math.floor(min(ay, by) / cell_m)),
+                                   int(math.floor(max(ay, by) / cell_m)) + 1):
+                        self.cells.setdefault((i, j), []).append(
+                            (line_index, segment_index))
+                        self._extend(i, j)
+
+    def _extend(self, i, j):
+        if self.min_i is None:
+            self.min_i = self.max_i = i
+            self.min_j = self.max_j = j
+            return
+        self.min_i, self.max_i = min(self.min_i, i), max(self.max_i, i)
+        self.min_j, self.max_j = min(self.min_j, j), max(self.max_j, j)
+
+    def nearest(self, point):
+        if not self.cells:
+            return None
+        cell = self.cell
+        centre_i = int(math.floor(point[0] / cell))
+        centre_j = int(math.floor(point[1] / cell))
+        best = None
+        seen = set()
+        ring = 0
+        while True:
+            # Nothing in a ring further out than this can beat what we have:
+            # a cell at Chebyshev ring r is at least (r - 1) cells away.
+            if best is not None and (ring - 1) * cell > best[0]:
+                return best
+            # Once the ring has swept past the whole grid there is nothing
+            # left to find, whether or not anything was found.
+            if (centre_i - ring < self.min_i and centre_i + ring > self.max_i
+                    and centre_j - ring < self.min_j
+                    and centre_j + ring > self.max_j):
+                return best
+            for i, j in self._ring(centre_i, centre_j, ring):
+                for key in self.cells.get((i, j), ()):
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    line_index, segment_index = key
+                    line = self.lines[line_index]
+                    distance, foot, _t, direction = _closest_on_segment(
+                        point, line[segment_index], line[segment_index + 1])
+                    if _closer(distance, line_index, segment_index, best):
+                        best = (distance, line_index, segment_index, foot,
+                                direction)
+            ring += 1
+
+    @staticmethod
+    def _ring(i0, j0, ring):
+        if ring == 0:
+            yield (i0, j0)
+            return
+        for i in range(i0 - ring, i0 + ring + 1):
+            yield (i, j0 - ring)
+            yield (i, j0 + ring)
+        for j in range(j0 - ring + 1, j0 + ring):
+            yield (i0 - ring, j)
+            yield (i0 + ring, j)
+
+
+def nearest_segment(point, lines, index=None):
     """The closest coastline segment to a point.
 
     Returns (distance_m, line_index, segment_index, foot, unit_direction) or
-    None when there is no coastline at all.
+    None when there is no coastline at all. `index` is a SegmentIndex over the
+    same lines; it changes how long this takes and nothing else.
     """
+    if index is not None:
+        return index.nearest(point)
     best = None
     for line_index, line in enumerate(lines):
         for segment_index in range(len(line) - 1):
             distance, foot, _t, direction = _closest_on_segment(
                 point, line[segment_index], line[segment_index + 1])
-            if best is None or distance < best[0]:
+            if _closer(distance, line_index, segment_index, best):
                 best = (distance, line_index, segment_index, foot, direction)
     return best
 
 
-def is_land(point, lines):
+def is_land(point, lines, index=None):
     """True where the point lies on the land side of the nearest segment.
 
     OSM's convention is land on the left of the way's direction, so the sign
     of the cross product of the segment direction with the offset to the
     point is the whole test. None when there is no coastline to test against.
     """
-    found = nearest_segment(point, lines)
+    found = nearest_segment(point, lines, index)
     if found is None:
         return None
     _distance, _line, _segment, foot, (ux, uy) = found
@@ -288,7 +402,8 @@ def _walk(line, start_index, start_t, distance_m):
     return line[index], False
 
 
-def local_tangent(lines, station=(0.0, 0.0), half_window_m=250.0):
+def local_tangent(lines, station=(0.0, 0.0), half_window_m=250.0,
+                  index=None):
     """Bearing of the coastline tangent at the station, fitted over a window.
 
     A least-squares direction over +/- half_window_m rather than the nearest
@@ -299,7 +414,7 @@ def local_tangent(lines, station=(0.0, 0.0), half_window_m=250.0):
 
     Returns (bearing_deg, n_points) or (None, 0).
     """
-    found = nearest_segment(station, lines)
+    found = nearest_segment(station, lines, index)
     if found is None:
         return None, 0
     _distance, line_index, segment_index, foot, _direction = found
@@ -343,7 +458,8 @@ def _between(point, start, end, foot, half_window_m):
             <= half_window_m * 1.05)
 
 
-def shore_normal(lines, station=(0.0, 0.0), half_window_m=250.0):
+def shore_normal(lines, station=(0.0, 0.0), half_window_m=250.0,
+                 index=None):
     """Outward (seaward) normal bearing: the way you face looking out to sea.
 
     Same convention as the rip pipeline's sites.yaml. Land is to the left of
@@ -353,20 +469,21 @@ def shore_normal(lines, station=(0.0, 0.0), half_window_m=250.0):
     linework disagrees with itself and None is returned rather than a bearing
     that is exactly backwards.
     """
-    bearing, count = local_tangent(lines, station, half_window_m)
+    bearing, count = local_tangent(lines, station, half_window_m, index)
     if bearing is None:
         return None, count
     normal = (bearing + 90.0) % 360
     step = 100.0
     probe = (station[0] + math.sin(math.radians(normal)) * step,
              station[1] + math.cos(math.radians(normal)) * step)
-    water = is_land(probe, lines)
+    water = is_land(probe, lines, index)
     if water is None or water:
         return None, count
     return normal, count
 
 
-def curvature_per_km(lines, station=(0.0, 0.0), window_m=2000.0):
+def curvature_per_km(lines, station=(0.0, 0.0), window_m=2000.0,
+                     index=None):
     """Signed curvature of the local coastline, in 1/km.
 
     Negative is concave, which is to say embayed: the coast wraps around the
@@ -380,7 +497,7 @@ def curvature_per_km(lines, station=(0.0, 0.0), window_m=2000.0):
     circle. Returns (curvature, radius_m) with (0.0, inf) for a straight
     coast and (None, None) where the coastline is too short to fit.
     """
-    found = nearest_segment(station, lines)
+    found = nearest_segment(station, lines, index)
     if found is None:
         return None, None
     _distance, line_index, segment_index, foot, _direction = found
@@ -393,7 +510,7 @@ def curvature_per_km(lines, station=(0.0, 0.0), window_m=2000.0):
     centre, radius = _circle_through(back, foot, forward)
     if centre is None:
         return 0.0, float("inf")
-    centre_is_land = is_land(centre, lines)
+    centre_is_land = is_land(centre, lines, index)
     if centre_is_land is None:
         return None, None
     sign = 1.0 if centre_is_land else -1.0
@@ -416,7 +533,7 @@ def _circle_through(a, b, c):
     return (ux, uy), math.hypot(ax - ux, ay - uy)
 
 
-def embayment_ratio(lines, station=(0.0, 0.0), along_m=2000.0):
+def embayment_ratio(lines, station=(0.0, 0.0), along_m=2000.0, index=None):
     """Straight-line distance / along-shore distance, +/- along_m either side.
 
     1.0 is a straight coast. Lower is more enclosed: 0.0 would be a coast
@@ -424,7 +541,7 @@ def embayment_ratio(lines, station=(0.0, 0.0), along_m=2000.0):
     enclosure, and the reason beach_type is assigned by hand rather than by
     thresholding it -- the interesting sites are the ones in the middle.
     """
-    found = nearest_segment(station, lines)
+    found = nearest_segment(station, lines, index)
     if found is None:
         return None
     _distance, line_index, segment_index, foot, _direction = found
@@ -439,7 +556,7 @@ def embayment_ratio(lines, station=(0.0, 0.0), along_m=2000.0):
 
 
 def land_fraction(lines, station=(0.0, 0.0), radius_m=5000.0, rings=12,
-                  per_ring=24):
+                  per_ring=24, index=None):
     """Share of a disc around the station that is land.
 
     Sampled on rings whose radii go as sqrt, so every sample stands for the
@@ -456,7 +573,7 @@ def land_fraction(lines, station=(0.0, 0.0), radius_m=5000.0, rings=12,
             angle = 2 * math.pi * step / per_ring
             point = (station[0] + radius * math.sin(angle),
                      station[1] + radius * math.cos(angle))
-            verdict = is_land(point, lines)
+            verdict = is_land(point, lines, index)
             if verdict is None:
                 continue
             total += 1
@@ -469,32 +586,58 @@ def land_fraction(lines, station=(0.0, 0.0), radius_m=5000.0, rings=12,
 OCTANTS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 
 
-def fetch_by_octant(lines, station=(0.0, 0.0), max_km=25.0, step_m=250.0):
+def _ray_hit(station, direction, lines, max_m, skip_m=1.0):
+    """Distance along a ray to the first coastline crossing, or None.
+
+    Every coastline crossing is a water/land transition, so the first one a
+    ray meets going out to sea IS the fetch. The previous version stepped
+    250 m at a time asking is_land at each point, which cost eight hundred
+    nearest-segment queries per station and still could not see a spit
+    narrower than its own step. This sees every crossing and reports the
+    exact distance.
+    """
+    dx, dy = direction
+    best = None
+    for line in lines:
+        for k in range(len(line) - 1):
+            ax, ay = line[k]
+            bx, by = line[k + 1]
+            ex, ey = bx - ax, by - ay
+            denom = dx * ey - dy * ex
+            if denom == 0.0:
+                continue           # parallel: no single crossing
+            qx, qy = ax - station[0], ay - station[1]
+            t = (qx * ey - qy * ex) / denom
+            if t < skip_m or t > max_m:
+                continue
+            u = (qx * dy - qy * dx) / denom
+            if not 0.0 <= u <= 1.0:
+                continue
+            if best is None or t < best:
+                best = t
+    return best
+
+
+def fetch_by_octant(lines, station=(0.0, 0.0), max_km=25.0, index=None):
     """Open-water distance in each compass octant, in km.
 
-    Marches outward from the station along each octant's centre bearing and
-    stops at the first land sample. A value equal to max_km means the march
-    ran out of search area, not that the ocean ends there, so it is returned
-    with a `_capped` companion -- reporting a censored value as a measurement
-    is how a sheltered site and an open one end up looking alike.
+    A value equal to max_km means the ray ran out of search area, not that
+    the ocean ends there, so it is returned with a `_capped` companion --
+    reporting a censored value as a measurement is how a sheltered site and
+    an open one end up looking alike.
+
+    `index` is accepted so this matches the other covariates' signature; the
+    ray crosses the whole box, so there is no neighbourhood to restrict to.
     """
     if not lines:
         return {}, {}
+    max_m = max_km * 1000.0
     distances, capped = {}, {}
-    steps = int(max_km * 1000 / step_m)
-    for index, name in enumerate(OCTANTS):
-        bearing = index * 45.0
-        dx = math.sin(math.radians(bearing))
-        dy = math.cos(math.radians(bearing))
-        reached = max_km
-        hit = False
-        for step in range(1, steps + 1):
-            distance = step * step_m
-            point = (station[0] + dx * distance, station[1] + dy * distance)
-            if is_land(point, lines):
-                reached = distance / 1000.0
-                hit = True
-                break
-        distances[name] = reached
-        capped[name] = not hit
+    for octant, name in enumerate(OCTANTS):
+        bearing = octant * 45.0
+        direction = (math.sin(math.radians(bearing)),
+                     math.cos(math.radians(bearing)))
+        hit = _ray_hit(station, direction, lines, max_m)
+        distances[name] = max_km if hit is None else hit / 1000.0
+        capped[name] = hit is None
     return distances, capped

@@ -157,9 +157,9 @@ def test_a_far_away_defect_does_not_void_the_whole_tile():
           (values.get("coastline_defect_km") or 0) > 6.0,
           values.get("coastline_defect_km"))
 
-    near = [[(32.9, -117.3), (33.0, -117.3)],
-            [(33.1, -117.3), (33.0, -117.3)]]
-    values = spatial.coastline_covariates(33.0, -117.29, near)
+    close_by = [[(32.9, -117.3), (33.0, -117.3)],
+                [(33.1, -117.3), (33.0, -117.3)]]
+    values = spatial.coastline_covariates(33.0, -117.29, close_by)
     check("a defect the covariates would actually read still withholds them",
           values.get("shore_normal_deg") is None,
           str(values.get("coastline_note")))
@@ -252,6 +252,72 @@ def test_fetch_by_octant():
     distances, _capped = geo.fetch_by_octant(bay(), (2995.0, 0.0), max_km=10.0)
     check("across a 3 km-radius bay is about 6 km",
           near(distances["W"], 6.0, 0.4), str(distances["W"]))
+
+
+def test_the_index_answers_exactly_what_the_scan_would():
+    """An index that quietly disagrees is not an optimisation.
+
+    Without it, every land/water sample scans every segment in the box, and
+    the covariates make roughly eleven hundred samples per station. On an
+    estuary shore at OpenStreetMap detail that does not finish -- and it does
+    not fail either, so it reads as a hang rather than a bug. The only thing
+    that makes the index usable is that it returns the same answer.
+    """
+    print("\nthe segment index against the scan it replaces")
+    import random
+    rng = random.Random(4)
+    lines, x = [], -8000.0
+    points = []
+    while x < 8000.0:
+        points.append((x, 400 * math.sin(x / 900.0) + rng.uniform(-30, 30)))
+        x += 15.0
+    lines = [points[i:i + 60 + 1] for i in range(0, len(points) - 1, 60)]
+    island = [(2500.0 + 600.0 * math.cos(2 * math.pi * k / 120),
+               1500.0 + 600.0 * math.sin(2 * math.pi * k / 120))
+              for k in range(121)]
+    lines.append(island)                              # an island off the shore
+    index = geo.SegmentIndex(lines)
+
+    disagreed = land_disagreed = 0
+    for _ in range(600):
+        probe = (rng.uniform(-9000, 9000), rng.uniform(-4000, 4000))
+        if geo.nearest_segment(probe, lines) != geo.nearest_segment(
+                probe, lines, index):
+            disagreed += 1
+        if geo.is_land(probe, lines) != geo.is_land(probe, lines, index):
+            land_disagreed += 1
+    check("the nearest segment is identical on 600 random points",
+          disagreed == 0, f"{disagreed} disagreements")
+    check("and so is the land/water verdict",
+          land_disagreed == 0, f"{land_disagreed} disagreements")
+
+    # A point well outside the linework's own extent: the index has to keep
+    # walking outward rather than report nothing.
+    far = (40000.0, 40000.0)
+    check("a point far outside the box still finds the shore",
+          geo.nearest_segment(far, lines, index)
+          == geo.nearest_segment(far, lines))
+
+    # Exactly equidistant from two segments meeting at a shared vertex --
+    # the ordinary case, one per interior node of every way.
+    vee = [[(-1000.0, 1000.0), (0.0, 0.0), (1000.0, 1000.0)]]
+    tie_index = geo.SegmentIndex(vee)
+    check("an exact tie resolves the same way indexed and not",
+          geo.nearest_segment((0.0, -500.0), vee)
+          == geo.nearest_segment((0.0, -500.0), vee, tie_index))
+
+
+def test_fetch_sees_a_spit_thinner_than_a_step():
+    print("\nfetch by ray, not by sampling")
+    # A barrier 60 m thick, 5 km offshore. The old version sampled every
+    # 250 m and stepped straight over it, reporting open water to the cap.
+    barrier = [[(-20000.0, 5000.0), (20000.0, 5000.0)],
+               [(20000.0, 5060.0), (-20000.0, 5060.0)]]
+    distances, capped = geo.fetch_by_octant(barrier, (0.0, 0.0), max_km=25.0)
+    check("a 60 m barrier stops the fetch at 5 km",
+          near(distances["N"], 5.0, 0.01), str(distances["N"]))
+    check("and the value is not censored", capped["N"] is False)
+    check("the other way is open to the cap", distances["S"] == 25.0)
 
 
 def test_closed_rings_wrap():
@@ -696,6 +762,8 @@ def main():
     for test in (test_land_and_water,
                  test_sanity_check_catches_a_reversed_way,
                  test_a_far_away_defect_does_not_void_the_whole_tile,
+                 test_the_index_answers_exactly_what_the_scan_would,
+                 test_fetch_sees_a_spit_thinner_than_a_step,
                  test_shore_normal,
                  test_curvature_sign_and_magnitude,
                  test_embayment_and_land_fraction,

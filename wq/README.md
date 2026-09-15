@@ -207,6 +207,23 @@ wrong. Nodes of degree three or more are counted and reported, never judged.
 > precisely because a check that cannot fail is worse than no check: it gets
 > read as evidence.
 
+**The queries go through a grid index.** Every land/water sample takes the
+nearest coastline segment, and the covariates make roughly eleven hundred
+samples per station — 288 for `land_fraction`, the rest for the tangent,
+curvature and embayment. Scanning every segment each time is ~10⁸ distance
+computations per station on a 30 km box of Narragansett Bay at OSM detail,
+which does not finish and does not fail either: it reads as a hang. A uniform
+500 m grid over the segments makes each query local. The offline tests assert
+the indexed answer is **identical** to the unindexed one on random points,
+including the exact ties at shared vertices, because an index that quietly
+disagrees is not an optimisation, it is a different answer.
+
+**Fetch is a ray, not a march.** Every coastline crossing is a water/land
+transition, so the first one an outward ray meets *is* the fetch. The first
+version stepped 250 m at a time asking `is_land`, which cost 800 nearest-segment
+queries per station and could not see a barrier island narrower than its own
+step. There is a test for exactly that: a 60 m spit 5 km offshore.
+
 - `shore_normal_deg` — the outward normal of a least-squares tangent fitted
   over ±250 m, then **verified** by stepping 100 m along it and confirming
   that point is water. Same convention as the rip pipeline's `sites.yaml`.
