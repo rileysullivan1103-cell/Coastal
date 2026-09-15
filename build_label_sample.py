@@ -45,6 +45,14 @@ HIGH_CLOUD_PCT = 80.0
 
 LABEL_COLUMNS = ["rip_present", "notes", "labeled_at"]
 
+# Hours with no MOP wave height. They are a real part of the record and are
+# reported, but they are not drawn from: a frame with no wave height cannot
+# sit in a wave tercile, so labelling it answers nothing the cross-tab asks.
+# Left in the draw pool they are three more "cells", and draw_grid splits the
+# budget twelve ways instead of nine -- 75 of 300 images spent on 0.7% of the
+# record, while every real cell drops from 33 rows to 25.
+MISSING_TERCILE = "H? missing"
+
 
 def load_frames(slug):
     """Frame-level detector output, one row per still the detector scored."""
@@ -166,9 +174,19 @@ def assign_strata(pool, cut, edges):
         pool["mop_wave_height"], bins=edges,
         labels=["H1 low", "H2 mid", "H3 high"], include_lowest=True)
     pool["wave_tercile"] = pool["wave_tercile"].astype(object)
-    pool.loc[pool["mop_wave_height"].isna(), "wave_tercile"] = "H? missing"
+    pool.loc[pool["mop_wave_height"].isna(), "wave_tercile"] = MISSING_TERCILE
     pool["stratum"] = pool["confidence"] + " / " + pool["wave_tercile"].astype(str)
     return pool
+
+
+def drawable_pool(pool):
+    """The candidates the grid may draw from: everything with a wave tercile.
+
+    Kept separate from assign_strata so the counts printed to the terminal show
+    the whole record, including the hours that are about to be excluded, rather
+    than quietly hiding them.
+    """
+    return pool[pool["wave_tercile"] != MISSING_TERCILE]
 
 
 def draw_grid(pool, target, rng):
@@ -335,12 +353,18 @@ def main():
     for name, n in counts.items():
         print(f"    {name:<22} {n:>6}")
 
+    drawable = drawable_pool(pool)
+    dropped = len(pool) - len(drawable)
+    if dropped:
+        print(f"\n  excluding {dropped} candidates with no MOP wave height "
+              f"({dropped / len(pool):.1%} of the record)")
+
     rng = np.random.default_rng(args.seed)
-    grid = draw_grid(pool, args.target, rng)
+    grid = draw_grid(drawable, args.target, rng)
     grid = grid.copy()
     grid["booster"] = ""
     print(f"\n  grid draw: {len(grid)} rows across {grid['stratum'].nunique()} cells")
-    boosters = draw_boosters(pool, grid, rng)
+    boosters = draw_boosters(drawable, grid, rng)
     sample = pd.concat([grid, boosters]) if len(boosters) else grid
     sample = sample.sort_values("timestamp").reset_index(drop=True)
     print(f"  total sample: {len(sample)} rows")
@@ -409,7 +433,7 @@ def main():
     # sample deliberately over-represents high confidence and the boosters, so
     # without these weights the precision analysis would report the sample's
     # precision and call it the detector's.
-    populations = (pool.groupby("stratum").size().rename("population")
+    populations = (drawable.groupby("stratum").size().rename("population")
                    .reset_index())
     populations["sampled"] = populations["stratum"].map(
         table["stratum"].value_counts()).fillna(0).astype(int)

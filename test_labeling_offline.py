@@ -283,6 +283,54 @@ def check_missing_wave_height_gets_its_own_cell():
           list(out["confidence"]) == ["high", "high", "low"])
 
 
+def check_missing_wave_height_does_not_eat_the_budget():
+    """The three 'H? missing' cells must not take a quarter of the draw.
+
+    Built to the real shape of the Walton dry run: 38,301 candidates carry a
+    wave height and 285 do not. Left in the pool those 285 rows are three more
+    cells, so draw_grid splits 300 twelve ways instead of nine -- 75 images on
+    0.7% of the record, and every real cell falls from 33 rows to 25.
+    """
+    import numpy as np
+    import build_label_sample as bls
+
+    rng = np.random.default_rng(11)
+    n_real, n_missing = 38301, 285
+    total = n_real + n_missing
+    # A NaN score is the 'none' band -- an imagery hour the detector never fired
+    # on. Without these the fixture has two confidence bands, not three, and the
+    # twelve-cell arithmetic this test exists to check never arises.
+    n_none = 3192
+    scores = [float("nan")] * n_none + list(rng.uniform(0, 1, total - n_none))
+    heights = list(rng.uniform(0.3, 3.0, n_real)) + [float("nan")] * n_missing
+    rng.shuffle(heights)
+    pool = pd.DataFrame({
+        "score_max": scores,
+        "mop_wave_height": heights,
+        "solar_elevation": [40.0] * total,
+        "cloud_cover": [10.0] * total,
+    })
+    real = pd.Series(heights).dropna()
+    edges = [-np.inf, float(real.quantile(1/3)), float(real.quantile(2/3)), np.inf]
+    pool = bls.assign_strata(pool, cut=0.5, edges=edges)
+
+    check("the full pool really does carry twelve cells",
+          pool["stratum"].nunique() == 12, f"{pool['stratum'].nunique()} cells")
+
+    drawable = bls.drawable_pool(pool)
+    check("the draw pool is down to the nine real cells",
+          drawable["stratum"].nunique() == 9, f"{drawable['stratum'].nunique()} cells")
+    check("only the missing-height rows were excluded",
+          len(pool) - len(drawable) == n_missing, f"{len(pool) - len(drawable)} dropped")
+
+    grid = bls.draw_grid(drawable, 300, rng)
+    check("no missing-height row reached the sample",
+          not grid["stratum"].str.contains(bls.MISSING_TERCILE, regex=False).any())
+    smallest = grid["stratum"].value_counts().min()
+    check("each real cell gets ~33 rows, not ~25", smallest >= 33,
+          f"smallest cell {smallest}")
+
+
 def main():
     print("labelling pipeline offline checks\n")
     check_weighting_beats_the_sample()
@@ -295,6 +343,7 @@ def main():
     check_boxes_round_trip_as_json()
     check_the_draw_balances_and_does_not_double_count()
     check_missing_wave_height_gets_its_own_cell()
+    check_missing_wave_height_does_not_eat_the_budget()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
 
