@@ -873,6 +873,51 @@ def test_frame_to_frame_agrees_with_the_reference():
         shutil.rmtree(tmp)
 
 
+def test_the_text_chart():
+    """The chart exists so the finding survives not opening a PNG.
+
+    It is what gets pasted into a message, so the three things it must not get
+    wrong are: a step has to look like a step, a real gap in the record has to
+    be visible, and ordinary spacing between samples must NOT be drawn as a
+    gap -- at one frame a week over three years there are more columns than
+    samples, and marking every empty column as missing buries the holes that
+    matter.
+    """
+    print("\nthe terminal chart")
+    dates = pd.date_range("2024-01-07", periods=40, freq="7D", tz="UTC")
+    flat = pd.Series(np.zeros(len(dates)), index=dates)
+    lines = g.spark(flat)
+    check("a flat record draws something", len(lines) > 5, len(lines))
+    check("and claims no gaps",
+          not any("gap in the record" in line for line in lines))
+    body = "\n".join(lines)
+    check("nothing is drawn above the baseline",
+          body.count("*") > 0 and all("*" not in line for line in lines[1:-4]),
+          [line for line in lines[1:-4] if "*" in line][:1])
+
+    stepped = pd.Series(np.where(np.arange(len(dates)) < 20, 0.0, 120.0),
+                        index=dates)
+    top = g.spark(stepped)[1]
+    check("a step reaches the top row", "*" in top, repr(top[:40]))
+    check("and only in its second half",
+          top.index("*") > len(top) * 0.5, top.index("*"))
+
+    # A hole: drop three months out of the middle.
+    holed = stepped.drop(dates[12:24])
+    drawn = g.spark(holed)
+    check("a real gap is marked", any("·" in line for line in drawn))
+    check("and the legend says so",
+          any("gap in the record" in line for line in drawn))
+
+    marked = g.spark(flat, marks=[dates[20]])
+    check("a step date draws a rule", any("|" in line for line in marked[1:6]))
+    check("and the legend explains it",
+          any("candidate step" in line for line in marked))
+
+    check("too little data draws nothing",
+          g.spark(pd.Series([1.0], index=dates[:1])) == [])
+
+
 def test_the_survey_tiles_the_whole_frame():
     """The survey asks nothing about appearance, so it must cover everything.
 
@@ -1017,6 +1062,7 @@ def main():
                  test_features_with_no_overlapping_dates_are_not_linked,
                  test_a_move_bigger_than_a_patch,
                  test_frame_to_frame_agrees_with_the_reference,
+                 test_the_text_chart,
                  test_the_survey_tiles_the_whole_frame,
                  test_a_large_survey_still_finds_the_rigid_block,
                  test_a_changed_frame_size_is_reported,

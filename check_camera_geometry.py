@@ -1049,6 +1049,127 @@ def describe_epochs(steps, dates, counts=None):
     return epochs
 
 
+# Everything the run wrote, so it can be listed -- and opened -- in one place
+# at the end instead of scrolling back for paths.
+WRITTEN = []
+OPEN_IMAGES = False
+
+
+def wrote(path):
+    if path:
+        WRITTEN.append(os.path.abspath(path))
+    return path
+
+
+def show(paths):
+    """Open the written images with whatever this platform uses.
+
+    `open` on macOS, `xdg-open` on Linux, `start` on Windows. A failure here is
+    never worth failing a run over -- the paths are printed either way -- so it
+    is reported and swallowed.
+    """
+    import shutil as _shutil
+    import subprocess
+    if sys.platform == "darwin":
+        opener = ["open"]
+    elif os.name == "nt":
+        opener = ["cmd", "/c", "start", ""]
+    else:
+        opener = ["xdg-open"] if _shutil.which("xdg-open") else None
+    images = [p for p in paths if p.lower().endswith((".png", ".jpg"))]
+    if not opener or not images:
+        return
+    try:
+        subprocess.run(opener + images, check=False)
+    except Exception as error:
+        print(f"  could not open the images ({error}); the paths are above")
+
+
+def spark(series, width=86, height=13, marks=(), label=""):
+    """The offset series as text, so the finding is readable without a viewer.
+
+    A PNG has to be found, opened, and -- when the person reading it is not at
+    the machine -- attached to a message. A chart made of characters is in the
+    terminal output already, which means it is in the thing you paste. The PNG
+    is still written and is still the better artefact; this is so the shape of
+    the record cannot be missed for want of opening it.
+
+    Time is on the x axis by DATE, not by sample, so a gap in the record reads
+    as a gap rather than being closed up.
+    """
+    series = series.dropna()
+    if len(series) < 2:
+        return []
+    start, end = series.index.min(), series.index.max()
+    span = (end - start).total_seconds()
+    if span <= 0:
+        return []
+    columns = [[] for _ in range(width)]
+    for stamp, value in series.items():
+        index = int((stamp - start).total_seconds() / span * (width - 1))
+        columns[min(max(index, 0), width - 1)].append(float(value))
+    # The MAXIMUM in each bucket, not the mean: this chart exists to make a
+    # step or a spike visible, and averaging is exactly what hides one.
+    heights = [max(bucket) if bucket else None for bucket in columns]
+
+    # An empty column usually means "no sample was due here", not "the record
+    # has a hole": at one frame a week over three years there are more columns
+    # than samples, and marking every one of them as missing buries the gaps
+    # that matter. A column is only a GAP if the nearest real measurement is
+    # further away than the record's own sampling interval.
+    gaps = series.index.to_series().diff().dropna()
+    spacing = float(gaps.median().total_seconds()) if len(gaps) else span
+    seconds_per_column = span / max(width - 1, 1)
+    gap_columns = set()
+    occupied = [index for index, bucket in enumerate(columns) if bucket]
+    for index, value in enumerate(heights):
+        if value is not None or not occupied:
+            continue
+        nearest = min(abs(index - other) for other in occupied)
+        if nearest * seconds_per_column > 1.5 * spacing:
+            gap_columns.add(index)
+    finite = [v for v in heights if v is not None]
+    if not finite:
+        return []
+    low, high = min(min(finite), 0.0), max(finite)
+    if high - low < 1e-9:
+        high = low + 1.0
+
+    marked = set()
+    for stamp in marks:
+        index = int((pd.Timestamp(stamp) - start).total_seconds()
+                    / span * (width - 1))
+        marked.add(min(max(index, 0), width - 1))
+
+    grid = [[" "] * width for _ in range(height)]
+    for column, value in enumerate(heights):
+        if value is None:
+            if column in gap_columns:
+                grid[height - 1][column] = "·"   # the record really is empty
+            continue
+        row = int(round((value - low) / (high - low) * (height - 1)))
+        grid[height - 1 - row][column] = "#" if column in marked else "*"
+    for column in marked:
+        for row in range(height):
+            if grid[row][column] == " ":
+                grid[row][column] = "|"
+
+    lines = [f"  {label}" if label else "  offset, px"]
+    for index, row in enumerate(grid):
+        value = high - (high - low) * index / (height - 1)
+        lines.append(f"  {value:8.1f} |" + "".join(row))
+    lines.append("  " + " " * 9 + "+" + "-" * width)
+    lines.append(f"  {'':9} {start:%Y-%m-%d}" +
+                 " " * max(1, width - 21) + f"{end:%Y-%m-%d}")
+    legend = "           * measurement"
+    if gap_columns:
+        legend += "   · gap in the record"
+    if marked:
+        legend += "   | # candidate step"
+    lines.append(legend)
+    return lines
+
+
 def report_record(steps, dates, slug, step_px, what):
     """Print the epoch split, or its absence, for one registration pass."""
     if not steps:
@@ -1296,6 +1417,9 @@ def main():
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--open", dest="open_images", action="store_true",
+                    help="open the plots and previews when the run finishes, "
+                         "in whatever this machine uses for images")
     ap.add_argument("--no-coarse", action="store_true",
                     help="skip the whole-frame registration and measure with "
                          "patches alone. Only useful for reproducing the "
@@ -1323,6 +1447,10 @@ def main():
     ap.add_argument("--step-px", type=float, default=STEP_PX,
                     help=f"a shift this large counts as a step (default {STEP_PX})")
     args = ap.parse_args()
+    global OPEN_IMAGES
+    OPEN_IMAGES = args.open_images
+    import atexit
+    atexit.register(finish)
 
     if not (args.detections or args.sample):
         ap.error("choose --detections (read-only) or --sample (downloads frames)")
@@ -1387,10 +1515,10 @@ def main():
     pick = sharpest(paths, rois)
     print(f"\n  reference frame: {dates[pick]:%Y-%m-%d} "
           f"({os.path.basename(paths[pick])}), the sharpest of {len(paths)}")
-    preview = draw_rois(paths[pick], rois,
-                        os.path.join(OUT_DIR, f"candidates_{slug}.jpg"))
+    preview = wrote(draw_rois(paths[pick], rois,
+                              os.path.join(OUT_DIR, f"candidates_{slug}.jpg")))
     if preview:
-        print(f"    {os.path.abspath(preview)}")
+        print(f"    {preview}")
 
     coarse = None
     if not args.no_coarse:
@@ -1491,12 +1619,24 @@ def main():
                     sequential[["step", "cum_dx", "cum_dy"]], how="outer")
             reg_csv = os.path.join(OUT_DIR, f"registration_{slug}.csv")
             registration.to_csv(reg_csv)
-            reg_png = plot_registration(
+            wrote(reg_csv)
+            wrote(plot_registration(
                 coarse, sequential, coarse_steps if reliable else [],
-                os.path.join(OUT_DIR, f"registration_{slug}.png"))
-            print(f"\nwrote {reg_csv}")
-            if reg_png:
-                print(f"wrote {reg_png}")
+                os.path.join(OUT_DIR, f"registration_{slug}.png")))
+
+            print("\nDISPLACEMENT FROM THE REFERENCE, by date")
+            for line in spark(coarse["offset"],
+                              marks=[s["date"] for s in coarse_steps],
+                              label="offset from reference, px"):
+                print(line)
+            if sequential is not None and not sequential.empty:
+                print("\nFRAME-TO-FRAME STEP, by date  (a camera move is ONE "
+                      "tall bar;")
+                print("a record that never settles is tall everywhere)")
+                for line in spark(sequential["step"],
+                                  marks=[s["date"] for s in coarse_steps],
+                                  label="step from the previous frame, px"):
+                    print(line)
             if coarse["offset"].max() > args.roi_size / 2:
                 print(f"\n  NOTE: the record moves further than half a "
                       f"{args.roi_size} px patch "
@@ -1585,16 +1725,17 @@ def main():
         ys = [r["y"] for r in kept_rois]
         print(f"  the agreeing patches span x {min(xs)}-{max(xs) + args.roi_size}"
               f", y {min(ys)}-{max(ys) + args.roi_size}")
-    final = draw_rois(paths[pick], kept_rois,
-                      os.path.join(OUT_DIR, f"rois_{slug}.jpg"),
-                      # Hundreds of grey survey cells make the picture
-                      # unreadable; the kept ones are the finding.
-                      rejected=dropped_rois if len(dropped_rois) <= 30 else ())
+    final = wrote(draw_rois(paths[pick], kept_rois,
+                            os.path.join(OUT_DIR, f"rois_{slug}.jpg"),
+                            # Hundreds of grey survey cells make the picture
+                            # unreadable; the kept ones are the finding.
+                            rejected=(dropped_rois if len(dropped_rois) <= 30
+                                      else ())))
     if final:
         # Absolute, because data/ is often a symlink into another checkout and
         # a relative path pasted into a browser is a 404 rather than a file.
         print("\n  OPEN THIS BEFORE TRUSTING THE RESULT:")
-        print(f"    open {os.path.abspath(final)}")
+        print(f"    open {final}")
         print("  Orange = kept, grey = dropped. Every orange box should sit on "
               "something\n  bolted down. Orange on a moored boat or a parked "
               "car tracks the boat, and\n  several boats on one mooring field "
@@ -1613,10 +1754,11 @@ def main():
 
     csv_path = os.path.join(OUT_DIR, f"geometry_{slug}.csv")
     frame.to_csv(csv_path, index=False)
+    wrote(csv_path)
     signal = agreeing_signal(frame)
     steps = find_steps(signal["offset"], threshold=args.step_px)
-    png_path = plot(frame, signal, steps, os.path.join(OUT_DIR,
-                                                       f"geometry_{slug}.png"))
+    wrote(plot(frame, signal, steps,
+               os.path.join(OUT_DIR, f"geometry_{slug}.png")))
 
     print("\n" + "=" * 74)
     print("PATCH CROSS-CHECK")
@@ -1677,9 +1819,29 @@ def main():
         report_record(steps, signal.index, slug, args.step_px,
                       "the agreeing patches")
 
-    print(f"\nwrote {csv_path}")
-    if png_path:
-        print(f"wrote {png_path}")
+def finish():
+    """List everything written, in one block, and open it if asked.
+
+    Registered with atexit rather than called at the end of main, because the
+    runs that write the most interesting files are often the ones that stop
+    early -- a patch pass with nothing to report has still written the preview
+    that shows why, and printing its path only on the happy path is how you end
+    up scrolling for it.
+    """
+    if not WRITTEN:
+        return
+    print("\n" + "=" * 74)
+    print("FILES WRITTEN")
+    print("=" * 74)
+    for item in WRITTEN:
+        print(f"  {item}")
+    images = [p for p in WRITTEN if p.lower().endswith((".png", ".jpg"))]
+    if OPEN_IMAGES:
+        show(WRITTEN)
+    elif images:
+        print("\n  open them all with:")
+        print("    open " + " ".join(images))
+        print("  or add --open to the command and the run will do it.")
 
 
 if __name__ == "__main__":
