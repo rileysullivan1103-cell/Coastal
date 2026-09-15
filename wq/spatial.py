@@ -88,6 +88,43 @@ DEFAULT_MIN_INTERVAL = 0.25
 RATE_LIMIT_BACKOFF = (15, 60, 180)
 _LAST_CALL = {}
 
+# After this many consecutive failures, a host is given up on for the rest of
+# the run. Without it, a service that is refusing everything costs its full
+# backoff ladder ONCE PER SITE: ECHO rate-limiting RI's 7 tiles spent four
+# minutes each and then spent them again for every station in the tile,
+# because a failed fetch is not cached and the next station retried it. The
+# covariates that host supplies then come out empty, the coverage rule drops
+# them, and the manifest records that the layer was unavailable -- which is
+# the honest outcome and takes seconds rather than hours.
+CIRCUIT_THRESHOLD = 3
+_FAILURES = {}
+_TRIPPED = set()
+
+
+def _circuit_check(host):
+    if host in _TRIPPED:
+        raise LayerFailed(
+            f"{host}: skipped — {CIRCUIT_THRESHOLD} consecutive failures "
+            "earlier in this run, so this layer is given up on rather than "
+            "retried at every remaining site")
+
+
+def _circuit_record(host, ok):
+    if ok:
+        _FAILURES[host] = 0
+        return
+    _FAILURES[host] = _FAILURES.get(host, 0) + 1
+    if _FAILURES[host] >= CIRCUIT_THRESHOLD and host not in _TRIPPED:
+        _TRIPPED.add(host)
+        print(f"      GIVING UP on {host} after {_FAILURES[host]} consecutive "
+              "failures. Its covariates will be empty and the coverage rule "
+              "will drop them.")
+
+
+def circuit_report():
+    """Hosts abandoned this run, for the layer record and the manifest."""
+    return sorted(_TRIPPED)
+
 
 def _throttle(host):
     wait = HOST_MIN_INTERVAL.get(host, DEFAULT_MIN_INTERVAL)
@@ -130,12 +167,26 @@ def _cache_path(name):
     return os.path.join(CACHE_DIR, f"{name}.json")
 
 
+# Failures within this run, keyed like the cache. A fetch that failed is not
+# written to disk -- a re-run should retry it -- but it must not be retried
+# for every remaining station in the same tile, which is what turned one
+# rate-limited tile into 120 identical failures.
+_FAILED_THIS_RUN = {}
+
+
 def _cached_json(name, builder):
     path = _cache_path(name)
     if os.path.exists(path):
         with open(path) as handle:
             return json.load(handle)
-    payload = builder()
+    if name in _FAILED_THIS_RUN:
+        raise LayerFailed(f"{_FAILED_THIS_RUN[name]} (already failed for this "
+                          "tile in this run; not retried per station)")
+    try:
+        payload = builder()
+    except LayerFailed as exc:
+        _FAILED_THIS_RUN[name] = str(exc)
+        raise
     with open(path, "w") as handle:
         json.dump(payload, handle)
     return payload
@@ -157,15 +208,17 @@ def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
     what the service actually objected to.
     """
     import requests
-    import scan_cameras as scan
     host = url.split("/")[2]
     headers = {"User-Agent": USER_AGENT}
+    _circuit_check(host)
 
-    # 429 means the service is asking to be left alone, and scan_cameras'
-    # 2/4/8-second ladder is far too short an answer -- it retries three times
-    # inside fourteen seconds and then fails the site, which on a national run
-    # produced page after page of retries and no data. Back off in minutes,
-    # and honour Retry-After when the service states one.
+    # ONE retry ladder, here. An earlier version wrapped this loop around
+    # scan_cameras.get_with_retry, which has its own 2/4/8-second ladder for
+    # the same status codes -- so every outer attempt spent fourteen seconds
+    # retrying before the outer backoff even started, and a refusing service
+    # cost four minutes per attempt to learn nothing. Nested retry ladders
+    # multiply; they do not compose.
+    response = None
     for attempt, pause in enumerate((0,) + RATE_LIMIT_BACKOFF):
         if pause:
             print(f"      {host} rate-limited; waiting {pause}s "
@@ -177,17 +230,20 @@ def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
                 response = requests.post(url, data=data, timeout=timeout,
                                          headers=headers)
             else:
-                response = scan.get_with_retry(url, params=params,
-                                               headers=headers)
+                response = requests.get(url, params=params, timeout=timeout,
+                                        headers=headers)
         except requests.RequestException as exc:
+            _circuit_record(host, ok=False)
             raise LayerFailed(f"{host}: {type(exc).__name__}") from exc
-        if response.status_code not in (429, 503, 504):
+        if response.status_code not in (429, 502, 503, 504):
             break
         stated = response.headers.get("Retry-After")
         if stated and str(stated).isdigit():
             wait = min(int(stated), 300)
             print(f"      {host} asked for {wait}s")
             time.sleep(wait)
+    _circuit_record(host, ok=response is not None
+                    and response.status_code == 200)
     if probe:
         print(f"    {method} {response.url[:150]}")
         print(f"      HTTP {response.status_code}, "
@@ -833,6 +889,17 @@ def build(sites, record=None, progress=True, want=None):
             left = (total - index) * done / max(index, 1)
             print(f"  [{index}/{total}] spatial covariates  "
                   f"~{left / 60:.0f} min left")
+    abandoned = circuit_report()
+    if abandoned:
+        print(f"\n  layers abandoned this run: {', '.join(abandoned)}")
+        print("  Their covariates are empty. That is recorded in the manifest, "
+              "and the coverage rule will drop them.")
+        for key, layer in layers.LAYERS.items():
+            if any(host in layer["endpoint"] for host in abandoned):
+                layers.record_access(
+                    record, key,
+                    note=f"abandoned after {CIRCUIT_THRESHOLD} consecutive "
+                         "failures in this run")
     frame = fill_drainage_from_wqp(pd.DataFrame(rows), sites)
     return frame, record
 
