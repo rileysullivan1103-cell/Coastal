@@ -11,3 +11,13 @@ requests
 # without it, so neither is needed to run the pipeline.
 Pillow
 matplotlib
+
+# check_geometry_strict.py only, for its PRIMARY registration route:
+# ORB/SIFT features plus a RANSAC homography fit. RANSAC is what rejects the
+# moving water instead of averaging it in, and a homography is what makes a
+# rotation or a zoom visible at all -- phase correlation measures a shift and
+# is structurally blind to both. The headless build is the right one here:
+# nothing in this repo opens a window, and the GUI build drags in Qt.
+# Without it that script can still run --inventory and its phase route, but
+# the phase route alone has nothing to cross-check it against.
+opencv-python-headless

@@ -1495,3 +1495,97 @@ rescues them. What MOP delivered is height, mean period, peak period and peak
 direction, well measured and close in. The rip-forcing term is not available
 from this source at this stretch of coast, and nothing here should be read as
 having tested it.
+
+## The stricter geometry check (`check_geometry_strict.py`)
+
+`check_camera_geometry.py` answers "is this one geometric record or several?"
+with phase correlation over the whole frame. Running it end to end at Walton
+Lighthouse exposed four ways that method can be confidently wrong, and this
+script is the same question asked so that none of them is available.
+
+    python check_geometry_strict.py --camera <slug> --inventory
+    python check_geometry_strict.py --camera <slug> --cached --mask-preview
+    python check_geometry_strict.py --camera <slug> --cached --survey
+
+**The water is masked out before anything is registered, not after.** At Walton
+six of twelve surviving patches sat on buildings and the six that failed sat on
+surf and open water — the frame is majority moving ocean, so a whole-frame
+correlation is partly a measurement of the waves. The land mask is declared by
+hand in the `MASKS` table, with a note saying which frame it was drawn from, and
+**registration exits rather than run without one**. A synthetic scene where the
+water moves 30 px and the land moves 5 px is in the test suite: unmasked, the
+run returns the water's 30 px at a confidence of 374.
+
+**The primary route fits a homography, not a shift.** SIFT (or ORB) with RANSAC,
+matched only on the masked land. RANSAC rejects outliers instead of averaging
+them in, and a homography carries rotation, scale and perspective. This matters
+more than it sounds: *a rotation about the frame centre moves the centre pixel
+by exactly zero*, so a camera that turned 2° — moving its corners by 13 px —
+reads as perfectly stable to any shift-only method. Every run reports rotation,
+scale, anisotropy and bend alongside translation. **A zoom change leaves the
+frame size untouched and so never appears in metadata**; the scale column is the
+only place it can show up.
+
+**Phase correlation is kept as a second, independent route.** Not for
+redundancy: the gap between two routes is the only thing in the file that
+measures *correctness*. Confidence does not. Walton's per-quarter table read
+88–100% registered in quarters that demonstrably did not register, because
+peak-to-sidelobe ratio says how distinctive a peak is and never whether it is in
+the right place. The pass rate is reported here and is never the answer.
+
+**Only boundaries both routes find are called confirmed.** Everything else is
+labelled as one route's candidate, and distinguished from the case where the
+other route had no frames there to look at.
+
+### The noise algebra is not the same as the Walton one
+
+Within one route, a neighbour step is compared against the difference of two
+measurements against the reference, so the gap carries `e·√3` and `noise =
+gap/√3` — as before. **Between the two routes it is `e·√2`, not `e·√3`**, because
+those are two direct measurements of the same quantity rather than a step
+against a difference. Using √3 there would understate the error by 22% and
+promise a resolution the data does not support. The step threshold is three
+times the *worst* of the available estimates, never the kindest.
+
+### Two things measured here that are easy to get wrong
+
+**Do not difference the survivors.** Dropping weak frames and then calling
+`.diff()` pairs each neighbour step with whatever row happened to survive before
+it. Across a fortnight of fog that is a two-week gap, so the camera's real
+motion over that fortnight gets booked as measurement noise and the floor
+inflates until nothing can be resolved.
+
+**A masked band loses its short axis.** Measured on synthetic texture with a
+known (+2, +5) px displacement: a 200-row band recovers (2.00, 5.00), a 120-row
+band recovers (2.00, 5.00), and a 72-row band recovers **(0.28, 4.99)** — the
+horizontal exact and the vertical gone, at ordinary confidence. At a beach
+camera the land *is* a strip along the bottom of the frame, so this is the
+normal case. Below `THIN_BAND_PX` the run says so. Getting even that far needs
+two details: crop to the **binary** mask's bounding box, not the outer end of
+its feathered ramp (or the ramp and the Hann window between them leave too few
+rows at full weight), and **keep** the Hann window rather than flattening it,
+because the band runs into the frame edge where rows have no counterpart under
+vertical motion.
+
+### The survey is the decisive test, and it is run early
+
+Tile the land into non-overlapping cells and register each independently. A
+rigid camera translation displaces every cell by the same vector, so a common
+vector either exists or it does not — no view about which part of the scene is
+interesting is required. At Walton this was the strongest single piece of
+evidence: 280 cells, no three agreeing within 3 px.
+
+**The grid is anchored to the mask, not to the frame origin.** Land at rows
+298–479 of a 480-row frame is 182 rows — room for a 128 px cell with 54 to
+spare — but the only frame-anchored row starts at 384 and runs off the bottom,
+so the survey found zero cells and the decisive test silently did not run. Cells
+stay non-overlapping so their agreement is independent; if the band cannot hold
+three, the cell size drops rather than letting cells share pixels.
+
+### What it will not do
+
+It will not correct or re-register anything. It will not pool two cameras on the
+same beach. It will not register across a frame-size change — that is a hard
+epoch boundary, and the inventory that finds it runs before anything else,
+because weekly sampling at Walton missed a five-frame resolution change entirely
+and it took the full daily pull to surface.
