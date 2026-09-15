@@ -1099,7 +1099,16 @@ def for_site(site, record=None, probe=False, want=None):
             layers.record_access(record, "coastline", note=str(exc))
 
     if "nhdplus" in want:
+        # All three are attempted the moment the NHDPlus request goes out:
+        # nlcd and nhdplus_vaa ride in on the same response (DERIVED_FROM).
+        # Counting them where they SUCCEED instead made nlcd read 115/115 --
+        # a layer that missed five sites reporting as perfect -- and left
+        # nhdplus_vaa at 0/0, which reads as never tried when it was tried
+        # at every site and came back empty. A count that cannot tell an
+        # absence from a non-attempt is the bug this module keeps finding.
         record["nhdplus"]["sites_attempted"] += 1
+        record["nhdplus_vaa"]["sites_attempted"] += 1
+        record["nlcd"]["sites_attempted"] += 1
         try:
             def build():
                 comid, _geometry, _properties = fetch_comid(lat, lon, probe=probe)
@@ -1153,7 +1162,8 @@ def for_site(site, record=None, probe=False, want=None):
                                  note=landcover_note)
             if values.get("dist_to_stream_m") is not None:
                 record["nhdplus"]["sites_populated"] += 1
-            record["nlcd"]["sites_attempted"] += 1
+            if values.get("stream_order") is not None:
+                record["nhdplus_vaa"]["sites_populated"] += 1
             if values.get("impervious_frac") is not None:
                 record["nlcd"]["sites_populated"] += 1
         except LayerFailed as exc:

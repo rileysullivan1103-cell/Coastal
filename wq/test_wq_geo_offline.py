@@ -819,6 +819,30 @@ def test_manifest_records_layers_and_amendments():
                           "land_fraction_5km": spread,
                           "embayment_ratio": [0.9 - 0.02 * i for i in range(10)],
                           "impervious_frac": spread[:3] + [None] * 7})
+    # A layer attempted and empty must not look like a layer never tried.
+    # nlcd and nhdplus_vaa ride in on the NHDPlus response, so all three are
+    # attempted together; counting them on success made nlcd read 115/115
+    # (perfect, having missed five sites) and nhdplus_vaa read 0/0 (never
+    # tried, having been tried everywhere and come back empty).
+    print("\nattempted is not the same as populated")
+    trial = layers.blank_record()
+    for _ in range(10):
+        for name in ("nhdplus", "nhdplus_vaa", "nlcd"):
+            trial[name]["sites_attempted"] += 1
+    trial["nlcd"]["sites_populated"] = 7
+    section = layers.manifest_section(trial)
+    check("a layer that answered nowhere still counts its attempts",
+          section["nhdplus_vaa"]["sites_attempted"] == 10
+          and section["nhdplus_vaa"]["sites_populated"] == 0,
+          f"{section['nhdplus_vaa']['sites_populated']}"
+          f"/{section['nhdplus_vaa']['sites_attempted']}")
+    check("a partly populated layer is not reported as whole",
+          section["nlcd"]["sites_attempted"] == 10,
+          f"{section['nlcd']['sites_populated']}"
+          f"/{section['nlcd']['sites_attempted']}")
+    check("a layer never in `want` stays at zero of zero",
+          section["coops_datums"]["sites_attempted"] == 0)
+
     record = layers.blank_record()
     layers.record_access(record, "coastline", "2026-09-01T00:00:00Z")
     record["coastline"]["sites_attempted"] = 10
