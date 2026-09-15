@@ -732,7 +732,10 @@ def main():
     preview = draw_rois(paths[0], rois,
                         os.path.join(OUT_DIR, f"rois_{slug}.jpg"))
     if preview:
-        print(f"\n  OPEN THIS BEFORE TRUSTING THE RESULT: {preview}")
+        # Absolute, because data/ is often a symlink into another checkout and
+        # a relative path pasted into a browser is a 404 rather than a file.
+        print(f"\n  OPEN THIS BEFORE TRUSTING THE RESULT:")
+        print(f"    open {os.path.abspath(preview)}")
         print("  Each box must sit on something bolted down — the lighthouse,")
         print("  a roofline, a railing. A box on a moored boat or a parked car")
         print("  tracks the boat. Re-run with --roi name:x,y,w,h to override.")
