@@ -37,7 +37,15 @@ WATERS_FLOWLINE = ("https://watersgeo.epa.gov/arcgis/rest/services/"
 ECHO_FACILITIES = ("https://echodata.epa.gov/echo/"
                    "cwa_rest_services.get_facilities")
 ECHO_DOWNLOAD = "https://echodata.epa.gov/echo/cwa_rest_services.get_download"
-OVERPASS = "https://overpass-api.de/api/interpreter"
+# Overpass mirrors, tried in order. The main instance rate-limits and
+# occasionally rejects a request the mirrors accept, and a coastline is the
+# one layer with no substitute, so it is worth a second and third try.
+OVERPASS_MIRRORS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+)
+OVERPASS = OVERPASS_MIRRORS[0]
 
 # NLDI characteristic ids. Matched by SUBSTRING against the catalogue the
 # service publishes, because the year suffix moves with each NLCD release and
@@ -75,19 +83,61 @@ def _cached_json(name, builder):
     return payload
 
 
-def _get(url, params=None, timeout=120, method="GET", data=None):
+# Several of these services reject the default python-requests agent, and
+# Overpass asks by name that scripts identify themselves.
+USER_AGENT = ("coastal-wq/1.0 (research pipeline; "
+              "https://github.com/rileysullivan1103-cell/Coastal)")
+
+
+def _get(url, params=None, timeout=120, method="GET", data=None, probe=False):
+    """One request, with the failure body attached to the error.
+
+    A bare "HTTP 406" is not diagnosable -- it was 406 from Overpass that hid
+    a query the server would have explained if anyone had read its body. The
+    body is truncated into the LayerFailed message so a failing probe says
+    what the service actually objected to.
+    """
     import requests
     import scan_cameras as scan
+    headers = {"User-Agent": USER_AGENT}
     try:
         if method == "POST":
-            response = requests.post(url, data=data, timeout=timeout)
+            response = requests.post(url, data=data, timeout=timeout,
+                                     headers=headers)
         else:
-            response = scan.get_with_retry(url, params=params)
+            response = scan.get_with_retry(url, params=params, headers=headers)
     except requests.RequestException as exc:
         raise LayerFailed(f"{url.split('/')[2]}: {type(exc).__name__}") from exc
+    if probe:
+        print(f"    {method} {response.url[:150]}")
+        print(f"      HTTP {response.status_code}, "
+              f"{len(response.content) / 1000:.1f} kB")
     if response.status_code != 200:
-        raise LayerFailed(f"{url.split('/')[2]}: HTTP {response.status_code}")
+        detail = (response.text or "").strip().replace("\n", " ")[:300]
+        raise LayerFailed(f"{url.split('/')[2]}: HTTP "
+                          f"{response.status_code} — {detail}")
     return response
+
+
+def _first_working(candidates, probe=False):
+    """Try several URL shapes and return (response, url) for the one that
+    answers, or raise with every failure listed.
+
+    None of these endpoints could be checked against a live response when
+    they were written, and a service that has moved its path answers 404 to
+    the old one. Trying the documented shapes in order and RECORDING which
+    one worked is the difference between a covariate that is missing and a
+    covariate that is missing for a reason nobody wrote down.
+    """
+    failures = []
+    for url, params in candidates:
+        try:
+            return _get(url, params=params, probe=probe), url
+        except LayerFailed as exc:
+            failures.append(str(exc))
+            if probe:
+                print(f"      no: {exc}")
+    raise LayerFailed(" | ".join(failures))
 
 
 # ---------------------------------------------------------------------------
@@ -103,10 +153,27 @@ def fetch_coastline(lat, lon, km=COASTLINE_BBOX_KM, probe=False):
     dlat = km / 111.0
     dlon = km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
     bbox = f"{lat - dlat:.4f},{lon - dlon:.4f},{lat + dlat:.4f},{lon + dlon:.4f}"
-    query = (f'[out:json][timeout:120];'
-             f'way["natural"="coastline"]({bbox});out geom;')
-    response = _get(OVERPASS, method="POST", data={"data": query})
-    payload = response.json()
+    query = (f"[out:json][timeout:120];"
+             f'way["natural"="coastline"]({bbox});'
+             f"out geom;")
+    if probe:
+        print(f"  overpass query: {query}")
+
+    failures = []
+    payload = None
+    for mirror in OVERPASS_MIRRORS:
+        try:
+            response = _get(mirror, method="POST", data={"data": query},
+                            probe=probe)
+            payload = response.json()
+            break
+        except LayerFailed as exc:
+            failures.append(str(exc))
+            if probe:
+                print(f"    mirror failed: {exc}")
+    if payload is None:
+        raise LayerFailed(" | ".join(failures))
+
     if probe:
         print(f"  overpass returned {len(payload.get('elements', []))} ways")
         print(f"  osm3s: {payload.get('osm3s')}")
@@ -175,32 +242,82 @@ def coastline_covariates(lat, lon, lines, vintage=None):
 # ---------------------------------------------------------------------------
 
 def fetch_comid(lat, lon, probe=False):
+    """The NHDPlus flowline the station sits on.
+
+    The comid is printed under --probe because everything downstream is keyed
+    on it: a properties dict that spells it differently gives comid "None",
+    and every characteristics URL built from that 404s while looking like the
+    service is down.
+    """
     response = _get(f"{NLDI_BASE}/comid/position",
-                    params={"coords": f"POINT({lon} {lat})", "f": "json"})
+                    params={"coords": f"POINT({lon} {lat})", "f": "json"},
+                    probe=probe)
     payload = response.json()
-    if probe:
-        print(f"  NLDI position -> {json.dumps(payload)[:400]}")
     features = payload.get("features") or []
     if not features:
         raise LayerFailed("NLDI: no flowline at this coordinate")
     properties = features[0].get("properties") or {}
-    comid = (properties.get("comid") or properties.get("identifier")
-             or properties.get("nhdplus_comid"))
-    geometry = features[0].get("geometry") or {}
-    return str(comid), geometry, properties
+    if probe:
+        print(f"  NLDI feature properties: {json.dumps(properties)[:300]}")
+    comid = None
+    for key in ("comid", "identifier", "nhdplus_comid", "featureid", "COMID"):
+        value = properties.get(key)
+        if value not in (None, "", "null"):
+            comid = str(value).strip()
+            break
+    if comid is None or not comid.isdigit():
+        raise LayerFailed(
+            f"NLDI: no numeric comid in the feature properties "
+            f"({sorted(properties)[:8]}) — the field moved; update fetch_comid")
+    if probe:
+        print(f"  NLDI comid: {comid}")
+    return comid, features[0].get("geometry") or {}, properties
+
+
+# Catchment-accumulated characteristics have lived at more than one path.
+# Each shape is tried in order and the one that answers is recorded, rather
+# than a single guess 404ing and taking every land-cover covariate with it.
+NLDI_CHARACTERISTIC_PATHS = (
+    "{base}/comid/{comid}/tot",
+    "{base}/comid/{comid}/characteristics/tot",
+    "https://labs.waterdata.usgs.gov/api/nldi/linked-data/comid/{comid}/tot",
+)
+NLDI_CATALOGUE_PATHS = (
+    "{lookups}/tot/characteristics",
+    "{base}/../lookups/tot/characteristics",
+    "https://labs.waterdata.usgs.gov/api/nldi/lookups/tot/characteristics",
+)
+# Which path answered, so the manifest can record it and the next run can
+# skip the ones that do not.
+WORKING_PATHS = {}
+
+
+def _characteristic_rows(payload):
+    """NLDI has returned these under more than one key shape."""
+    rows = (payload.get("characteristics")
+            or payload.get("characteristic")
+            or payload.get("characteristicMetadata") or [])
+    if isinstance(rows, dict):
+        rows = rows.get("characteristic") or list(rows.values())
+    return rows if isinstance(rows, list) else []
 
 
 def fetch_characteristics(comid, probe=False):
-    response = _get(f"{NLDI_BASE}/comid/{comid}/tot", params={"f": "json"})
+    candidates = [(path.format(base=NLDI_BASE, comid=comid), {"f": "json"})
+                  for path in NLDI_CHARACTERISTIC_PATHS]
+    response, url = _first_working(candidates, probe=probe)
+    WORKING_PATHS["nldi_characteristics"] = url
     payload = response.json()
-    rows = payload.get("characteristics") or []
+    rows = _characteristic_rows(payload)
     if probe:
-        print(f"  NLDI tot characteristics: {len(rows)}")
-        for row in rows[:25]:
-            print(f"    {row.get('characteristic_id'):<24} "
+        print(f"  NLDI characteristics from {url}: {len(rows)} rows")
+        for row in rows[:20]:
+            print(f"    {str(row.get('characteristic_id')):<24} "
                   f"{row.get('characteristic_value')}")
+        if not rows:
+            print(f"    payload keys: {list(payload)[:10]}")
     return {str(r.get("characteristic_id")): r.get("characteristic_value")
-            for r in rows}
+            for r in rows if r.get("characteristic_id")}
 
 
 def characteristic_catalogue(probe=False):
@@ -208,8 +325,12 @@ def characteristic_catalogue(probe=False):
     NLCD year is written. Cached, because it is the same for every site and
     it is what the manifest records as the land-cover vintage."""
     def build():
-        response = _get(f"{NLDI_LOOKUPS}/tot/characteristics",
-                        params={"f": "json"})
+        candidates = [(path.format(lookups=NLDI_LOOKUPS, base=NLDI_BASE),
+                       {"f": "json"})
+                      for path in NLDI_CATALOGUE_PATHS
+                      if "{base}/.." not in path]
+        response, url = _first_working(candidates, probe=probe)
+        WORKING_PATHS["nldi_catalogue"] = url
         return response.json()
 
     payload = _cached_json("nldi_catalogue", build)
@@ -265,6 +386,7 @@ def stream_covariates(lat, lon, lines, comid=None, characteristics=None,
     area = characteristics.get(BASIN_AREA_ID)
     out["upstream_area_km2"] = (float(area) if area not in (None, "")
                                 else None)
+    out["upstream_area_source"] = "nldi" if out["upstream_area_km2"] else None
 
     impervious_id, developed_ids, vintage = pick_landcover_ids(catalogue)
     out["landcover_vintage"] = vintage
@@ -359,6 +481,15 @@ def fetch_flowlines(lat, lon, km=STREAM_SEARCH_KM, probe=False):
 # EPA ECHO (permitted discharges)
 # ---------------------------------------------------------------------------
 
+# ECHO's download returns a DEFAULT column set unless you ask for columns by
+# name, and that default carries FacLong without FacLat -- so a distance
+# calculation over it silently finds nothing, everywhere, forever. These are
+# the columns this module actually reads.
+ECHO_COLUMNS = ("SourceID", "CWPName", "FacLat", "FacLong",
+                "CWPMajorMinorStatusFlag", "CWPFacilityTypeIndicator",
+                "CWPPermitStatusDesc", "CWPTotalDesignFlowNmbr")
+
+
 def fetch_outfalls(lat, lon, km=OUTFALL_SEARCH_KM, probe=False):
     dlat = km / 111.0
     dlon = km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
@@ -367,18 +498,40 @@ def fetch_outfalls(lat, lon, km=OUTFALL_SEARCH_KM, probe=False):
         "p_c1lon": f"{lon - dlon:.5f}", "p_c1lat": f"{lat + dlat:.5f}",
         "p_c2lon": f"{lon + dlon:.5f}", "p_c2lat": f"{lat - dlat:.5f}",
     }
-    payload = _get(ECHO_FACILITIES, params=params).json()
+    payload = _get(ECHO_FACILITIES, params=params, probe=probe).json()
     results = payload.get("Results") or {}
     qid = results.get("QueryID")
+    rows = results.get("QueryRows")
     if probe:
-        print(f"  ECHO QueryID {qid}, rows {results.get('QueryRows')}")
+        print(f"  ECHO QueryID {qid}, rows {rows}")
+        error = results.get("Error") or payload.get("Error")
+        if error:
+            print(f"  ECHO error: {error}")
     if not qid:
         return []
+    try:
+        if int(str(rows).strip() or 0) == 0:
+            if probe:
+                print("  ECHO: no permitted facilities in this box — a real "
+                      "answer, not a failure")
+            return []
+    except (TypeError, ValueError):
+        pass
+
     from io import StringIO
-    text = _get(ECHO_DOWNLOAD, params={"qid": qid, "output": "CSV"}).text
+    text = _get(ECHO_DOWNLOAD,
+                params={"qid": qid, "output": "CSV",
+                        "qcolumns": ",".join(ECHO_COLUMNS)},
+                probe=probe).text
     frame = pd.read_csv(StringIO(text), low_memory=False)
     if probe:
-        print(f"  ECHO download columns: {list(frame.columns)[:25]}")
+        print(f"  ECHO download columns: {list(frame.columns)}")
+        missing = [c for c in ("FacLat", "FacLong") if c not in frame.columns]
+        if missing:
+            print(f"  ECHO: {missing} absent even with qcolumns — without a "
+                  "latitude nothing here can be placed, so the outfall "
+                  "covariates will stay empty and the coverage rule will "
+                  "drop them")
     return frame.to_dict("records")
 
 
@@ -523,6 +676,37 @@ def _slug(text):
     return "".join(c if c.isalnum() else "_" for c in str(text))[:64]
 
 
+def fill_drainage_from_wqp(frame, sites):
+    """Use WQP's own drainage area wherever NLDI did not answer.
+
+    Same quantity, different source, and the source is recorded per site --
+    a covariate assembled from two layers without saying which is which is
+    exactly what the vintage logging exists to prevent.
+    """
+    if "wqp_drainage_area_km2" not in sites.columns:
+        return frame
+    lookup = dict(zip(sites["station_id"].astype(str),
+                      pd.to_numeric(sites["wqp_drainage_area_km2"],
+                                    errors="coerce")))
+    out = frame.copy()
+    if "upstream_area_km2" not in out.columns:
+        out["upstream_area_km2"] = np.nan
+        out["upstream_area_source"] = None
+    filled = 0
+    for index, row in out.iterrows():
+        if pd.notna(row.get("upstream_area_km2")):
+            continue
+        value = lookup.get(str(row["station_id"]))
+        if value is not None and pd.notna(value):
+            out.at[index, "upstream_area_km2"] = float(value)
+            out.at[index, "upstream_area_source"] = "wqp_station_record"
+            filled += 1
+    if filled:
+        print(f"  upstream_area_km2: {filled} site(s) filled from the WQP "
+              "station record where NLDI did not answer")
+    return out
+
+
 def build(sites, record=None, progress=True, want=None):
     """Spatial covariates for every site. Returns (frame, layer_record)."""
     record = record if record is not None else layers.blank_record()
@@ -538,7 +722,7 @@ def build(sites, record=None, progress=True, want=None):
             left = (total - index) * done / max(index, 1)
             print(f"  [{index}/{total}] spatial covariates  "
                   f"~{left / 60:.0f} min left")
-    frame = pd.DataFrame(rows)
+    frame = fill_drainage_from_wqp(pd.DataFrame(rows), sites)
     return frame, record
 
 

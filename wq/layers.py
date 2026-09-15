@@ -61,6 +61,9 @@ LAYERS = {
         "declared_vintage": "ECHO refreshes weekly from ICIS-NPDES",
         "vintage_source": "response carries no timestamp; accessed_at is the "
                           "only date available",
+        "note": "the download needs an explicit qcolumns list — ECHO's "
+                "default set returns FacLong without FacLat, which places "
+                "nothing and fails silently",
         "citation": "US EPA Enforcement and Compliance History Online",
         "caveat": "ECHO gives the FACILITY location, not the outfall pipe. A "
                   "treatment plant sited a kilometre inland of its own "

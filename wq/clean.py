@@ -469,7 +469,7 @@ def nondetect_shares(frame):
         n=("value", "size"),
         n_nondetect=("nondetect", "sum"),
         n_over_range=("over_range", "sum"),
-        n_methods=("method", lambda s: s.replace("", np.nan).nunique()),
+        n_methods=("method", lambda s: s.where(s.astype(str) != "").nunique()),
         n_estimators=("estimator", lambda s: s[s != "unknown"].nunique()),
     ).reset_index()
     out["nondetect_fraction"] = out["n_nondetect"] / out["n"]

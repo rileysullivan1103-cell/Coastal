@@ -26,6 +26,7 @@ import time
 from datetime import date
 from io import StringIO
 
+import numpy as np
 import pandas as pd
 
 from . import config
@@ -69,6 +70,12 @@ STATION_LON = "LongitudeMeasure"
 STATION_STATE = "StateCode"
 STATION_COUNTY = "CountyCode"
 STATION_ORG = "OrganizationIdentifier"
+# WQP publishes the upstream drainage area on the station record itself.
+# Confirmed present in a live Rhode Island response. It is the same quantity
+# NLDI accumulates, arriving free with a pull that already happens, so it is
+# read here and used wherever NLDI has not answered for a site.
+STATION_DRAINAGE = "DrainageAreaMeasure/MeasureValue"
+STATION_DRAINAGE_UNIT = "DrainageAreaMeasure/MeasureUnitCode"
 
 # Top-level siteType categories to request. The finer filter that actually
 # decides a site (config.COASTAL_SITE_TYPES, matched against
@@ -214,6 +221,23 @@ def normalize_stations(stations):
         "lon": pd.to_numeric(stations.get(STATION_LON), errors="coerce"),
         "organization": stations.get(STATION_ORG, "").astype(str),
     })
+    if STATION_DRAINAGE in stations.columns:
+        area = pd.to_numeric(stations[STATION_DRAINAGE], errors="coerce")
+        unit = (stations.get(STATION_DRAINAGE_UNIT, "").astype(str)
+                .str.strip().str.lower())
+        # WQP reports these in square miles far more often than in km2, and a
+        # 2.59x error in a stratification variable is not recoverable later.
+        factor = pd.Series(np.nan, index=area.index)
+        factor[unit.str.startswith("sq mi") | unit.isin(["mi2", "sqmi"])] = 2.58999
+        factor[unit.str.startswith("sq km") | unit.isin(["km2", "sqkm"])] = 1.0
+        out["wqp_drainage_area_km2"] = area * factor
+        unknown = area.notna() & factor.isna()
+        if unknown.any():
+            seen = sorted(set(stations.loc[unknown, STATION_DRAINAGE_UNIT]
+                              .astype(str)))[:4]
+            print(f"  {int(unknown.sum())} station(s) report a drainage area "
+                  f"in an unrecognised unit {seen} — left empty rather than "
+                  "assumed")
     codes = stations.get(STATION_STATE)
     if codes is not None:
         out["state"] = (codes.astype(str).str.extract(r"(\d+)")[0]
