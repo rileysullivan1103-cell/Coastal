@@ -185,9 +185,21 @@ far corner of the box is recorded in `coastline_check` and otherwise ignored,
 because voiding forty stations over geometry none of them read is not caution,
 it is just a different way of getting the answer wrong.
 
-The join tolerance is **1 m**, not the 50 m it started at: ways that really
-chain share a node, and at 50 m two ways merely passing near each other in an
-estuary register as a junction and then get called a reversal.
+Two things had to be right before the check was worth reading, and neither
+was at first. **The join tolerance is 1 m**, not the 50 m it started at: ways
+that really chain share a node, and at 50 m two ways merely passing near each
+other in an estuary register as a junction. And **endpoints are clustered
+before they are judged**, because the head-to-tail rule only applies to a node
+where exactly two way-ends meet — at a river mouth where one way ends and two
+begin, a pairwise scan sees two starts and calls it a reversal when nothing is
+wrong. Nodes of degree three or more are counted and reported, never judged.
+
+> Run against Rhode Island, the first version reported **1254 of 3959
+> junctions reversed** — in every tile, about a third of them. OSM is not a
+> third broken; the check was. It voided the coastline covariates at all 120
+> stations, and because a rejected covariate looks exactly like one nobody
+> asked for, the coverage table showed a row of zeros with no error anywhere
+> above it. That is what `--explain-spatial` exists for.
 
 > An earlier version of that check probed each segment against itself and
 > agreed 100% of the time on every input, including a deliberately reversed
