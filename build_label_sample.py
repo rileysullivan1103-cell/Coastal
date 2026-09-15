@@ -347,7 +347,15 @@ def main():
     print(f"  {len(detected)} scored frames, {len(blank_hours)} imagery hours with no detection")
     print(f"  confidence split at score_max {cut:.3f} (median of scored frames)")
     if len(edges) == 4:
+        # The cut points alone hide how much physical contrast the wave axis
+        # has. Equal-count terciles on a tightly clustered record can put the
+        # middle third inside a 20 cm band, which makes "H2 mid" a label for a
+        # slice too narrow to expect a precision difference across.
         print(f"  wave terciles at {edges[1]:.2f} m and {edges[2]:.2f} m")
+        print(f"    H1 low   {heights.min():.2f} - {edges[1]:.2f} m")
+        print(f"    H2 mid   {edges[1]:.2f} - {edges[2]:.2f} m "
+              f"({edges[2] - edges[1]:.2f} m wide)")
+        print(f"    H3 high  {edges[2]:.2f} - {heights.max():.2f} m")
     print(f"\n  candidates per stratum:")
     counts = pool.groupby("stratum").size().sort_index()
     for name, n in counts.items():
