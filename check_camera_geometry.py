@@ -40,6 +40,17 @@ THE KEY TEST IS AGREEMENT BETWEEN FEATURES. One patch moving is a sign that
 blew over. Every patch moving by the same vector on the same date is the
 camera. Both are reported, and the epoch split uses the agreeing signal.
 
+That test is also how the patches are CHOSEN. Picking four patches by how they
+look in one frame and then trusting them failed at Walton three times running:
+sky, then a banner, then fog. Sharpness in a single frame cannot tell a
+roofline from a bright bank of cloud. So the run now picks a dozen candidates,
+tracks all of them, and keeps the largest group whose offset series agree with
+each other over the whole record. Rigid patches agree because they are bolted
+to the same building; fog, surf and glare do not agree with anything, including
+each other. The patches are selected by the evidence rather than by my reading
+of one JPEG, and the ones that were thrown out are drawn on the preview in
+grey so the choice is inspectable.
+
 Outputs, per camera, under data/geometry/:
   geometry_<slug>.csv   one row per frame per feature: dx, dy, confidence
   geometry_<slug>.png   per-feature offset against date, plus the step trace
@@ -68,9 +79,19 @@ DEFAULT_HOUR_UTC = 20
 # A frame within this many hours of the target is close enough to stand in.
 HOUR_TOLERANCE = 3
 
-# Patch size for tracking, and how many patches to follow.
+# Patch size for tracking.
 ROI_SIZE = 128
-N_FEATURES = 4
+# How many candidates to propose and track before the agreement test picks the
+# keepers. More candidates is cheap -- the frames are already loaded, and a
+# 128x128 FFT is nothing next to decoding a 2560x1920 JPEG -- and it is the
+# only defence against a frame where the sharpest-looking thing is weather.
+CANDIDATES = 12
+# Vertical bands the candidates are spread across. Patches from one band are
+# four samples of one thing and agree with each other whatever the camera did.
+BANDS = 4
+# Fewer than this many mutually-agreeing features is not a rigid scene, it is a
+# coincidence. Two patches agreeing could both be on the same drifting fogbank.
+MIN_CLUSTER = 3
 # Features are taken from the top of the frame by default: land, roofline and
 # structure live there, and the beach and water -- which move for real reasons
 # -- live below. --land-fraction moves the line.
@@ -292,7 +313,7 @@ def phase_shift(reference, image):
     return float(-dy), float(-dx), confidence
 
 
-def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
+def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
                  land_fraction=LAND_FRACTION, sample=16,
                  top_margin=0, bottom_margin=0):
     """Pick patches that are sharp in space and still in time.
@@ -407,55 +428,66 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
         print("  nothing is both calm and alive; dropping the calm test")
         score = np.where(usable & alive, patch_structure, 0.0)
 
-    # Take the best patch from each horizontal band rather than the best four
-    # overall. Greedy selection with local suppression walks along one row: at
+    # Spread the candidates across horizontal bands rather than taking the best
+    # N overall. Greedy selection with local suppression walks along one row: at
     # Walton it put all four patches at y=0, spanning the full width but
     # sampling a single band, and four samples of one band agree with each
     # other whatever the camera did. Bands force the patches apart vertically,
     # which is what makes their agreement mean something.
     rows = np.flatnonzero(usable.any(axis=1))
-    edges = np.linspace(rows[0], rows[-1] + 1, count + 1).astype(int)
-    bands = [(edges[i], edges[i + 1]) for i in range(count)]
+    bands = max(1, min(bands, count))
+    edges = np.linspace(rows[0], rows[-1] + 1, bands + 1).astype(int)
+    per_band = int(np.ceil(count / bands))
 
     rois = []
     working = score.copy()
-    for band_top, band_bottom in bands:
-        banded = np.zeros_like(working)
-        banded[band_top:band_bottom, :] = working[band_top:band_bottom, :]
-        # A band with nothing usable in it -- all water, or all overlay --
-        # falls back to the best patch left anywhere, so a frame whose
-        # structure really is all in one place still gets its features.
-        # Bands express a preference for vertical spread, not a mandate to
-        # accept rubbish: a band of nothing but fog has a best patch, and it is
-        # still fog. Below a quarter of the best score anywhere, take the best
-        # remaining patch instead of the best patch in this band.
-        floor = 0.25 * float(working.max()) if working.any() else 0.0
-        source = banded if banded.max(initial=0.0) >= floor and banded.any() \
-            else working
-        if not source.any():
-            break
-        cy, cx = np.unravel_index(int(np.argmax(source)), source.shape)
-        rois.append({"name": f"feature{len(rois) + 1}",
-                     "x": int(cx * 2 - size // 2), "y": int(cy * 2 - size // 2),
-                     "w": size, "h": size,
-                     # Carried so the run can print why each patch was chosen.
-                     # A patch reported with near-zero variation is an overlay
-                     # whatever else the output says.
-                     "structure": float(patch_structure[cy, cx]),
-                     "spread": float(patch_spread[cy, cx])})
-        # Suppress a generous neighbourhood so the patches are not all one
-        # corner of one roof.
-        y0, y1 = max(0, cy - half * 3), cy + half * 3
-        x0, x1 = max(0, cx - half * 3), cx + half * 3
-        working[y0:y1, x0:x1] = 0
+    for index in range(bands):
+        band_top, band_bottom = edges[index], edges[index + 1]
+        for _ in range(per_band):
+            if len(rois) >= count:
+                break
+            banded = np.zeros_like(working)
+            banded[band_top:band_bottom, :] = working[band_top:band_bottom, :]
+            # A band with nothing usable left in it -- all water, all overlay,
+            # or already suppressed -- falls back to the best patch anywhere,
+            # so a frame whose structure really is all in one place still gets
+            # its candidates. Bands express a preference for vertical spread,
+            # not a mandate to accept rubbish: a band of nothing but fog has a
+            # best patch, and it is still fog. Below a quarter of the best
+            # score anywhere, take the best remaining patch instead.
+            floor = 0.25 * float(working.max()) if working.any() else 0.0
+            source = banded if banded.max(initial=0.0) >= floor and banded.any() \
+                else working
+            if not source.any():
+                break
+            cy, cx = np.unravel_index(int(np.argmax(source)), source.shape)
+            rois.append({"name": f"f{len(rois) + 1}",
+                         "x": int(cx * 2 - size // 2),
+                         "y": int(cy * 2 - size // 2),
+                         "w": size, "h": size,
+                         # Carried so the run can print why each patch was
+                         # chosen. A patch reported with near-zero variation is
+                         # an overlay whatever else the output says.
+                         "structure": float(patch_structure[cy, cx]),
+                         "spread": float(patch_spread[cy, cx])})
+            # Suppress a generous neighbourhood so the patches are not all one
+            # corner of one roof.
+            y0, y1 = max(0, cy - half * 3), cy + half * 3
+            x0, x1 = max(0, cx - half * 3), cx + half * 3
+            working[y0:y1, x0:x1] = 0
     return rois
 
 
-def draw_rois(path, rois, out_path):
+def draw_rois(path, rois, out_path, rejected=()):
     """Write the reference frame with the chosen patches boxed and labelled.
 
     "Eyeball these before trusting the result" is not actionable when the
     result is four x/y triples and the frame is 2560 px wide. A picture is.
+
+    `rejected` patches are drawn thin and grey. Seeing which candidates the
+    agreement test threw out is how you tell a working run from a lucky one:
+    grey boxes on sky and surf with orange boxes on buildings is the picture
+    this method is supposed to produce.
     """
     try:
         from PIL import Image, ImageDraw
@@ -468,6 +500,9 @@ def draw_rois(path, rois, out_path):
         return None
     draw = ImageDraw.Draw(image)
     width = max(2, image.width // 500)
+    for roi in rejected:
+        box = [roi["x"], roi["y"], roi["x"] + roi["w"], roi["y"] + roi["h"]]
+        draw.rectangle(box, outline=(124, 143, 153), width=max(1, width // 2))
     for roi in rois:
         box = [roi["x"], roi["y"], roi["x"] + roi["w"], roi["y"] + roi["h"]]
         draw.rectangle(box, outline=(228, 87, 46), width=width)
@@ -508,14 +543,9 @@ def sharpest(paths, rois):
     return best
 
 
-def track(paths, dates, rois, min_confidence=MIN_CONFIDENCE):
-    """dx/dy per frame per feature, against the sharpest readable frame."""
-    pick = sharpest(paths, rois)
+def track(paths, dates, rois, pick=0, min_confidence=MIN_CONFIDENCE):
+    """dx/dy per frame per feature, against the reference frame at `pick`."""
     reference, reference_date = load_gray(paths[pick]), dates[pick]
-    if reference is not None:
-        print(f"  reference frame: {reference_date:%Y-%m-%d} "
-              f"({os.path.basename(paths[pick])}), the sharpest of "
-              f"{len(paths)}")
     rows, unreadable = [], 0
     for path, date in zip(paths, dates):
         image = load_gray(path)
@@ -562,12 +592,106 @@ def agreeing_signal(frame):
     """
     if frame.empty:
         return pd.DataFrame()
-    grouped = frame.groupby("date").agg(
-        dx=("dx", "median"), dy=("dy", "median"),
-        spread=("offset", lambda s: float(s.max() - s.min())),
-        features=("feature", "nunique"))
-    grouped["offset"] = np.hypot(grouped["dx"], grouped["dy"])
-    return grouped.sort_index()
+    # Disagreement is the distance from the consensus VECTOR, not the range of
+    # offset magnitudes. Two patches that slid 5 px in opposite directions have
+    # identical magnitudes and a range of zero, and the earlier version called
+    # that perfect agreement.
+    rows = []
+    for date, group in frame.groupby("date"):
+        dx, dy = float(group["dx"].median()), float(group["dy"].median())
+        rows.append({
+            "date": date, "dx": dx, "dy": dy,
+            "offset": float(np.hypot(dx, dy)),
+            "spread": float(np.hypot(group["dx"] - dx,
+                                     group["dy"] - dy).max()),
+            "features": int(group["feature"].nunique())})
+    return pd.DataFrame(rows).set_index("date").sort_index()
+
+
+def _cliques(nodes, adjacency):
+    """Every maximal set of mutually adjacent nodes (Bron-Kerbosch)."""
+    found = []
+
+    def expand(clique, candidates, excluded):
+        if not candidates and not excluded:
+            found.append(list(clique))
+            return
+        for node in list(candidates):
+            expand(clique + [node],
+                   candidates & adjacency[node],
+                   excluded & adjacency[node])
+            candidates = candidates - {node}
+            excluded = excluded | {node}
+
+    expand([], set(nodes), set())
+    return found
+
+
+def agreeing_features(frame, tolerance=STEP_PX, minimum=MIN_CLUSTER):
+    """The largest group of features whose offset series agree with each other.
+
+    This is what replaces my judgement about which part of the frame is
+    rigid. Two patches on the same building report the same dx/dy on every
+    date, because there is only one camera; two patches on fog report
+    unrelated numbers, because there is nothing holding them together. So the
+    rigid scene is recoverable as the largest mutually-consistent subset, with
+    no appeal to what the frame looks like.
+
+    Pairwise distance is the MEDIAN over dates of the distance between the two
+    features' offset vectors -- median so that a handful of foggy frames one
+    patch happened to survive cannot separate two features that track together
+    the rest of the time.
+
+    Returns (kept, rejected, distance), where distance maps each feature to its
+    median distance from the kept group, so a run can say how far out the
+    rejects were rather than only that they were dropped.
+    """
+    names = sorted(frame["feature"].unique())
+    if len(names) < 2:
+        return names, [], {}
+    wide = frame.pivot_table(index="date", columns="feature",
+                             values=["dx", "dy"])
+
+    def distance_between(a, b):
+        dxa, dya = wide[("dx", a)], wide[("dy", a)]
+        dxb, dyb = wide[("dx", b)], wide[("dy", b)]
+        both = dxa.notna() & dxb.notna()
+        # Two features that never survive the confidence cut on the same date
+        # have no evidence of agreeing. Absence of disagreement is not
+        # agreement, so they are not linked.
+        if int(both.sum()) < minimum:
+            return float("inf")
+        return float(np.median(np.hypot(dxa[both] - dxb[both],
+                                        dya[both] - dyb[both])))
+
+    pairs = {}
+    for index, a in enumerate(names):
+        for b in names[index + 1:]:
+            pairs[(a, b)] = pairs[(b, a)] = distance_between(a, b)
+    adjacency = {a: {b for b in names
+                     if b != a and pairs[(a, b)] <= tolerance} for a in names}
+
+    def tightness(clique):
+        inner = [pairs[(a, b)] for i, a in enumerate(clique)
+                 for b in clique[i + 1:]]
+        return float(np.mean(inner)) if inner else 0.0
+
+    # Biggest clique wins; ties go to the tightest, so a spurious pair of
+    # patches that happen to be 2.9 px apart never beats a real group.
+    best = max(_cliques(names, adjacency),
+               key=lambda c: (len(c), -tightness(c)), default=[])
+    best = sorted(best)
+
+    def distance_to(group):
+        return {n: float(np.median([pairs[(n, k)] for k in group if k != n]))
+                for n in names if [k for k in group if k != n]}
+
+    if len(best) < minimum:
+        # Nothing agrees. Report each feature's median distance from ALL the
+        # others, so the failure says how far apart the frame is rather than
+        # only that no group formed.
+        return [], names, distance_to(names)
+    return best, [n for n in names if n not in best], distance_to(best)
 
 
 def find_steps(series, threshold=STEP_PX, persist=PERSIST):
@@ -694,6 +818,52 @@ def plot(frame, signal, steps, path):
 # Sampling (the one mode that touches the network)
 # ---------------------------------------------------------------------------
 
+def cached_frames(camera):
+    """The frames a previous --sample already downloaded. No network at all.
+
+    Choosing patches is iterative -- that is the nature of it -- and every
+    iteration was paying for 168 element queries and a fresh look at the
+    inventory before it could re-read JPEGs that were already on disk. The
+    imagery is the expensive part and it does not change, so once a camera has
+    been sampled, every later run over the same frames should be local.
+
+    Dates come from the filenames, which pull_rip_detection writes as
+    <label>-YYYY-MM-DD-HHMMSSZ.jpg -- the element timestamp, not the download
+    time, so the record is recoverable from the directory alone.
+    """
+    import re
+    directories = sorted(d for d in os.listdir(OUT_DIR)
+                         if os.path.isdir(os.path.join(OUT_DIR, d)))
+    matches = [d for d in directories if d == camera] or \
+              [d for d in directories if camera.lower() in d.lower()]
+    if not matches:
+        sys.exit(f"no cached frames for {camera!r} under {OUT_DIR}/.\n"
+                 "Cached cameras: " + (", ".join(directories) or "none") +
+                 "\nRun once without --cached to download them.")
+    if len(matches) > 1:
+        sys.exit(f"{camera!r} matches {', '.join(matches)} — be specific")
+    slug = matches[0]
+    save_dir = os.path.join(OUT_DIR, slug)
+
+    stamp = re.compile(r"(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})(\d{2})Z")
+    paths, dates = [], []
+    unnamed = 0
+    for name in sorted(os.listdir(save_dir)):
+        found = stamp.search(name)
+        if not found:
+            unnamed += 1
+            continue
+        day, hour, minute, second = found.groups()
+        paths.append(os.path.join(save_dir, name))
+        dates.append(pd.Timestamp(f"{day}T{hour}:{minute}:{second}Z"))
+    if unnamed:
+        print(f"  {unnamed} files carry no timestamp in their name, skipped")
+    if not paths:
+        sys.exit(f"{save_dir}/ holds no timestamped frames")
+    print(f"\nreusing {len(paths)} frames already in {save_dir}/ — no network")
+    return slug, paths, dates
+
+
 def sample_frames(camera, every_days, hour_utc, limit=None, workers=6):
     """One still per `every_days`, near `hour_utc`, cached under data/geometry."""
     import pull_rip_detection as rip
@@ -766,10 +936,17 @@ def main():
     ap.add_argument("--hour", type=int, default=DEFAULT_HOUR_UTC,
                     help=f"UTC hour to sample at (default {DEFAULT_HOUR_UTC})")
     ap.add_argument("--limit", type=int, help="stop after N targets, to try it")
+    ap.add_argument("--cached", action="store_true",
+                    help="re-use the frames a previous --sample downloaded and "
+                         "make no network calls. Use this for every re-run "
+                         "that only changes --roi, --candidates or margins.")
     ap.add_argument("--roi", action="append", default=[],
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--candidates", type=int, default=CANDIDATES,
+                    help=f"patches to propose and track before the agreement "
+                         f"test keeps the rigid ones (default {CANDIDATES})")
     ap.add_argument("--top-margin", type=int, default=0,
                     help="ignore this many pixels at the top of the frame. Use "
                          "it for a composited banner the automatic test misses "
@@ -797,8 +974,11 @@ def main():
     print("IMAGERY PASS")
     print("=" * 74)
     require_imaging()
-    slug, paths, dates = sample_frames(args.camera, args.every, args.hour,
-                                       args.limit)
+    if args.cached:
+        slug, paths, dates = cached_frames(args.camera)
+    else:
+        slug, paths, dates = sample_frames(args.camera, args.every, args.hour,
+                                           args.limit)
     order = np.argsort(dates)
     paths = [paths[i] for i in order]
     dates = [dates[i] for i in order]
@@ -807,9 +987,11 @@ def main():
 
     rois = [parse_roi(text) for text in args.roi]
     if not rois:
-        print("\nchoosing static features (sharp in space, still in time, "
-              f"top {args.land_fraction:.0%} of frame)")
-        rois = propose_rois(paths, land_fraction=args.land_fraction,
+        print(f"\nproposing {args.candidates} candidate patches (sharp in "
+              f"space, still in time,\ntop {args.land_fraction:.0%} of frame); "
+              "the agreement test picks the keepers")
+        rois = propose_rois(paths, count=args.candidates,
+                            land_fraction=args.land_fraction,
                             top_margin=args.top_margin,
                             bottom_margin=args.bottom_margin)
         if not rois:
@@ -819,33 +1001,80 @@ def main():
         if "spread" in roi:
             extra = (f"  structure={roi['structure']:.2f} "
                      f"variation={roi['spread']:.2f}")
-        print(f"  {roi['name']:<10} x={roi['x']} y={roi['y']} "
+        print(f"  {roi['name']:<6} x={roi['x']:>5} y={roi['y']:>5} "
               f"{roi['w']}x{roi['h']}{extra}")
 
-    # Four patches in one band of rows are four samples of one thing. They will
-    # agree with each other beautifully and say nothing about the camera.
-    rows = [roi["y"] for roi in rois]
-    if len(rois) > 2 and max(rows) - min(rows) < ROI_SIZE:
-        print(f"\n  WARNING: every patch sits within {max(rows) - min(rows)} px "
-              "of the same row. They are")
-        print("  sampling one band of the frame, so their agreement is not "
-              "independent evidence.")
-        print("  Spread them by hand with --roi before believing a verdict.")
-    preview = draw_rois(paths[0], rois,
-                        os.path.join(OUT_DIR, f"rois_{slug}.jpg"))
+    pick = sharpest(paths, rois)
+    print(f"\n  reference frame: {dates[pick]:%Y-%m-%d} "
+          f"({os.path.basename(paths[pick])}), the sharpest of {len(paths)}")
+    preview = draw_rois(paths[pick], rois,
+                        os.path.join(OUT_DIR, f"candidates_{slug}.jpg"))
     if preview:
-        # Absolute, because data/ is often a symlink into another checkout and
-        # a relative path pasted into a browser is a 404 rather than a file.
-        print(f"\n  OPEN THIS BEFORE TRUSTING THE RESULT:")
-        print(f"    open {os.path.abspath(preview)}")
-        print("  Each box must sit on something bolted down — the lighthouse,")
-        print("  a roofline, a railing. A box on a moored boat or a parked car")
-        print("  tracks the boat. Re-run with --roi name:x,y,w,h to override.")
+        print(f"    {os.path.abspath(preview)}")
 
     print("\nregistering")
-    frame, reference_date = track(paths, dates, rois)
+    frame, reference_date = track(paths, dates, rois, pick)
     if frame.empty:
         sys.exit("no usable measurements")
+
+    # Which of those candidates were actually on the rigid scene. This is the
+    # step that used to be my guess about the frame contents and is now the
+    # record's own answer.
+    kept, rejected, distance = agreeing_features(frame, tolerance=args.step_px)
+    if len(rois) > 1:
+        print(f"\nagreement between candidates (median px apart over the "
+              f"record, threshold {args.step_px:.0f})")
+        for roi in rois:
+            name = roi["name"]
+            apart = distance.get(name)
+            mark = "keep  " if name in kept else "drop  "
+            reading = f"{apart:6.2f} px from the group" if apart is not None \
+                else "     no overlapping dates"
+            print(f"  {mark}{name:<4} {reading}")
+    if not kept:
+        sys.exit(
+            f"\nNo {MIN_CLUSTER} candidates agree with each other to within "
+            f"{args.step_px:.0f} px.\n"
+            "Nothing in the searched part of the frame is behaving like rigid "
+            "structure, so\nthere is no answer to give -- a verdict from these "
+            "patches would be noise.\n"
+            "Open the candidate preview above and pass the buildings by hand:\n"
+            "  --roi roof:X,Y,128,128 --roi pier:X,Y,128,128 "
+            "--roi wall:X,Y,128,128\n"
+            "or widen the search with --land-fraction 0.8 so the built-up rows "
+            "are included.")
+    if rejected:
+        print(f"\n  {len(rejected)} of {len(rois)} candidates did not track "
+              f"with the others and were dropped.")
+        print("  That is the expected outcome, not a fault: a patch on fog, "
+              "surf or glare\n  agrees with nothing, which is exactly how it "
+              "is identified.")
+    frame = frame[frame["feature"].isin(kept)]
+    kept_rois = [r for r in rois if r["name"] in kept]
+    dropped_rois = [r for r in rois if r["name"] not in kept]
+    final = draw_rois(paths[pick], kept_rois,
+                      os.path.join(OUT_DIR, f"rois_{slug}.jpg"),
+                      rejected=dropped_rois)
+    if final:
+        # Absolute, because data/ is often a symlink into another checkout and
+        # a relative path pasted into a browser is a 404 rather than a file.
+        print("\n  OPEN THIS BEFORE TRUSTING THE RESULT:")
+        print(f"    open {os.path.abspath(final)}")
+        print("  Orange = kept, grey = dropped. Every orange box should sit on "
+              "something\n  bolted down. Orange on a moored boat or a parked "
+              "car tracks the boat, and\n  several boats on one mooring field "
+              "agree with each other. Override with\n  --roi name:x,y,w,h.")
+
+    # Patches in one band of rows are several samples of one thing. They will
+    # agree with each other beautifully and say nothing about the camera.
+    rows = [roi["y"] for roi in kept_rois]
+    if len(kept_rois) > 2 and max(rows) - min(rows) < ROI_SIZE:
+        print(f"\n  WARNING: every kept patch sits within "
+              f"{max(rows) - min(rows)} px of the same row.")
+        print("  They are sampling one band of the frame, so their agreement "
+              "is not fully")
+        print("  independent evidence. Spread them by hand with --roi before "
+              "believing a verdict.")
 
     csv_path = os.path.join(OUT_DIR, f"geometry_{slug}.csv")
     frame.to_csv(csv_path, index=False)
@@ -872,15 +1101,25 @@ def main():
     # anything -- not the steps, and not their absence. The first Walton run
     # reported a 0.02 px median offset with 16.6 px of disagreement and then
     # called the record stable, which it had no basis for.
+    print(f"features kept: {len(kept)} of {len(rois)} candidates "
+          f"({', '.join(kept)})")
+
+    # The kept features passed a MEDIAN agreement test, which a genuine camera
+    # move does not break -- every rigid patch moves together -- but a zoom or
+    # a lens change does, because rigid patches then move by different amounts.
+    # So a per-date disagreement above the step threshold still invalidates the
+    # verdict even after the selection.
     trustworthy = disagreement <= args.step_px
     if not trustworthy:
         print("\n" + "!" * 74)
-        print(f"FEATURES DO NOT AGREE ({disagreement:.1f} px apart, against a "
-              f"{args.step_px:.0f} px step threshold).")
-        print("They are not tracking one rigid scene, so the verdict below is")
-        print("not evidence either way. Open the ROI preview: a patch on sky,")
-        print("water or a moored boat produces exactly this. Fix the patches")
-        print("with --roi and run again.")
+        print(f"KEPT FEATURES STILL DISAGREE ({disagreement:.1f} px apart, "
+              f"against a {args.step_px:.0f} px step threshold).")
+        print("They passed the median agreement test and fail it date by date,")
+        print("which is what a zoom or a lens change looks like: rigid points")
+        print("move together under a pan and apart under a zoom. It is also")
+        print("what too few surviving frames looks like. The verdict below is")
+        print("not evidence either way; open the ROI preview and check the")
+        print("orange boxes are on structure, then re-run with --every 3.")
         print("!" * 74)
 
     if not steps:

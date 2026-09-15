@@ -468,7 +468,8 @@ def test_the_reference_is_the_sharpest_frame():
 
         check("it picks the one clear frame", g.sharpest(paths, rois) == 3,
               g.sharpest(paths, rois))
-        frame, reference = g.track(paths, list(dates), rois)
+        frame, reference = g.track(paths, list(dates), rois,
+                                   g.sharpest(paths, rois))
         check("and registers against it", reference == dates[3], reference)
         check("every frame is still measured",
               set(frame["feature"]) == {"a", "b"}, set(frame["feature"]))
@@ -549,6 +550,124 @@ def test_a_stable_record_reports_no_step():
           g.find_steps(spike, threshold=3.0, persist=3))
 
 
+def tracked(series_by_feature, start="2024-01-07"):
+    """A tracked frame built straight from per-feature (dy, dx) series."""
+    rows = []
+    length = len(next(iter(series_by_feature.values())))
+    dates = pd.date_range(start, periods=length, freq="7D", tz="UTC")
+    for name, series in series_by_feature.items():
+        for date, (dy, dx) in zip(dates, series):
+            rows.append({"date": date, "feature": name, "dx": float(dx),
+                         "dy": float(dy), "confidence": 0.5, "frame": "x.jpg"})
+    frame = pd.DataFrame(rows)
+    frame["offset"] = np.hypot(frame["dx"], frame["dy"])
+    return frame
+
+
+def test_disagreement_is_measured_as_a_vector():
+    """Two features that slid opposite ways are not in agreement.
+
+    The first version measured the spread as the range of offset MAGNITUDES.
+    A feature at dx=+5 and one at dx=-5 both have magnitude 5, so the range is
+    zero and the run called that perfect agreement -- the one arrangement that
+    most clearly means the patches are not on a common rigid scene.
+    """
+    print("\ndisagreement between features")
+    frame = tracked({"a": [(0, 5)] * 8, "b": [(0, -5)] * 8})
+    signal = g.agreeing_signal(frame)
+    check("opposite shifts of equal size are a disagreement",
+          signal["spread"].median() > 4.0, signal["spread"].median())
+
+    together = tracked({"a": [(0, 5)] * 8, "b": [(0, 5.2)] * 8})
+    check("features that moved together are not",
+          g.agreeing_signal(together)["spread"].median() < 1.0,
+          g.agreeing_signal(together)["spread"].median())
+
+
+def test_the_agreeing_group_is_recovered_from_noise():
+    """The rigid patches are found without being told which they are.
+
+    This is the whole reason the picker no longer has to be right. Three
+    features are given one shared record -- a camera that jumped on sample 20
+    -- and three are given unrelated noise, which is what a patch on fog, surf
+    or glare produces. The largest mutually-consistent subset must be the three
+    real ones, with no appeal to where they sit in the frame.
+    """
+    print("\nrecovering the rigid features from a field of candidates")
+    rng = np.random.default_rng(11)
+    truth = [(0.0, 0.0)] * 20 + [(-6.0, 9.0)] * 20
+    series = {}
+    for name in ("roof", "tower", "wall"):
+        series[name] = [(dy + rng.normal(0, 0.3), dx + rng.normal(0, 0.3))
+                        for dy, dx in truth]
+    for name in ("fog", "surf", "glare"):
+        series[name] = [(rng.normal(0, 14), rng.normal(0, 14))
+                        for _ in truth]
+    frame = tracked(series)
+
+    kept, rejected, distance = g.agreeing_features(frame, tolerance=3.0)
+    check("the three rigid features are kept",
+          set(kept) == {"roof", "tower", "wall"}, kept)
+    check("and the three noise features are dropped",
+          set(rejected) == {"fog", "surf", "glare"}, rejected)
+    check("each reject is reported with how far out it was",
+          all(distance.get(n, 0) > 3.0 for n in rejected),
+          {n: round(distance.get(n, -1), 1) for n in rejected})
+
+    # And the step survives the selection: dropping the noise must not drop
+    # the signal with it.
+    signal = g.agreeing_signal(frame[frame["feature"].isin(kept)])
+    steps = g.find_steps(signal["offset"], threshold=3.0, persist=3)
+    check("the planted step survives the selection", len(steps) == 1, steps)
+    if steps:
+        check("on the right date", steps[0]["date"] == signal.index[20],
+              steps[0]["date"])
+
+
+def test_a_frame_with_nothing_rigid_in_it_returns_nothing():
+    """Better no answer than an answer from two patches of fog.
+
+    Two features will always agree about as well as any other two, so a run
+    that accepted the best pair would report a verdict from whatever noise
+    happened to correlate. Below MIN_CLUSTER the honest output is empty.
+    """
+    print("\na frame with no rigid structure in it")
+    rng = np.random.default_rng(5)
+    series = {name: [(rng.normal(0, 12), rng.normal(0, 12)) for _ in range(30)]
+              for name in ("a", "b", "c", "d")}
+    kept, rejected, distance = g.agreeing_features(tracked(series),
+                                                   tolerance=3.0)
+    check("no group is claimed", kept == [], kept)
+    check("everything is reported as rejected", len(rejected) == 4, rejected)
+    check("with distances, so the failure says how far apart they are",
+          all(distance[n] > 3.0 for n in ("a", "b", "c", "d")), distance)
+
+    # Two of four agreeing is still not enough.
+    series["b"] = list(series["a"])
+    kept, _, _ = g.agreeing_features(tracked(series), tolerance=3.0)
+    check("a lone agreeing pair is not a rigid scene", kept == [], kept)
+
+
+def test_features_with_no_overlapping_dates_are_not_linked():
+    """Absence of disagreement is not agreement.
+
+    A patch that only ever survives the confidence cut in winter and one that
+    only survives in summer have no common date to compare, and a distance of
+    zero over an empty set would link them into a clique of imaginary friends.
+    """
+    print("\nfeatures that never overlap in time")
+    frame = tracked({"a": [(0, 0)] * 12, "b": [(0, 0)] * 12,
+                     "c": [(0, 0)] * 12})
+    dates = sorted(frame["date"].unique())
+    # 'c' survives only on the last three dates, 'a' and 'b' only on the first.
+    keep_early = frame["date"].isin(dates[:6]) & frame["feature"].isin(["a", "b"])
+    keep_late = frame["date"].isin(dates[9:]) & (frame["feature"] == "c")
+    frame = frame[keep_early | keep_late]
+    kept, _, _ = g.agreeing_features(frame, tolerance=3.0)
+    check("a non-overlapping feature does not join the group",
+          "c" not in kept, kept)
+
+
 def test_epochs_count_stills_not_just_samples():
     print("\nepoch sizes in stills")
     dates = list(pd.date_range("2024-01-07", periods=10, freq="7D", tz="UTC"))
@@ -581,6 +700,10 @@ def main():
                  test_the_reference_is_the_sharpest_frame,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
+                 test_disagreement_is_measured_as_a_vector,
+                 test_the_agreeing_group_is_recovered_from_noise,
+                 test_a_frame_with_nothing_rigid_in_it_returns_nothing,
+                 test_features_with_no_overlapping_dates_are_not_linked,
                  test_epochs_count_stills_not_just_samples):
         test()
     print("\n" + ("ALL PASS" if not FAILURES
