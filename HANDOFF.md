@@ -92,6 +92,15 @@ to decline a follow-up.
 
 ## OPEN — ranked
 
+0. **Hand-labelled ground truth for the Walton detector — BUILT, not yet run.**
+   `build_label_sample.py` draws ~300 stills stratified by detector confidence
+   (none/low/high) x MOP wave-height tercile, plus boosters from low-sun and
+   high-cloud hours; `label_server.py` serves a local page that overlays the
+   detector's boxes and saves each verdict; `analyze_precision.py` reports
+   precision by stratum, population-weighted. Every score_max result in this
+   project currently rests on the assumption that detector confidence tracks
+   real rips, which nothing has tested. This is that test.
+
 1. **What IS Virginia Beach's temperature tracking?** Three explanations are
    dead; the -0.36 is still there and still suppressed by light. Proposed next
    test: a sea-breeze / storminess index. Not started.
