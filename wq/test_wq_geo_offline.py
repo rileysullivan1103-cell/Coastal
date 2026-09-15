@@ -464,6 +464,23 @@ def test_stream_covariates():
           values["n_streams_within_2km"] == 1,
           str(values["n_streams_within_2km"]))
 
+    # NLDI's catchment-characteristics endpoints are gone -- every path 404s,
+    # including the documented example on a crawled feature, and the catalogue
+    # with them. That kills the land-cover covariates. It must NOT kill the
+    # three that come from the WATERS flowlines and never touched NLDI's
+    # characteristics: losing them was a coupling in this code, not an
+    # outage.
+    values = spatial.stream_covariates(lat, lon, coastline, "12345",
+                                       {}, {}, [mouth, passing])
+    check("with no characteristics at all, the flowline covariates survive",
+          values["stream_order"] == 3
+          and values["n_streams_within_2km"] == 1,
+          f"order {values.get('stream_order')}, "
+          f"{values.get('n_streams_within_2km')} stream(s)")
+    check("and the land-cover ones are empty rather than wrong",
+          values.get("impervious_frac") is None
+          and values.get("developed_frac") is None)
+
 
 def test_landcover_ids_are_not_hardcoded():
     print("\nNLCD year comes from the catalogue")

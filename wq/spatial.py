@@ -857,9 +857,20 @@ def for_site(site, record=None, probe=False, want=None):
         try:
             def build():
                 comid, _geometry, _properties = fetch_comid(lat, lon, probe=probe)
+                # The catchment characteristics and the flowlines are two
+                # different services, and only the land-cover covariates need
+                # the first. Letting it raise here took dist_to_stream_m,
+                # stream_order and n_streams_within_2km down with it -- three
+                # covariates that come from the WATERS flowlines and never
+                # touched NLDI's characteristics at all.
+                characteristics, note = [], None
+                try:
+                    characteristics = fetch_characteristics(comid, probe=probe)
+                except LayerFailed as exc:
+                    note = str(exc)
                 return {"comid": comid,
-                        "characteristics": fetch_characteristics(comid,
-                                                                 probe=probe),
+                        "characteristics": characteristics,
+                        "characteristics_note": note,
                         "flowlines": _safe(fetch_flowlines, lat, lon,
                                            probe=probe)}
 
@@ -869,14 +880,24 @@ def for_site(site, record=None, probe=False, want=None):
             if os.path.exists(cached):
                 with open(cached) as handle:
                     lines = json.load(handle).get("lines") or []
+            catalogue = {}
+            catalogue_note = None
+            try:
+                catalogue = characteristic_catalogue()
+            except LayerFailed as exc:
+                catalogue_note = str(exc)
             values = stream_covariates(
                 lat, lon, lines, payload.get("comid"),
-                payload.get("characteristics"), characteristic_catalogue(),
+                payload.get("characteristics"), catalogue,
                 payload.get("flowlines"))
             out.update(values)
             layers.record_access(record, "nhdplus")
+            landcover_note = payload.get("characteristics_note") or catalogue_note
+            if landcover_note:
+                out["nlcd_note"] = landcover_note
             layers.record_access(record, "nlcd",
-                                 values.get("landcover_vintage"))
+                                 values.get("landcover_vintage"),
+                                 note=landcover_note)
             if values.get("dist_to_stream_m") is not None:
                 record["nhdplus"]["sites_populated"] += 1
             record["nlcd"]["sites_attempted"] += 1
@@ -1143,7 +1164,8 @@ def report_outcomes(frame, want=None):
     return table
 
 
-STREAMCAT_LEGACY = "https://java.epa.gov/StreamCAT/metrics"
+STREAMCAT_HOSTS = ("https://api.epa.gov/StreamCat/streams/metrics",
+                   "https://java.epa.gov/StreamCAT/metrics")
 
 
 def probe_streams(lat, lon):
@@ -1194,10 +1216,12 @@ def probe_streams(lat, lon):
              "example)",
              f"{NLDI_BASE}/nwissite/USGS-05429700/local",
              {"characteristicId": "CAT_BFI", "f": "json"})
-        show("StreamCat, which is keyed on comid rather than on a feature",
-             STREAMCAT_LEGACY,
-             {"name": "pcturbhi2019,pcturbmd2019,pcturblo2019,pcturbop2019",
-              "areaOfInterest": "watershed", "comid": comid})
+        for host in STREAMCAT_HOSTS:
+            show("StreamCat, which is keyed on comid rather than on a feature",
+                 host,
+                 {"name": "pcturbhi2019,pcturbmd2019,pcturblo2019,"
+                          "pcturbop2019,pctimp2019",
+                  "areaOfInterest": "watershed", "comid": comid})
 
     for path in NLDI_CATALOGUE_PATHS:
         show("characteristic catalogue",

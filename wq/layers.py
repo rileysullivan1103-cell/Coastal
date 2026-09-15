@@ -84,6 +84,18 @@ LAYERS = {
                           "manifest",
         "citation": "MRLC National Land Cover Database, accumulated to "
                     "NHDPlus catchments by USGS",
+        # Probed on 2026-09-15 from a live network: EVERY characteristics path
+        # on api.water.usgs.gov returns 404, including the documented example
+        # on a crawled feature (nwissite/USGS-05429700/local?characteristicId=
+        # CAT_BFI), and so does the catalogue. labs.waterdata.usgs.gov answers
+        # 404 with an empty body. The comid lookup on the SAME host works, so
+        # this is the characteristics service being absent, not the request
+        # being malformed -- which is what four rounds of guessing assumed.
+        "observed_absent": "NLDI catchment characteristics 404 on every "
+                           "documented path (probed 2026-09-15). The "
+                           "land-cover covariates have no source until this "
+                           "is replaced; StreamCat is the candidate and is "
+                           "not wired in until it has been probed.",
         "caveat": "These are accumulated over the upstream catchment of the "
                   "flowline nearest the beach, which is the right denominator "
                   "for a creek mouth and the wrong one for a beach whose "
