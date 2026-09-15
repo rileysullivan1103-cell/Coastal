@@ -231,6 +231,19 @@ wrong. Nodes of degree three or more are counted and reported, never judged.
 > 6141236. `wq.spatial --probe-streams` is what established all of this and is
 > the thing to re-run when one of these services moves again.
 
+> **EPA WATERS is down too, and that is a different kind of down.** The
+> NHDSnapshot flowline query answers HTTP 500 with an ArcGIS page reading
+> `Error: Service NHDPlus_NP21/NHDSnapshot_NP21/MapServer not started` — the
+> server saying the service is not loaded, which no change of query shape
+> fixes. Probed 2026-09-15. Nothing has been probed that replaces it, so
+> `layers.py` records `replaced_by: None` rather than a guess, and
+> `dist_to_stream_m`, `stream_order` and `n_streams_within_2km` stay empty
+> until something answers. Against Rhode Island the result is eleven of
+> eighteen covariates clearing the 70% rule: the seven coastline ones, the
+> two CO-OPS ones, and `impervious_frac` / `developed_frac` at 115/120 —
+> the five misses being beaches with no NHDPlus catchment under them, which
+> is the service answering rather than failing.
+
 **The ways are stitched into chains first.** OpenStreetMap splits a shoreline
 into many short ways — an estuary shore is hundreds of them, a few hundred
 metres each — and every covariate that *walks* along the shore has to follow

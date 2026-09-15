@@ -308,7 +308,11 @@ def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
         print(f"      HTTP {response.status_code}, "
               f"{len(response.content) / 1000:.1f} kB")
     if response.status_code != 200:
-        detail = (response.text or "").strip().replace("\n", " ")[:300]
+        # A CARRIAGE RETURN sends the cursor back to column one, so an
+        # ArcGIS error page pasted into a terminal overwrites the line that
+        # was printing it -- the reason table came out with one row visibly
+        # eaten. Collapse every kind of whitespace, not just newlines.
+        detail = " ".join((response.text or "").split())[:300]
         raise LayerFailed(f"{url.split('/')[2]}: HTTP "
                           f"{response.status_code} — {detail}")
     return response
@@ -1135,9 +1139,16 @@ def outcomes(frame, want=None, width=150):
         if frame.empty:
             continue
         for _, row in frame.iterrows():
-            note = _note_of(row, key)
             empty = (not supplies) or all(pd.isna(row.get(c))
                                           for c in supplies)
+            # A layer that produced something answers for itself. Inheriting
+            # the parent's note here read "nlcd — partial: via nhdplus:
+            # watersgeo.epa.gov HTTP 500" at 114 sites where the land cover
+            # had in fact come back clean: the parent's dead FLOWLINE service
+            # has nothing to do with the land cover, which reaches nlcd from
+            # StreamCat. The parent's note explains an EMPTY derived layer
+            # (no comid, so nothing to key on) and nothing else.
+            note = _raw_note(row, key) if not empty else _note_of(row, key)
             if not empty:
                 reason = "populated" if note is None else f"partial: {note}"
             elif note is not None:

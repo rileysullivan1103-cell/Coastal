@@ -305,6 +305,24 @@ def test_an_empty_layer_has_to_say_why():
           "EMPTY, NO REASON RECORDED" not in
           {reasons.get(k) for k in layers.FETCHED}, str(reasons))
 
+    # The inheritance runs one way only. Once the land cover came from
+    # StreamCat instead of NLDI, nlcd stopped depending on nhdplus for
+    # anything but the comid -- so a run where the flowline service was down
+    # but StreamCat answered reported "nlcd — partial: via nhdplus:
+    # watersgeo.epa.gov HTTP 500" at 114 sites whose land cover was fine. A
+    # layer that produced its covariates answers for itself.
+    answered = pd.DataFrame([{
+        "station_id": "a", "tile": "t1",
+        "impervious_frac": 0.1175, "developed_frac": 0.1406,
+        "nhdplus_note": "watersgeo.epa.gov: HTTP 500 — Service not started",
+    }])
+    table = spatial.outcomes(answered, want={"nlcd", "nhdplus"})
+    reasons = dict(zip(table["layer"], table["reason"]))
+    check("a derived layer that answered does not inherit its parent's "
+          "failure", reasons.get("nlcd") == "populated", reasons.get("nlcd"))
+    check("and the parent still reports its own", "HTTP 500" in
+          reasons.get("nhdplus", ""), reasons.get("nhdplus"))
+
     # Every covariate the coverage table names has to have a layer beside it,
     # or nobody can check its vintage.
     orphans = [name for name in config.SITE_COVARIATES
