@@ -175,6 +175,29 @@ def detection_report(slug):
 # Registration
 # ---------------------------------------------------------------------------
 
+def require_imaging():
+    """Fail before the downloads, not after them.
+
+    The first run of --sample fetched eight frames and then died inside
+    propose_rois on a missing Pillow. Checking at the top costs nothing and
+    means a missing dependency is a one-line message rather than a traceback
+    that arrives after the network work is already done.
+    """
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        sys.exit("--sample needs Pillow to read the frames.\n"
+                 "  pip install -r requirements.txt\n"
+                 "(paste that line ALONE — a trailing shell comment is passed "
+                 "to pip as an argument\n on a zsh without "
+                 "interactive_comments, and pip rejects it.)")
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        print("  matplotlib is not installed; the run will write the CSV and "
+              "the text report\n  but no plot.  pip install matplotlib")
+
+
 def load_gray(path, downsample=1):
     """Greyscale float array, or None if the file is not a readable image."""
     from PIL import Image
@@ -570,6 +593,7 @@ def main():
     print("\n" + "=" * 74)
     print("IMAGERY PASS")
     print("=" * 74)
+    require_imaging()
     slug, paths, dates = sample_frames(args.camera, args.every, args.hour,
                                        args.limit)
     order = np.argsort(dates)
