@@ -97,6 +97,18 @@ retries exactly the chunks that are missing. If the first three chunks all fail
 the run stops and says so, because that is a connectivity problem rather than a
 data one and there is no point spending four hours discovering it.
 
+A cache entry also has to match the shape the caller expects. Each cached fetch
+names the keys it is about to read, and a file on disk that is missing any of
+them is deleted and rebuilt rather than served. This is not hypothetical
+tidiness: when the land cover moved from NLDI to StreamCat, every station
+already had a cached payload written by the previous schema, so the new fetch
+never ran, `payload.get("streamcat")` read `None`, nothing raised, and the
+coverage table reported `impervious_frac 0/120` with no error anywhere in the
+run. A stale cache is the one failure mode that looks exactly like success. A
+key whose value is `None` still counts as present — the builder ran and the
+fetch failed, and that is an answer worth keeping rather than 120 requests a
+run to re-learn.
+
 Offline checks, no network:
 
 ```bash

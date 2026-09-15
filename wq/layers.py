@@ -40,6 +40,15 @@ LAYERS = {
                           "NLDI documentation",
         "citation": "USGS Hydro Network-Linked Data Index (NLDI), "
                     "https://labs.waterdata.usgs.gov/about-nldi/",
+        # The comid lookup on this host works. The three flowline covariates
+        # do not come from here at all -- they come from the WATERS flowline
+        # query, which is down; see nhdplus_vaa. upstream_area_km2 came from
+        # the NLDI characteristics, which are absent; see nlcd.
+        "observed_absent": "of the four covariates named above, only the "
+                           "comid lookup that keys them still answers "
+                           "(probed 2026-09-15). upstream_area_km2 depended "
+                           "on NLDI catchment characteristics, which 404 on "
+                           "every documented path.",
         "verified": False,
     },
     "nhdplus_vaa": {
@@ -51,6 +60,19 @@ LAYERS = {
         "vintage_source": "MapServer /info returns a service edit date; read "
                           "where present",
         "citation": "EPA WATERS GeoViewer services",
+        # Probed on 2026-09-15 from a live network: the layer 0 /query path
+        # answers HTTP 500 with an ArcGIS REST Framework error page reading
+        # "Error: Service NHDPlus_NP21/NHDSnapshot_NP21/MapServer", which is
+        # the server saying the SERVICE is not loaded -- not a bad request,
+        # not a rate limit, and not something a different query shape fixes.
+        # No replacement has been probed, so none is claimed here. Until one
+        # answers, dist_to_stream_m, stream_order and n_streams_within_2km
+        # stay empty and the 70% coverage rule drops them before fitting.
+        "observed_absent": "EPA WATERS NHDSnapshot_NP21 MapServer returns "
+                           "HTTP 500 'Error: Service NHDPlus_NP21/"
+                           "NHDSnapshot_NP21/MapServer' for every flowline "
+                           "query (probed 2026-09-15).",
+        "replaced_by": None,
         "verified": False,
     },
     "echo": {

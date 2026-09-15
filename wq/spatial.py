@@ -199,11 +199,27 @@ def _cache_path(name):
 _FAILED_THIS_RUN = {}
 
 
-def _cached_json(name, builder):
+def _cached_json(name, builder, expects=()):
+    """Read the cached payload, or build and cache it.
+
+    `expects` names the keys this caller is about to read. A cache file
+    written before those keys existed is not a valid answer to today's
+    question -- it is a payload from an older schema -- so it is rebuilt
+    rather than served. Without this, adding a fetch to a builder is silent:
+    the new covariates read `None` from the old payload, nothing raises, and
+    the coverage table shows an empty layer with no reason recorded.
+    """
     path = _cache_path(name)
     if os.path.exists(path):
         with open(path) as handle:
-            return json.load(handle)
+            payload = json.load(handle)
+        missing = [key for key in expects
+                   if not isinstance(payload, dict) or key not in payload]
+        if not missing:
+            return payload
+        print(f"      {name}: cached payload predates "
+              f"{', '.join(missing)}; refetching")
+        os.remove(path)
     if name in _FAILED_THIS_RUN:
         raise LayerFailed(f"{_FAILED_THIS_RUN[name]} (already failed for this "
                           "tile in this run; not retried per station)")
@@ -840,7 +856,8 @@ def for_site(site, record=None, probe=False, want=None):
                 lines, vintage = fetch_coastline(lat, lon, probe=probe)
                 return {"lines": lines, "vintage": vintage}
 
-            payload = _cached_json(f"coastline_{_tile_slug(lat, lon)}", build)
+            payload = _cached_json(f"coastline_{_tile_slug(lat, lon)}",
+                                   build, expects=("lines", "vintage"))
             values = coastline_covariates(lat, lon, payload["lines"],
                                           payload.get("vintage"))
             out.update(values)
@@ -878,7 +895,10 @@ def for_site(site, record=None, probe=False, want=None):
                         "streamcat": landcover,
                         "streamcat_note": landcover_note}
 
-            payload = _cached_json(f"nhd_{_slug(station)}", build)
+            payload = _cached_json(
+                f"nhd_{_slug(station)}", build,
+                expects=("comid", "flowlines", "flowline_note",
+                         "streamcat", "streamcat_note"))
             lines = []
             cached = _cache_path(f"coastline_{_tile_slug(lat, lon)}")
             if os.path.exists(cached):
@@ -915,7 +935,8 @@ def for_site(site, record=None, probe=False, want=None):
         try:
             payload = _cached_json(
                 f"echo_{_tile_slug(lat, lon)}",
-                lambda: {"records": fetch_outfalls(lat, lon, probe=probe)})
+                lambda: {"records": fetch_outfalls(lat, lon, probe=probe)},
+                expects=("records",))
             values = outfall_covariates(lat, lon, payload.get("records"))
             out.update(values)
             layers.record_access(record, "echo")

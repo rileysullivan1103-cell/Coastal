@@ -313,8 +313,66 @@ def test_an_empty_layer_has_to_say_why():
           not orphans, str(orphans))
 
 
+def test_a_cache_from_an_older_schema_is_not_an_answer():
+    """StreamCat was wired in, ran green, and populated nothing.
+
+    The land cover fetch was added to the per-station NHD builder, the probe
+    confirmed StreamCat answers HTTP 200, and the next run still reported
+    impervious_frac 0/120 with the layer EMPTY, NO REASON RECORDED. The cache
+    was the whole story: every station already had an nhd_*.json written by
+    the previous schema, so the builder never ran, the new key read as None,
+    and nothing raised. A cache hit on a payload that predates the keys the
+    caller is about to read is not a cache hit -- it is a wrong answer served
+    quickly, and it is silent by construction, which is the worst combination
+    this pipeline can produce.
+    """
+    print("\nA cached payload that predates a key is refetched")
+    kept = spatial.CACHE_DIR
+    spatial.CACHE_DIR = tempfile.mkdtemp()
+    try:
+        builds = []
+
+        def build_old():
+            builds.append("old")
+            return {"comid": 42, "flowlines": []}
+
+        def build_new():
+            builds.append("new")
+            return {"comid": 42, "flowlines": [], "streamcat": {"pctimp": 1.0}}
+
+        old_keys = ("comid", "flowlines")
+        new_keys = ("comid", "flowlines", "streamcat")
+        spatial._cached_json("nhd_S1", build_old, expects=old_keys)
+        spatial._cached_json("nhd_S1", build_old, expects=old_keys)
+        check("a payload that has every key it is asked for is reused",
+              builds == ["old"], str(builds))
+        payload = spatial._cached_json("nhd_S1", build_new, expects=new_keys)
+        check("a payload missing a newly-read key is rebuilt",
+              builds == ["old", "new"], str(builds))
+        check("and the rebuilt payload carries the new key",
+              payload.get("streamcat") == {"pctimp": 1.0}, str(payload))
+        spatial._cached_json("nhd_S1", build_new, expects=new_keys)
+        check("the rebuilt payload is then cached like any other",
+              builds == ["old", "new"], str(builds))
+        # A key whose VALUE is None is still a key: the builder ran, the fetch
+        # failed, and the None is that answer. Refetching it every run would
+        # turn one dead endpoint into 120 requests a run, forever.
+        def build_none():
+            builds.append("none")
+            return {"comid": 42, "flowlines": [], "streamcat": None}
+
+        spatial._cached_json("nhd_S2", build_none, expects=new_keys)
+        spatial._cached_json("nhd_S2", build_none, expects=new_keys)
+        check("a key recorded as None is an answer, not a miss",
+              builds == ["old", "new", "none"], str(builds))
+    finally:
+        shutil.rmtree(spatial.CACHE_DIR, ignore_errors=True)
+        spatial.CACHE_DIR = kept
+
+
 def main():
     for test in (test_grid_cell_sharing,
+                 test_a_cache_from_an_older_schema_is_not_an_answer,
                  test_an_empty_layer_has_to_say_why,
                  test_shore_normal_priority,
                  test_wind_components,
