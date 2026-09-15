@@ -142,6 +142,11 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
     def done(frame, note, cell=None):
         return (frame, note, cell) if return_cell else (frame, note)
 
+    # The last thing the service actually said. Without this, a run where
+    # every cell was refused reports "no ocean cell found within ~22 km" -- a
+    # claim about geography, when the truth was a rate limit. That message sent
+    # a real debugging session looking at the coastline instead of the clock.
+    refusal = None
     for nudge in MARINE_NUDGES:
         bearings = [(0, 0)] if nudge == 0 else MARINE_BEARINGS
         for dlat, dlon in bearings:
@@ -158,9 +163,13 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
                         print(f"      exact point has no wave data; used a cell "
                               f"~{km:.0f} km away ({try_lat:.3f}, {try_lon:.3f})")
                     return done(frame, "ok", (try_lat, try_lon))
-            elif nudge == 0:
-                print(f"      at the site itself: {note}")
+            else:
+                refusal = note
+                if nudge == 0:
+                    print(f"      at the site itself: {note}")
             time.sleep(0.2)
+    if refusal:
+        return done(None, f"every cell refused, last said: {refusal}")
     return done(None, "no ocean cell found within ~22 km")
 
 

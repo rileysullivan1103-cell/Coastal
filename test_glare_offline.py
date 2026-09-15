@@ -79,6 +79,15 @@ def build(kind, seed=5):
     elif kind == "glare":
         frame["temperature_2m"] = 18 + 9.0 * glare + rng.normal(0, 1.5, n)
         suppressor = glare
+    elif kind == "suppressed":
+        # Temperature is genuinely negative on the target AND positively
+        # correlated with elevation, which is itself positive on the target.
+        # Without elevation in the model the two effects partly cancel and
+        # temperature looks weak; with it, temperature's own effect stands out
+        # and its coefficient GROWS. This is what Virginia Beach does, and
+        # nothing in the earlier fixtures produced it.
+        frame["temperature_2m"] = 18 + 0.15 * elevation + rng.normal(0, 1.5, n)
+        suppressor = None
     elif kind == "genuine":
         # Temperature is unrelated to the sun and really does move the target.
         frame["temperature_2m"] = independent
@@ -86,7 +95,13 @@ def build(kind, seed=5):
     else:
         raise ValueError(kind)
 
-    signal = 0.45 * frame["wave_height"] - 2.2 * suppressor + rng.normal(0, 0.5, n)
+    if kind == "suppressed":
+        # elevation helps the detector, temperature hurts it, independently.
+        signal = (0.45 * frame["wave_height"] + 0.06 * elevation
+                  - 0.35 * frame["temperature_2m"] + rng.normal(0, 0.5, n))
+    else:
+        signal = (0.45 * frame["wave_height"] - 2.2 * suppressor
+                  + rng.normal(0, 0.5, n))
     frame["detection_rate"] = (signal - signal.min()) / (signal.max() - signal.min())
     return frame
 
@@ -128,6 +143,19 @@ def check_glare_proxy_needs_the_geometry():
           f"geometry removes a further {elev_only - geometry:.4f}")
 
 
+def check_suppression_is_not_read_as_absorption():
+    """The Virginia Beach shape: the coefficient GROWS once light is in."""
+    out = run(build("suppressed"))
+    base = abs(out["base"][0])
+    asked = abs(out["+ elev/azim/cloud"][0])
+    check("a suppressed temperature coefficient grows, not shrinks",
+          asked / base > 1.15,
+          f"{base:.4f} -> {asked:.4f} ({asked / base:.2f}x)")
+    check("so it is never mistaken for a light proxy",
+          asked / base >= 0.5,
+          "a proxy would fall below 0.50x")
+
+
 def check_a_genuine_driver_is_not_absorbed():
     """The negative control. Without this the ladder proves nothing."""
     out = run(build("genuine"))
@@ -159,6 +187,7 @@ def main():
     check_daylight_proxy_is_absorbed()
     check_glare_proxy_needs_the_geometry()
     check_a_genuine_driver_is_not_absorbed()
+    check_suppression_is_not_read_as_absorption()
     check_wave_height_is_not_collaterally_diluted()
     check_beta_of_handles_a_withheld_fit()
     print("\n" + ("ALL PASS" if not FAILURES

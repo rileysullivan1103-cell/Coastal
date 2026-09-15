@@ -122,6 +122,47 @@ def ladder(observed, target, base, extras):
     return rows
 
 
+def added_term_test(small, big, added):
+    """(delta R2, F, p) for the terms `big` adds over `small`.
+
+    Needed because sun_in_view and sun_glare correlate above 0.85 by
+    construction -- glare IS the in-view component weighted by elevation -- so
+    their individual coefficients trade off against each other and can come out
+    with opposite signs from one arbitrary split. What IS identified is what the
+    pair contributes together, which is this.
+    """
+    if not small or not big or small["beta"] is None or big["beta"] is None:
+        return np.nan, np.nan, np.nan
+    if big["n"] != small["n"] or added < 1:
+        return np.nan, np.nan, np.nan
+    gain = big["r2"] - small["r2"]
+    df2 = big["n"] - len(big["names"]) - 1
+    if df2 <= 0 or big["r2"] >= 1:
+        return gain, np.nan, np.nan
+    f_stat = (gain / added) / ((1 - big["r2"]) / df2)
+    if f_stat <= 0:
+        return gain, f_stat, 1.0
+    # Survival of F(added, df2); exact for the small integer df1 used here.
+    p = (1.0 + added * f_stat / df2) ** (-df2 / 2.0) if added == 2 else np.nan
+    return gain, f_stat, p
+
+
+def collinear_pairs(frame, columns, threshold=0.85):
+    """Pairs among `columns` whose correlation would make betas untrustworthy."""
+    usable = [c for c in columns if c in frame.columns]
+    numeric = frame[usable].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(numeric) < 2:
+        return []
+    matrix = numeric.corr()
+    out = []
+    for i, first in enumerate(usable):
+        for second in usable[i + 1:]:
+            value = matrix.loc[first, second]
+            if pd.notna(value) and abs(value) >= threshold:
+                out.append((first, second, float(value)))
+    return out
+
+
 def analyse(sites, want):
     frame, name, has_coverage = ad.assemble_rip(sites, want=want)
     if frame is None:
@@ -233,6 +274,14 @@ def analyse(sites, want):
     print(f"\n{'-' * 78}")
     print("(b) WHAT HAPPENS TO temperature_2m AND " + height.upper())
     print("-" * 78)
+    pairs = collinear_pairs(observed, new)
+    if pairs:
+        print("  NOTE: these added terms are collinear, so their INDIVIDUAL")
+        print("  coefficients trade off against each other and may even come")
+        print("  out with opposite signs from one arbitrary split:")
+        for first, second, value in pairs:
+            print(f"    {first} vs {second}: r = {value:+.2f}")
+        print("  Read the dR2 line under each table, not the separate betas.")
     print("  Standardized coefficients. Each rung is the same physical base")
     print(f"  ({', '.join(base)})\n  plus the named light terms, so only the "
           "light terms move between rows.")
@@ -243,7 +292,8 @@ def analyse(sites, want):
         table = []
         for entry in rows:
             record = {"model": entry["model"], "n": entry["n"],
-                      "R2": round(entry["R2"], 4) if pd.notna(entry["R2"]) else np.nan}
+                      "R2": round(entry["R2"], 4) if pd.notna(entry["R2"]) else np.nan,
+                      "cond": round(entry["cond"], 1) if pd.notna(entry["cond"]) else np.nan}
             for column in tracked:
                 record[column] = round(beta_of(entry["fit"], column), 4)
             for column in new:
@@ -252,6 +302,20 @@ def analyse(sites, want):
         print(f"\n--- {target} ---")
         with pd.option_context("display.width", 220, "display.max_columns", 40):
             print(pd.DataFrame(table).to_string(index=False))
+        by_model = {r["model"]: r["fit"] for r in rows}
+        bearing_terms = [c for c in ("sun_in_view", "sun_glare")
+                         if c in observed.columns]
+        if len(bearing_terms) == 2:
+            gain, f_stat, p_value = added_term_test(
+                by_model.get("+ elevation"), by_model.get("+ glare geometry"),
+                len(bearing_terms))
+            if pd.notna(gain):
+                verdict = ("the bearing terms do real work"
+                           if pd.notna(p_value) and p_value < 0.01 and gain > 0.005
+                           else "the bearing terms add nothing")
+                detail = f"F={f_stat:.2f}, p={p_value:.2g}" if pd.notna(p_value) else ""
+                print(f"  bearing terms over elevation alone: dR2={gain:+.4f}"
+                      f"  {detail}  -> {verdict}")
         verdicts[target] = rows
     return verdicts, name, height, observed
 
@@ -265,7 +329,11 @@ def glare_verdict(verdicts, name, height, observed):
     for target, rows in verdicts.items():
         by_model = {r["model"]: r for r in rows}
         base_t = beta_of(by_model["base"]["fit"], "temperature_2m")
-        if not np.isfinite(base_t) or abs(base_t) < 0.02:
+        # A base coefficient near zero makes every ratio below explosive and
+        # meaningless -- 0.02 -> 0.04 is "200%" and says nothing.
+        if not np.isfinite(base_t) or abs(base_t) < 0.05:
+            print(f"  {target}: base temperature coefficient is "
+                  f"{base_t:+.4f}, too small to read a ratio from; skipped.")
             continue
         asked = beta_of(by_model["+ elev/azim/cloud"]["fit"], "temperature_2m")
         cloud_only = beta_of(by_model["+ cloud"]["fit"], "temperature_2m")
@@ -277,6 +345,16 @@ def glare_verdict(verdicts, name, height, observed):
                  "solar elevation": abs(base_t) - abs(elev_only)}
         worker = max(drops, key=drops.get)
         extra = abs(elev_only) - abs(geometry)
+        # Above 1.0 the coefficient GREW, which is the opposite finding and must
+        # not be reported as a share that "survived". It is suppression: the
+        # light terms were masking temperature, not standing in for it, and it
+        # is evidence AGAINST the proxy reading rather than a weak version of it.
+        if kept < 0.5:
+            reading = "absorbed — light proxy"
+        elif kept <= 1.15:
+            reading = "survives — not a light proxy"
+        else:
+            reading = "SUPPRESSED — light was masking it"
         lines.append({
             "target": target,
             "base": round(base_t, 4),
@@ -284,7 +362,8 @@ def glare_verdict(verdicts, name, height, observed):
             "+elev": round(elev_only, 4),
             "asked": round(asked, 4),
             "+geom": round(geometry, 4),
-            "kept": f"{kept:.0%}",
+            "x_base": f"{kept:.2f}x",
+            "reading": reading,
             "absorbed_by": worker if max(drops.values()) > 0.02 else "neither",
             "geometry_adds": f"{extra:+.3f}",
         })
@@ -293,9 +372,13 @@ def glare_verdict(verdicts, name, height, observed):
         return
     with pd.option_context("display.width", 220, "display.max_columns", 40):
         print(pd.DataFrame(lines).to_string(index=False))
-    print("\n  'kept' is how much of the base temperature coefficient survives")
-    print("  the model Riley asked for (elevation + azimuth + cloud). Under")
-    print("  ~50% means the light terms took most of its job.")
+    print("\n  'x_base' is the temperature coefficient in the asked-for model")
+    print("  (elevation + azimuth + cloud) as a multiple of its value without")
+    print("  the light terms. Below 0.50x the light terms took its job, which")
+    print("  is the proxy reading. Above 1.15x the coefficient GREW: the light")
+    print("  terms were MASKING temperature, not standing in for it, and that")
+    print("  is evidence against the proxy reading rather than a weak version")
+    print("  of it. Near 1.00x temperature simply stands on its own.")
     print("  'geometry_adds' is how much FURTHER temperature falls when the")
     print("  sun's bearing relative to the camera is added on top of plain")
     print("  elevation. A large positive number is the specifically-GLARE")
