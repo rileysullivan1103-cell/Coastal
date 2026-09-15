@@ -431,6 +431,43 @@ def test_outfall_covariates():
           empty["n_outfalls_within_2km"] == 0
           and "dist_to_outfall_m" not in empty)
 
+    # ECHO's CSV download cannot carry a latitude: its default column set has
+    # FacLong and no FacLat, and qcolumns takes the numeric ColumnID from
+    # .metadata rather than the ObjectName, so a list of names parses as
+    # nothing and it returns columns 1 and 2 instead of erroring. The
+    # coordinates come from get_map, joined to the facility records on the
+    # permit id. A latitude on its own places nothing, which is exactly how
+    # 113 real facilities produced n_outfalls_within_2km = 0.
+    print("\nplacing a facility ECHO would not place")
+    records = [
+        {"SourceID": "RI0023949", "FacLat": "41.377778"},   # no longitude
+        {"SourceID": "RIR101457"},                          # neither
+        {"SourceID": "RIR101178", "FacLat": "41.1", "FacLong": "-71.4"},
+        {"SourceID": "RI9999999"},                          # not on the map
+    ]
+    located = {"RI0023949": ("41.377778", "-71.511944"),
+               "RIR101457": ("41.5170855", "-71.2734191"),
+               "RIR101178": ("9.9", "9.9")}
+    placed_records, placed = spatial.place_outfalls(records, located)
+    check("a record with only a latitude is completed from the map",
+          placed_records[0]["FacLong"] == "-71.511944",
+          str(placed_records[0]))
+    check("a record with neither gets both",
+          placed_records[1].get("FacLat") == "41.5170855"
+          and placed_records[1].get("FacLong") == "-71.2734191")
+    check("a record that already has both is left alone, not overwritten",
+          placed_records[2]["FacLat"] == "41.1"
+          and placed_records[2]["FacLong"] == "-71.4")
+    check("a record the map does not carry stays unplaced",
+          "FacLat" not in placed_records[3])
+    check("and the count is of records that can actually be measured",
+          placed == 3, str(placed))
+    values = spatial.outfall_covariates(41.3778, -71.5119, placed_records)
+    check("the completed record is now the nearest outfall",
+          values.get("dist_to_outfall_m") is not None
+          and values["dist_to_outfall_m"] < 100,
+          str(values.get("dist_to_outfall_m")))
+
 
 def test_stream_covariates():
     print("\nNHDPlus streams")

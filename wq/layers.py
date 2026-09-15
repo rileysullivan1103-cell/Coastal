@@ -89,12 +89,19 @@ LAYERS = {
         # column name is not an error to ECHO, it is a column that does not
         # appear, so every distance came back empty and n_outfalls_within_2km
         # read a confident 0 at all 120 sites.
-        "observed_absent": "ECHO answers with 113 facilities in the box but "
-                           "its CWA download omits FacLat/FacLong, so nothing "
-                           "returned can be placed (probed 2026-09-15). The "
-                           "correct column names have not been established; "
-                           "wq.spatial --probe-outfalls asks the service for "
-                           "its own list rather than guessing a third set.",
+        "observed_absent": "ECHO's CWA CSV download cannot carry a latitude: "
+                           "its default column set has FacLong and no FacLat, "
+                           "and qcolumns takes the numeric ColumnID published "
+                           "by .metadata rather than the ObjectName, so a "
+                           "list of names parses as nothing and it returns "
+                           "columns 1 and 2 without erroring (probed "
+                           "2026-09-15).",
+        "replaced_by": "cwa_rest_services.get_qid for the facility records "
+                       "(named JSON, FacLat included) and "
+                       "cwa_rest_services.get_map for the coordinates (LAT "
+                       "and LON together), joined on the permit id — PUV on "
+                       "the map, SourceID on the record. Verified 2026-09-15 "
+                       "against 113 facilities in the Rhode Island tile.",
         "vintage_source": "response carries no timestamp; accessed_at is the "
                           "only date available",
         "note": "the download needs an explicit qcolumns list — ECHO's "

@@ -37,6 +37,16 @@ WATERS_FLOWLINE = ("https://watersgeo.epa.gov/arcgis/rest/services/"
 ECHO_FACILITIES = ("https://echodata.epa.gov/echo/"
                    "cwa_rest_services.get_facilities")
 ECHO_DOWNLOAD = "https://echodata.epa.gov/echo/cwa_rest_services.get_download"
+# The download is not used for the covariates and these two are, because the
+# download cannot carry a latitude. Its default column set has FacLong and no
+# FacLat, and its qcolumns parameter takes the numeric ColumnID published by
+# .metadata rather than the ObjectName -- so a list of names parses as nothing
+# and ECHO silently returns columns 1 and 2 (CWPName, SourceID) instead of
+# erroring. get_qid returns the facility records as named JSON, FacLat
+# included; get_map returns LAT and LON together for every mappable facility.
+# Both were verified against a live response on 2026-09-15.
+ECHO_RECORDS = "https://echodata.epa.gov/echo/cwa_rest_services.get_qid"
+ECHO_MAP = "https://echodata.epa.gov/echo/cwa_rest_services.get_map"
 # Overpass mirrors, tried in order. The main instance rate-limits and
 # occasionally rejects a request the mirrors accept, and a coastline is the
 # one layer with no substitute, so it is worth a second and third try.
@@ -737,6 +747,8 @@ def fetch_flowlines(lat, lon, km=STREAM_SEARCH_KM, probe=False):
 # name, and that default carries FacLong without FacLat -- so a distance
 # calculation over it silently finds nothing, everywhere, forever. These are
 # the columns this module actually reads.
+ECHO_MAX_PAGES = 20
+
 ECHO_COLUMNS = ("SourceID", "CWPName", "FacLat", "FacLong",
                 "CWPMajorMinorStatusFlag", "CWPFacilityTypeIndicator",
                 "CWPPermitStatusDesc", "CWPTotalDesignFlowNmbr")
@@ -784,21 +796,74 @@ def fetch_outfalls(lat, lon, km=OUTFALL_SEARCH_KM, probe=False):
     except (TypeError, ValueError):
         pass
 
-    from io import StringIO
-    text = _get(ECHO_DOWNLOAD,
-                params={"qid": qid, "output": "CSV",
-                        "qcolumns": ",".join(ECHO_COLUMNS)},
-                probe=probe).text
-    frame = pd.read_csv(StringIO(text), low_memory=False)
+    # The facility records, as named JSON. Paged, though 113 facilities in a
+    # 0.25-degree tile arrive on one page; the loop is here so a busier tile
+    # does not silently lose its tail.
+    records, page = [], 1
+    while page <= ECHO_MAX_PAGES:
+        payload = _get(ECHO_RECORDS,
+                       params={"qid": qid, "output": "JSON",
+                               "pageno": page, "responseset": "1000"},
+                       probe=probe).json()
+        results = payload.get("Results") or {}
+        batch = results.get("Facilities") or []
+        records.extend(batch)
+        if probe:
+            print(f"  ECHO get_qid page {page}: {len(batch)} facility record(s)")
+            if batch and page == 1:
+                print(f"  fields: {sorted(batch[0])[:20]}")
+        if len(records) >= int(str(rows).strip() or 0) or not batch:
+            break
+        page += 1
+
+    # get_map exists to put these on a map, so it carries LAT and LON
+    # together. get_qid carries FacLat but its longitude field has not been
+    # seen, and a latitude on its own places nothing -- so the coordinates
+    # come from here and the attributes from there, joined on the permit id.
+    located = {}
+    try:
+        payload = _get(ECHO_MAP, params={"qid": qid, "output": "JSON"},
+                       probe=probe).json()
+        for point in (payload.get("MapOutput") or {}).get("MapData") or []:
+            key = str(point.get("PUV") or "").strip()
+            if key and point.get("LAT") and point.get("LON"):
+                located[key] = (point["LAT"], point["LON"])
+        if probe:
+            print(f"  ECHO get_map: {len(located)} facility/facilities with "
+                  "both a latitude and a longitude")
+    except LayerFailed as exc:
+        if probe:
+            print(f"  ECHO get_map failed: {exc}")
+
+    records, placed = place_outfalls(records, located)
     if probe:
-        print(f"  ECHO download columns: {list(frame.columns)}")
-        missing = [c for c in ("FacLat", "FacLong") if c not in frame.columns]
-        if missing:
-            print(f"  ECHO: {missing} absent even with qcolumns — without a "
-                  "latitude nothing here can be placed, so the outfall "
-                  "covariates will stay empty and the coverage rule will "
-                  "drop them")
-    return frame.to_dict("records")
+        print(f"  {placed} of {len(records)} record(s) carry a usable "
+              "coordinate pair")
+    return records
+
+
+def place_outfalls(records, located):
+    """Give each facility record a coordinate pair, and count how many got one.
+
+    get_qid names its own fields and carries FacLat; get_map carries LAT and
+    LON together. Neither alone is enough for every record, and a latitude
+    without a longitude places nothing -- which is the whole reason the
+    outfall covariates read a confident zero at 120 sites. The join is on the
+    permit id, which get_map calls PUV and get_qid calls SourceID.
+
+    Returns (records, placed) rather than mutating silently, so a caller can
+    say how many of them can actually be measured against.
+    """
+    for record in records:
+        key = str(record.get("SourceID") or "").strip()
+        point = located.get(key)
+        # A record that already has BOTH is left alone; get_map only fills a
+        # gap, it never overwrites what the facility record itself reported.
+        if point and not (record.get("FacLat") and record.get("FacLong")):
+            record["FacLat"], record["FacLong"] = point
+    placed = sum(1 for record in records
+                 if record.get("FacLat") and record.get("FacLong"))
+    return records, placed
 
 
 def outfall_covariates(lat, lon, records):
