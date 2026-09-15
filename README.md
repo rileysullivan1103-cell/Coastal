@@ -526,6 +526,29 @@ alongside ordinary exceptions, because the single-camera helpers exit rather
 than raise, and an uncaught one would abandon the sweep with no record of what
 had already succeeded.
 
+### --match-observations is scoped to one camera
+
+`observation_window()` intersects the spans of the observation CSVs, because a
+rip hour is only usable where the conditions that would explain it also exist.
+It used to intersect **every** file in `data/`, which was fine while the
+project held one region and silently fatal the moment it held two: Cala
+Millor's weather ends 2024-09-28 and Corolla's begins 2025-09-08, so with both
+on disk the intersection was empty and `--match-observations` skipped all eight
+cameras — Walton included, whose own observations were perfectly good.
+
+It now matches only the files written for the camera being pulled, found by
+the stem its writer chose. Note that is **not** `slugify()`:
+`pull_site_observations.py` and `pull_gridded_weather.py` build filenames with
+underscores cut at 48 characters (`gridded_Beachfront_from_Hampton_Inn__Corolla__NC.csv`)
+while this module uses dashes for service and directory names. Two slug
+conventions in one pipeline is a trap, so `obs_slug()` exists to name the
+difference rather than leave it to be rediscovered.
+
+Tide and buoy files are named after a **station**, not a camera, and are shared
+between sites — `tide_8651370.csv` serves both Corolla cameras. Which one
+belongs to a camera is a distance question `analyze_drivers.py` answers at join
+time, so they are listed but do not constrain the window.
+
 ### The denominator is camera uptime, not detector uptime
 
 `--coverage` answers "was the camera looking". It does not answer "was the
