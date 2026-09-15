@@ -331,6 +331,66 @@ def check_missing_wave_height_does_not_eat_the_budget():
           f"smallest cell {smallest}")
 
 
+def check_boxes_come_off_disk_and_belong_to_their_frame():
+    """boxes_for must reopen the payload and take only this frame's boxes.
+
+    The regression this pins: the frame CSV stores source_file as a bare
+    basename, so the original os.path.exists(source_file) was false everywhere
+    and every detection in a 360-row sample shipped with an empty overlay. A
+    test that fed boxes_for a path it had just written would have passed while
+    the real run returned nothing, so the fixture reproduces the real shape --
+    a basename in the row, the path only in the index CSV beside it.
+    """
+    import json as _json
+    import build_label_sample as bls
+
+    def corners(x, y, w, h):
+        return [{"x": x, "y": y}, {"x": x + w, "y": y + h}]
+
+    payload = [
+        {"original_image_reference": "wanted.jpg",
+         "classification_result": {"classification_bboxes": [corners(10, 20, 30, 40)]}},
+        {"original_image_reference": "other.jpg",
+         "classification_result": {"classification_bboxes": [corners(500, 500, 9, 9)]}},
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        real = os.path.join(folder, "payload.json")
+        with open(real, "w") as handle:
+            _json.dump(payload, handle)
+        # The index is the only place the real path exists, exactly as on disk.
+        index = {"payload.json": real}
+
+        row = {"source_file": "payload.json", "original_image": "wanted.jpg"}
+        boxes = bls.boxes_for(row, index)
+        check("a basename row still finds its payload through the index",
+              len(boxes) == 1, f"{len(boxes)} boxes")
+        check("the box is this frame's, in source pixels",
+              boxes == [{"x": 10, "y": 20, "w": 30, "h": 40}], str(boxes))
+
+        other = bls.boxes_for(
+            {"source_file": "payload.json", "original_image": "other.jpg"}, index)
+        check("a different frame in the same file gets its own box",
+              other == [{"x": 500, "y": 500, "w": 9, "h": 9}], str(other))
+
+        unknown = bls.boxes_for(
+            {"source_file": "payload.json", "original_image": "absent.jpg"}, index)
+        check("a frame with no record in the file draws nothing", unknown == [])
+
+        ambiguous = bls.boxes_for(
+            {"source_file": "payload.json", "original_image": None}, index)
+        check("a two-record file with no reference draws nothing rather than "
+              "pooling both", ambiguous == [])
+
+        missing = bls.boxes_for(
+            {"source_file": "not_indexed.json", "original_image": "wanted.jpg"}, index)
+        check("a payload absent from the index draws nothing", missing == [])
+
+        # The bug's signature: the basename resolves from the cwd only by
+        # accident. Proving it does not is what the index exists for.
+        check("the bare basename is not itself a readable path",
+              not os.path.exists("payload.json"))
+
+
 def main():
     print("labelling pipeline offline checks\n")
     check_weighting_beats_the_sample()
@@ -344,6 +404,7 @@ def main():
     check_the_draw_balances_and_does_not_double_count()
     check_missing_wave_height_gets_its_own_cell()
     check_missing_wave_height_does_not_eat_the_budget()
+    check_boxes_come_off_disk_and_belong_to_their_frame()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
 

@@ -242,23 +242,55 @@ def draw_boosters(pool, already, rng):
     return pd.concat(out) if out else pool.iloc[0:0]
 
 
-def boxes_for(row):
-    """Every detector box for one frame, as [{x,y,w,h}], in source pixels.
+def source_index(slug):
+    """filename -> on-disk path for the raw detector payloads.
+
+    The frame CSV records source_file as a bare basename ("...json"), not a
+    path, so the payload cannot be reopened from that column alone -- an
+    os.path.exists on it is false from any directory, and boxes_for quietly
+    returned no boxes for every detection in the sample. The index written
+    beside the frame CSV carries both the filename and the real path.
+    """
+    index = ad.read_csv(f"{ad.DATA_DIR}/rip_detection/rip_{slug}_index.csv")
+    if index is None or index.empty:
+        return {}
+    if "filename" not in index.columns or "path" not in index.columns:
+        return {}
+    return {os.path.basename(str(name)): str(path)
+            for name, path in zip(index["filename"], index["path"])
+            if isinstance(path, str) or path == path}
+
+
+def boxes_for(row, index):
+    """Every detector box for ONE frame, as [{x,y,w,h}], in source pixels.
 
     The flattened frame CSV keeps only the largest box's area and centroid,
     which cannot be drawn. The raw payload is still on disk, so re-read it --
     labelling against a box that is not the box the detector drew would make
     the whole exercise measure the wrong thing.
+
+    A payload file can hold many records. Pooling every box in the file would
+    overlay other frames' boxes on this one, which is the same failure wearing
+    a different hat, so the record is matched on its original image reference
+    and a file that cannot be narrowed to one record contributes nothing.
     """
-    path = row.get("source_file")
-    if not isinstance(path, str) or not os.path.exists(path):
+    path = index.get(os.path.basename(str(row.get("source_file") or "")))
+    if not path or not os.path.exists(path):
         return []
     try:
-        records = prd.read_records(path)
+        records = prd.read_records(path) or []
     except Exception:
         return []
+
+    wanted = row.get("original_image")
+    if isinstance(wanted, str) and wanted:
+        records = [r for r in records
+                   if r.get("original_image_reference") == wanted]
+    elif len(records) != 1:
+        records = []
+
     out = []
-    for record in records or []:
+    for record in records:
         result = record.get("classification_result") or {}
         for box in result.get("classification_bboxes") or []:
             points = [(p.get("x"), p.get("y")) for p in box or []
@@ -300,6 +332,68 @@ def still_url(row, service, cache):
     return best["url"], "stills service"
 
 
+def report_boxes(table):
+    """Say how many rows carry an overlay, and complain if detections do not.
+
+    A detection with no box is the failure mode worth shouting about: the page
+    still shows the image, so labelling proceeds against a blank overlay and
+    the result looks like a clean run.
+    """
+    drawn = int((table["boxes"] != "[]").sum())
+    print(f"  {drawn} rows carry detector boxes to overlay; "
+          f"{len(table) - drawn} have none")
+    detections = table[table["confidence"] != "none"]
+    missing = int((detections["boxes"] == "[]").sum())
+    if missing:
+        print(f"  WARNING: {missing} of {len(detections)} detection rows have no "
+              f"box to draw.\n           Labelling those is labelling blind -- "
+              f"check data/rip_detection/ before starting.")
+    return drawn
+
+
+def repair_boxes(slug, frames):
+    """Recompute only the boxes column of an existing labels.csv.
+
+    Rebuilding the sample would re-resolve 360 stills urls against the service
+    and discard any labels already entered. The boxes are derived from payloads
+    already on disk, so they can be recomputed in place instead.
+    """
+    table = ad.read_csv(LABEL_CSV)
+    if table is None or table.empty:
+        sys.exit(f"No {LABEL_CSV} to repair — run without --repair-boxes first.")
+
+    lookup = {}
+    duplicates = 0
+    for _, frame in frames.iterrows():
+        key = pd.Timestamp(frame["timestamp"]).strftime("%Y%m%dT%H%M%SZ")
+        if key in lookup:
+            duplicates += 1
+            continue
+        lookup[key] = frame
+    if duplicates:
+        print(f"  {duplicates} frames share a frame_id to the second; kept the first")
+
+    index = source_index(slug)
+    print(f"  {len(index)} payload files in the detection index")
+
+    boxes = []
+    for frame_id in table["frame_id"]:
+        frame = lookup.get(str(frame_id))
+        boxes.append(json.dumps(boxes_for(frame, index)) if frame is not None
+                     else "[]")
+    table["boxes"] = boxes
+
+    labelled = int(table["rip_present"].astype(str).str.strip().ne("").sum()) \
+        if "rip_present" in table.columns else 0
+    temporary = LABEL_CSV + ".tmp"
+    table.to_csv(temporary, index=False)
+    os.replace(temporary, LABEL_CSV)
+    print(f"\n  rewrote the boxes column of {LABEL_CSV}")
+    print(f"  {labelled} existing labels preserved")
+    report_boxes(table)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -309,6 +403,9 @@ def main():
                         help="fixed so the same sample can be rebuilt exactly")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the stratum table and stop, downloading nothing")
+    parser.add_argument("--repair-boxes", action="store_true",
+                        help="recompute the boxes column of an existing "
+                             "labels.csv in place, keeping images and labels")
     parser.add_argument("--force", action="store_true",
                         help="overwrite an existing labels.csv, losing its labels")
     args = parser.parse_args()
@@ -317,6 +414,11 @@ def main():
 
     slug = ad.rip_slug(args.camera)
     frames = load_frames(slug)
+    # Before coverage and conditions: a repair needs neither, and loading
+    # conditions can reach for Open-Meteo, which bills by variable-hours.
+    if args.repair_boxes:
+        return repair_boxes(slug, frames)
+
     coverage = load_coverage(slug)
     conditions = hourly_conditions(args.camera, lat, lon)
 
@@ -403,6 +505,7 @@ def main():
     if not rows:
         sys.exit("  No image urls resolved; nothing to download.")
 
+    box_index = source_index(slug)
     got = prd.download([{k: v for k, v in r.items() if k != "_row"} for r in rows],
                        IMAGE_DIR)
     by_name = {os.path.basename(g["path"]): g["path"] for g in got}
@@ -428,7 +531,7 @@ def main():
             "cloud_cover": row.get("cloud_cover"),
             "solar_elevation": row.get("solar_elevation"),
             "image": os.path.basename(local),
-            "boxes": json.dumps(boxes_for(row)),
+            "boxes": json.dumps(boxes_for(row, box_index)),
             "rip_present": "",
             "notes": "",
             "labeled_at": "",
@@ -449,8 +552,7 @@ def main():
     print(f"  wrote {STRATA_CSV}  (stratum populations, for reweighting)")
     print(f"\n  wrote {LABEL_CSV}  ({len(table)} rows)")
     print(f"  images in {IMAGE_DIR}/")
-    drawn = int((table["boxes"] != "[]").sum())
-    print(f"  {drawn} rows carry detector boxes to overlay; {len(table) - drawn} have none")
+    report_boxes(table)
     print(f"\nNext:  python label_server.py")
     print(f"Then:  python analyze_precision.py")
     return 0
