@@ -1279,15 +1279,39 @@ def find_steps(series, threshold=STEP_PX, persist=PERSIST):
     A step is not a spike. Comparing the median of `persist` samples before a
     date against the median of `persist` after ignores a single bad frame and
     only fires on a change that the record keeps.
+
+    THE STEP IS IN THE DISPLACEMENT VECTOR, NOT ITS LENGTH. Pass a frame with
+    dx and dy and both are compared; pass a bare series and it is treated as
+    one number. The distinction is not academic. Every offset here is measured
+    from a reference frame, and the length |p(t) - p_ref| is blind in two
+    directions at once: a camera that slides from 20 px left of the reference
+    to 20 px right of it never changes its distance, so a real move reads as
+    nothing; and a reference that sits away from where the camera usually
+    points makes the record's ordinary position read as a large constant
+    offset, so which frame was chosen as reference starts to decide where the
+    steps appear. The vector has neither problem -- it is the same measurement
+    in either case, only with the sign kept.
     """
-    values = series.to_numpy(dtype=float)
+    if isinstance(series, pd.DataFrame):
+        values = series[["dx", "dy"]].to_numpy(dtype=float)
+    else:
+        values = series.to_numpy(dtype=float).reshape(-1, 1)
     dates = list(series.index)
+
+    def level(block):
+        return np.median(block, axis=0)
+
+    def apart(one, other):
+        return float(np.hypot(*(one - other))) if values.shape[1] == 2 \
+            else float(abs(one[0] - other[0]))
+
+    def size(point):
+        return float(np.hypot(*point)) if values.shape[1] == 2 \
+            else float(point[0])
     hits = []
     for index in range(persist, len(values) - persist + 1):
-        before = np.median(values[index - persist: index])
-        after = np.median(values[index: index + persist])
-        jump = abs(after - before)
-        if jump >= threshold:
+        if apart(level(values[index: index + persist]),
+                 level(values[index - persist: index])) >= threshold:
             hits.append(index)
     if not hits:
         return []
@@ -1312,11 +1336,11 @@ def find_steps(series, threshold=STEP_PX, persist=PERSIST):
         candidates = [i for i in run if i > 0]
         if not candidates:
             continue
-        index = max(candidates, key=lambda i: abs(values[i] - values[i - 1]))
-        before = float(np.median(values[max(0, index - persist): index]))
-        after = float(np.median(values[index: index + persist]))
-        steps.append({"date": dates[index], "jump": abs(after - before),
-                      "before": before, "after": after})
+        index = max(candidates, key=lambda i: apart(values[i], values[i - 1]))
+        before = level(values[max(0, index - persist): index])
+        after = level(values[index: index + persist])
+        steps.append({"date": dates[index], "jump": apart(after, before),
+                      "before": size(before), "after": size(after)})
     return steps
 
 
@@ -2000,10 +2024,9 @@ def main():
                     print(f"  two routes over the same pair disagree by "
                           f"sqrt(3) x the error in one")
                     print(f"  measurement, so this record measures a frame to "
-                          f"about +/-{noise:.0f} px")
+                          f"about +/-{noise:.2g} px")
                     print(f"  SMALLEST MOVE THIS RECORD CAN RESOLVE: "
-                          f"{resolution:.0f} px "
-                          f"(3x that error)")
+                          f"{resolution:.2g} px (3x that error)")
                     if threshold > args.step_px:
                         print(f"  the {args.step_px:.0f} px step threshold is "
                               "below that floor, so steps are")
@@ -2041,7 +2064,7 @@ def main():
                           "neither a move nor")
                     print("stability can be claimed. Re-run with --every 3.")
                     print("!" * 74)
-            coarse_steps = find_steps(coarse["offset"], threshold=threshold)
+            coarse_steps = find_steps(coarse[["dx", "dy"]], threshold=threshold)
             if reliable:
                 report_record(coarse_steps, coarse.index, slug, threshold,
                               "the whole frame",
@@ -2221,7 +2244,7 @@ def main():
     frame.to_csv(csv_path, index=False)
     wrote(csv_path)
     signal = agreeing_signal(frame)
-    steps = find_steps(signal["offset"], threshold=args.step_px)
+    steps = find_steps(signal[["dx", "dy"]], threshold=args.step_px)
     wrote(plot(frame, signal, steps,
                os.path.join(OUT_DIR, f"geometry_{slug}.png")))
 

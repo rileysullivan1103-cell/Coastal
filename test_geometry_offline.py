@@ -850,6 +850,47 @@ def test_a_planted_step_is_found_on_the_right_date():
         shutil.rmtree(tmp)
 
 
+def test_a_move_the_magnitude_cannot_see():
+    """The step is in the displacement vector, not in its length.
+
+    Every offset is measured from a reference frame, so the length
+    |p(t) - p_ref| is blind twice over. A camera that slides from 20 px left
+    of the reference to 20 px right of it never changes its DISTANCE from the
+    reference, so a 40 px move reads as perfectly stable. And a reference that
+    sits away from where the camera usually points turns the record's ordinary
+    position into a large constant offset, which makes the choice of reference
+    frame start to decide where the steps appear.
+    """
+    print("\na move that leaves the distance unchanged")
+    when = pd.date_range("2025-09-07", periods=20, freq="7D", tz="UTC")
+    dx = np.where(np.arange(20) < 10, -20.0, 20.0)      # a 40 px slide
+    dy = np.zeros(20)
+    frame = pd.DataFrame({"dx": dx, "dy": dy}, index=when)
+    frame["offset"] = np.hypot(frame["dx"], frame["dy"])
+
+    check("the distance from the reference never changes",
+          float(frame["offset"].std()) < 1e-9, float(frame["offset"].std()))
+    check("so the magnitude sees nothing",
+          g.find_steps(frame["offset"], threshold=5.0) == [], "no step")
+
+    found = g.find_steps(frame[["dx", "dy"]], threshold=5.0)
+    check("the vector finds the move", len(found) == 1, len(found))
+    if found:
+        check("  on the right date", found[0]["date"] == when[10],
+              str(found[0]["date"].date()))
+        check("  at its true size", abs(found[0]["jump"] - 40.0) < 1.0,
+              round(found[0]["jump"], 1))
+
+    # And it must not invent one where the camera really is still.
+    rng = np.random.default_rng(9)
+    still = pd.DataFrame({"dx": rng.normal(0, 0.4, 40),
+                          "dy": rng.normal(0, 0.4, 40)},
+                         index=pd.date_range("2025-09-07", periods=40,
+                                             freq="7D", tz="UTC"))
+    check("and reports nothing on a camera that did not move",
+          g.find_steps(still, threshold=5.0) == [], g.find_steps(still, 5.0))
+
+
 def test_a_stable_record_reports_no_step():
     print("\nstep detection on a camera that never moved")
     dates = pd.date_range("2024-01-07", periods=30, freq="7D", tz="UTC")
@@ -1564,6 +1605,7 @@ def main():
                  test_water_wins_a_median_split_when_it_covers_most_of_the_frame,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
+                 test_a_move_the_magnitude_cannot_see,
                  test_disagreement_is_measured_as_a_vector,
                  test_the_agreeing_group_is_recovered_from_noise,
                  test_a_frame_with_nothing_rigid_in_it_returns_nothing,
