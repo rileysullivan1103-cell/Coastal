@@ -73,17 +73,18 @@ LAYERS = {
         "verified": False,
     },
     "nlcd": {
-        "name": "NLCD impervious and land cover, catchment-accumulated via NLDI",
-        "endpoint": "https://api.water.usgs.gov/nldi/linked-data/comid",
+        "name": "NLCD impervious and developed land, watershed-accumulated, "
+                "via EPA StreamCat",
+        "endpoint": "https://api.epa.gov/StreamCat/streams/metrics",
         "supplies": ["impervious_frac", "developed_frac"],
-        "declared_vintage": "whichever NLCD year the chosen characteristic "
+        "declared_vintage": "whichever NLCD year the StreamCat response "
                             "ids carry — recorded per run, not assumed",
-        "vintage_source": "NLDI /lookups/tot/characteristics names the year "
-                          "in each characteristic's description; the chosen "
-                          "ids and their descriptions are written into the "
-                          "manifest",
+        "vintage_source": "the StreamCat metric name carries the year "
+                          "(pctimp2019ws is NLCD 2019); every candidate year "
+                          "goes in one request and the one that ANSWERS is "
+                          "what lands in landcover_vintage, per site",
         "citation": "MRLC National Land Cover Database, accumulated to "
-                    "NHDPlus catchments by USGS",
+                    "NHDPlus catchments by US EPA (StreamCat)",
         # Probed on 2026-09-15 from a live network: EVERY characteristics path
         # on api.water.usgs.gov returns 404, including the documented example
         # on a crawled feature (nwissite/USGS-05429700/local?characteristicId=
@@ -92,11 +93,14 @@ LAYERS = {
         # this is the characteristics service being absent, not the request
         # being malformed -- which is what four rounds of guessing assumed.
         "observed_absent": "NLDI catchment characteristics 404 on every "
-                           "documented path (probed 2026-09-15). The "
-                           "land-cover covariates have no source until this "
-                           "is replaced; StreamCat is the candidate and is "
-                           "not wired in until it has been probed.",
-        "caveat": "These are accumulated over the upstream catchment of the "
+                           "documented path (probed 2026-09-15), so this "
+                           "layer is no longer read from NLDI at all.",
+        "replaced_by": "EPA StreamCat, api.epa.gov/StreamCat/streams/metrics, "
+                       "keyed on the NHDPlus comid. Verified 2026-09-15: HTTP "
+                       "200 with pctimp2019ws for comid 6141236. The year is "
+                       "whichever of STREAMCAT_YEARS the response carries, "
+                       "recorded per site in landcover_vintage.",
+        "caveat": "These are accumulated over the upstream watershed of the "
                   "flowline nearest the beach, which is the right denominator "
                   "for a creek mouth and the wrong one for a beach whose "
                   "nearest flowline drains somewhere else entirely.",

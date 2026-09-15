@@ -857,22 +857,26 @@ def for_site(site, record=None, probe=False, want=None):
         try:
             def build():
                 comid, _geometry, _properties = fetch_comid(lat, lon, probe=probe)
-                # The catchment characteristics and the flowlines are two
-                # different services, and only the land-cover covariates need
-                # the first. Letting it raise here took dist_to_stream_m,
-                # stream_order and n_streams_within_2km down with it -- three
-                # covariates that come from the WATERS flowlines and never
-                # touched NLDI's characteristics at all.
-                characteristics, note = [], None
+                # Three different services, and they fail independently. The
+                # flowlines carry dist_to_stream_m, stream_order and
+                # n_streams_within_2km; StreamCat carries the land cover.
+                # Letting either raise here took the other's covariates down
+                # with it, which is how one dead endpoint cost five.
+                flowlines, flowline_note = [], None
                 try:
-                    characteristics = fetch_characteristics(comid, probe=probe)
+                    flowlines = fetch_flowlines(lat, lon, probe=probe)
                 except LayerFailed as exc:
-                    note = str(exc)
+                    flowline_note = str(exc)
+                landcover, landcover_note = {}, None
+                try:
+                    landcover = fetch_streamcat(comid, probe=probe)
+                except LayerFailed as exc:
+                    landcover_note = str(exc)
                 return {"comid": comid,
-                        "characteristics": characteristics,
-                        "characteristics_note": note,
-                        "flowlines": _safe(fetch_flowlines, lat, lon,
-                                           probe=probe)}
+                        "flowlines": flowlines,
+                        "flowline_note": flowline_note,
+                        "streamcat": landcover,
+                        "streamcat_note": landcover_note}
 
             payload = _cached_json(f"nhd_{_slug(station)}", build)
             lines = []
@@ -880,19 +884,18 @@ def for_site(site, record=None, probe=False, want=None):
             if os.path.exists(cached):
                 with open(cached) as handle:
                     lines = json.load(handle).get("lines") or []
-            catalogue = {}
-            catalogue_note = None
-            try:
-                catalogue = characteristic_catalogue()
-            except LayerFailed as exc:
-                catalogue_note = str(exc)
+            # NLDI's characteristics are gone -- see layers.py. Asking anyway
+            # is 120 requests a run for 120 404s.
             values = stream_covariates(
                 lat, lon, lines, payload.get("comid"),
-                payload.get("characteristics"), catalogue,
-                payload.get("flowlines"))
+                {}, {}, payload.get("flowlines"))
+            values.update(landcover_from_streamcat(payload.get("streamcat")))
             out.update(values)
-            layers.record_access(record, "nhdplus")
-            landcover_note = payload.get("characteristics_note") or catalogue_note
+            flowline_note = payload.get("flowline_note")
+            if flowline_note and values.get("dist_to_stream_m") is None:
+                out["nhdplus_note"] = flowline_note
+            layers.record_access(record, "nhdplus", note=flowline_note)
+            landcover_note = payload.get("streamcat_note")
             if landcover_note:
                 out["nlcd_note"] = landcover_note
             layers.record_access(record, "nlcd",
@@ -1164,8 +1167,77 @@ def report_outcomes(frame, want=None):
     return table
 
 
-STREAMCAT_HOSTS = ("https://api.epa.gov/StreamCat/streams/metrics",
-                   "https://java.epa.gov/StreamCAT/metrics")
+# Verified 2026-09-15 against a live network: api.epa.gov answers 200 with
+# {"items":[{"pctimp2019ws":11.75, "pcturbhi2019ws":9.91, ...}]} for comid
+# 6141236. The legacy java.epa.gov host answers 503 "the most likely cause is
+# a misconfiguration", which is a broken server rather than a wrong URL.
+STREAMCAT = "https://api.epa.gov/StreamCat/streams/metrics"
+STREAMCAT_HOSTS = (STREAMCAT, "https://java.epa.gov/StreamCAT/metrics")
+# Newest first. Every candidate goes in ONE request and the year that actually
+# comes back is what gets recorded -- the same discipline as the NLDI
+# catalogue had: the land-cover release is observed, never assumed, because
+# NLCD 2011 and NLCD 2019 are not the same covariate.
+STREAMCAT_YEARS = (2021, 2019, 2016, 2011)
+# NLCD's four developed classes: open space, low, medium, high intensity.
+STREAMCAT_URBAN = ("pcturbop", "pcturblo", "pcturbmd", "pcturbhi")
+
+
+def fetch_streamcat(comid, probe=False):
+    """Catchment- and watershed-accumulated land cover for one comid.
+
+    StreamCat is keyed on the comid, which is what a beach gives us. NLDI's
+    own characteristics service, which this replaces, 404s on every
+    documented path including its own catalogue.
+    """
+    names = []
+    for year in STREAMCAT_YEARS:
+        names.append(f"pctimp{year}")
+        names.extend(f"{prefix}{year}" for prefix in STREAMCAT_URBAN)
+    response = _get(STREAMCAT, params={"name": ",".join(names),
+                                       "areaOfInterest": "watershed",
+                                       "comid": str(comid)}, probe=probe)
+    items = (response.json() or {}).get("items") or []
+    if probe:
+        print(f"  StreamCat: {len(items)} row(s), "
+              f"{sorted(items[0])[:10] if items else '[]'}")
+    return items[0] if items else {}
+
+
+def _percent(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if number < 0 else number
+
+
+def landcover_from_streamcat(row):
+    """impervious_frac and developed_frac, from whichever year answered.
+
+    The suffix matters: `...ws` is accumulated over the whole upstream
+    watershed, `...cat` is the local catchment only, and `...wsrp100` is a
+    100 m riparian buffer. A2 asks for the upstream catchment, so `ws`.
+    """
+    out = {}
+    if not row:
+        return out
+    for year in STREAMCAT_YEARS:
+        impervious = _percent(row.get(f"pctimp{year}ws"))
+        urban = [_percent(row.get(f"{prefix}{year}ws"))
+                 for prefix in STREAMCAT_URBAN]
+        present = [value for value in urban if value is not None]
+        if impervious is None and not present:
+            continue
+        if impervious is not None:
+            out["impervious_frac"] = round(impervious / 100.0, 4)
+        if present:
+            out["developed_frac"] = round(sum(present) / 100.0, 4)
+        out["landcover_vintage"] = (f"NLCD {year}, accumulated over the "
+                                    f"upstream watershed "
+                                    f"(StreamCat pctimp{year}ws)")
+        out["landcover_source"] = "streamcat"
+        break
+    return out
 
 
 def probe_streams(lat, lon):
@@ -1222,6 +1294,13 @@ def probe_streams(lat, lon):
                  {"name": "pcturbhi2019,pcturbmd2019,pcturblo2019,"
                           "pcturbop2019,pctimp2019",
                   "areaOfInterest": "watershed", "comid": comid})
+
+    show("the WATERS flowline service, which answered with an ArcGIS error "
+         "page rather than features", WATERS_FLOWLINE,
+         {"geometry": f"{lon - 0.02},{lat - 0.02},{lon + 0.02},{lat + 0.02}",
+          "geometryType": "esriGeometryEnvelope", "inSR": "4326",
+          "spatialRel": "esriSpatialRelIntersects", "outFields": "*",
+          "returnGeometry": "true", "outSR": "4326", "f": "geojson"})
 
     for path in NLDI_CATALOGUE_PATHS:
         show("characteristic catalogue",

@@ -482,6 +482,53 @@ def test_stream_covariates():
           and values.get("developed_frac") is None)
 
 
+def test_landcover_comes_from_streamcat_at_the_year_that_answered():
+    """NLDI's characteristics are gone; StreamCat is keyed on the comid.
+
+    Probed 2026-09-15: api.epa.gov answered 200 for comid 6141236 with
+    pctimp2019ws 11.75 and the four developed classes, while every NLDI
+    characteristics path 404d including its own catalogue.
+    """
+    print("\nland cover from StreamCat, keyed on the comid")
+    row = {"pctimp2019cat": 11.75, "pctimp2019ws": 11.75,
+           "pcturbhi2019ws": 9.91, "pcturbmd2019ws": 2.7,
+           "pcturblo2019ws": 0.45, "pcturbop2019ws": 1.0,
+           # The riparian-buffer and local-catchment variants must not be
+           # mistaken for the watershed accumulation A2 asks for.
+           "pcturbhi2019catrp100": 4.65, "pcturbhi2019cat": 9.91}
+    values = spatial.landcover_from_streamcat(row)
+    check("impervious converted from percent to fraction",
+          near(values["impervious_frac"], 0.1175, 1e-9),
+          str(values.get("impervious_frac")))
+    check("developed is the four NLCD urban classes summed",
+          near(values["developed_frac"], 0.1406, 1e-9),
+          str(values.get("developed_frac")))
+    check("the accumulation is the WATERSHED one, not the local catchment "
+          "and not the riparian buffer",
+          "pctimp2019ws" in values["landcover_vintage"],
+          values["landcover_vintage"])
+
+    # The year is observed, never assumed: 2011 and 2019 are not the same
+    # covariate, and a study stratified on one is not a result about the other.
+    older = {"pctimp2011ws": 4.0, "pcturbhi2011ws": 1.0}
+    values = spatial.landcover_from_streamcat(older)
+    check("with only 2011 in the response it reports 2011",
+          "2011" in values["landcover_vintage"], values["landcover_vintage"])
+    both = dict(older, pctimp2019ws=9.0, pcturbhi2019ws=3.0)
+    values = spatial.landcover_from_streamcat(both)
+    check("and with both, the later release wins",
+          "2019" in values["landcover_vintage"]
+          and near(values["impervious_frac"], 0.09, 1e-9),
+          values["landcover_vintage"])
+    check("an empty response yields nothing rather than a zero",
+          spatial.landcover_from_streamcat({}) == {})
+
+    # More than one year has to be on offer, or the study is pinned to
+    # whichever release happened to be current the day this was written.
+    check("several NLCD years are asked for, not one",
+          len(spatial.STREAMCAT_YEARS) > 1, str(spatial.STREAMCAT_YEARS))
+
+
 def test_landcover_ids_are_not_hardcoded():
     print("\nNLCD year comes from the catalogue")
     old = {"TOT_IMPV11": {"description": "NLCD 2011 imperviousness"}}
@@ -845,6 +892,7 @@ def main():
                  test_covariates_from_a_coastline,
                  test_outfall_covariates,
                  test_stream_covariates,
+                 test_landcover_comes_from_streamcat_at_the_year_that_answered,
                  test_landcover_ids_are_not_hardcoded,
                  test_layers_are_fetched_per_tile_not_per_station,
                  test_no_data_is_not_a_refusal,

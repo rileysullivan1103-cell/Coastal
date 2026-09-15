@@ -146,7 +146,7 @@ is not a result about the other.
 |---|---|---|
 | `dist_to_stream_m`, `stream_order`, `upstream_area_km2`, `n_streams_within_2km` | NHDPlus V2.1 via USGS NLDI, flowline attributes via EPA WATERS | a stream **mouth**, not a stream: only flowline endpoints landing within 300 m of the coastline count, so a creek passing 300 m inland on its way elsewhere is not counted as an input |
 | `dist_to_outfall_m`, `outfall_type`, `n_outfalls_within_2km` | EPA ECHO (CWA/NPDES) | major/minor and POTW/non-POTW where ECHO carries them |
-| `impervious_frac`, `developed_frac` | NLCD, accumulated to the upstream catchment by NLDI | the NLCD **year is read from the service catalogue**, not hardcoded, and written into the manifest |
+| `impervious_frac`, `developed_frac` | NLCD, accumulated to the upstream watershed by **EPA StreamCat**, keyed on the NHDPlus comid | NLDI's own characteristics service 404s on every documented path — see below. The NLCD **year is whichever one the response carries**, not hardcoded: every candidate goes in one request and the one that answers is written into the manifest, per site |
 | `shore_normal_deg`, `curvature_1_per_km`, `embayment_ratio`, `land_fraction_5km`, `fetch_km_*` | OSM coastline via Overpass | see below |
 | `tidal_range_m`, `datum_gauge_dist_km` | NOAA CO-OPS datums | MHHW − MLLW at the nearest gauge |
 
@@ -206,6 +206,18 @@ wrong. Nodes of degree three or more are counted and reported, never judged.
 > one — a segment cannot disagree with itself. It is in the test suite now
 > precisely because a check that cannot fail is worse than no check: it gets
 > read as evidence.
+
+> **NLDI's catchment characteristics are gone.** Probed 2026-09-15 from a live
+> network: `/linked-data/comid/{comid}/tot` 404s, so does
+> `/characteristics/tot`, so does the catalogue at `/lookups/tot/characteristics`,
+> and so does **the documented example on a crawled feature**
+> (`nwissite/USGS-05429700/local?characteristicId=CAT_BFI`). `labs.waterdata.usgs.gov`
+> answers 404 with an empty body. The comid lookup on the *same host* works, so
+> the characteristics service is absent rather than the request malformed —
+> which four rounds of transcribing a different path could never have found.
+> StreamCat replaces it and is verified: HTTP 200 with `pctimp2019ws` for comid
+> 6141236. `wq.spatial --probe-streams` is what established all of this and is
+> the thing to re-run when one of these services moves again.
 
 **The ways are stitched into chains first.** OpenStreetMap splits a shoreline
 into many short ways — an estuary shore is hundreds of them, a few hundred
