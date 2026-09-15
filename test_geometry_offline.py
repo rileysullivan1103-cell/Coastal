@@ -949,6 +949,29 @@ def test_the_two_passes_are_set_against_each_other():
     check("the unmatched one is contradicted where the other pass had frames",
           "whole frame only" in kinds, kinds)
 
+    # THE TOLERANCE FOLLOWS THE SAMPLING. Walton's daily December window paired
+    # a step on 2026-02-17 with one on 2026-02-05 -- twelve days and a factor
+    # of four in size apart -- because the tolerance was a fixed 14 days, which
+    # is two samples of a weekly record and fourteen of a daily one.
+    daily = pd.date_range("2025-12-01", periods=90, freq="1D", tz="UTC")
+    apart = g.reconcile([step(daily[40], 8.0)], list(daily),
+                        [step(daily[52], 33.0)], list(daily))
+    check("twelve days apart in a DAILY record is two events",
+          len(apart) == 2 and not any(row[0].startswith("both") for row in apart),
+          [row[0] for row in apart])
+    weekly = pd.date_range("2025-12-01", periods=30, freq="7D", tz="UTC")
+    together = g.reconcile([step(weekly[10], 8.0)], list(weekly),
+                           [step(weekly[11], 8.5)], list(weekly))
+    check("but one sample apart in a WEEKLY record is one event",
+          len(together) == 1 and together[0][0] == "both",
+          [row[0] for row in together])
+
+    # And agreeing that something happened is not agreeing on what.
+    loud = g.reconcile([step(weekly[10], 113.0)], list(weekly),
+                       [step(weekly[10], 72.0)], list(weekly))
+    check("a 113 px and a 72 px reading of one move is flagged, not corroborated",
+          loud[0][0] == "both, but the sizes disagree", loud[0][0])
+
     # Now the same unmatched step, but the patches have no frames near it.
     blind = list(when[:14])
     gapped = g.reconcile([step(when[20], 30.0)], list(when), [], blind)

@@ -153,6 +153,7 @@ PERSIST = 3          # samples on each side that must agree
 # for a 128px patch, 5.0 for a 2.5 MP frame -- so a single threshold above that
 # means "better than chance" at any size.
 MIN_CONFIDENCE = 8.0
+OVERRULE_SHARE = 0.2   # frames forced inside the search window before it is suspect
 # Temporal spread, in grey levels, below which a patch is not scene at all.
 # Real imagery weeks apart never repeats exactly: sun angle, haze and JPEG
 # noise alone put the median absolute deviation well above one level. A region
@@ -532,6 +533,25 @@ def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
               f"{max_shift:.0f} px and were\n  re-measured inside it — that "
               "count IS the evidence for the limit; if it is\n  most of the "
               "record the limit is wrong, not the record")
+        # AND WHEN IT IS A QUARTER OF THE RECORD, SAY SO LOUDLY. A frame whose
+        # true peak lies outside the window is not measured; it is assigned the
+        # best position inside a box it does not belong in, and that number
+        # then votes in every median and every step. Printing the count and
+        # doing nothing with it let Walton's winter stretch report epochs from
+        # a record where one frame in four had been overruled.
+        share = strayed / len(frame)
+        if share > OVERRULE_SHARE:
+            print(f"\n  WARNING: that is {share:.0%} of the frames. Each one "
+                  "was given the best")
+            print("  position inside the window rather than its own, and those "
+                  "numbers vote in")
+            print("  every median and step below. The test is to re-run with "
+                  f"--max-shift {max_shift * 3:.0f}:")
+            print("  if the count collapses and the offsets change, the limit "
+                  "was wrong; if the")
+            print("  count holds, those frames do not register at all and are "
+                  "unmeasured either")
+            print("  way. Until then treat the epochs below as provisional.")
     weak = int((frame["confidence"] < min_confidence).sum())
     if weak:
         print(f"  {weak}/{len(frame)} frames below confidence "
@@ -1497,8 +1517,17 @@ def spark(series, width=86, height=13, marks=(), label=""):
     return lines
 
 
+def sampling_days(dates, fallback=7.0):
+    """Median spacing of a record, in days."""
+    if len(dates) < 2:
+        return fallback
+    gaps = pd.Series(sorted(dates)).diff().dropna()
+    spacing = gaps.median().total_seconds() / 86400.0 if len(gaps) else fallback
+    return spacing if spacing > 0 else fallback
+
+
 def reconcile(first, first_dates, second, second_dates,
-              persist=PERSIST, window_days=14):
+              persist=PERSIST, window_days=None):
     """Set the two passes' step lists against each other, date by date.
 
     The whole-frame pass and the agreeing patches measure the same camera by
@@ -1512,6 +1541,16 @@ def reconcile(first, first_dates, second, second_dates,
     unmatched step is reported as contradicted (the other pass had frames on
     both sides and found nothing) or as unmeasured (it did not).
     """
+    # TWO STEPS ARE THE SAME EVENT WHEN THEY ARE A SAMPLE OR TWO APART, NOT A
+    # FORTNIGHT. The tolerance was a fixed 14 days, which is two samples of a
+    # weekly record and fourteen of a daily one. On Walton's daily December
+    # window that paired a step on 2026-02-17 with one on 2026-02-05 and called
+    # them the same move -- twelve days and a factor of four in size apart --
+    # so the summary read "3 of 3 seen by both passes" when one of the three
+    # was two different events. The tolerance has to follow the sampling.
+    if window_days is None:
+        window_days = max(2.0 * sampling_days(first_dates), 1.0)
+
     def near(date, dates, days):
         return [d for d in dates if abs((d - date).days) <= days]
 
@@ -1526,7 +1565,17 @@ def reconcile(first, first_dates, second, second_dates,
         match = near(step["date"], [s["date"] for s in second], window_days)
         if match:
             twin = min(second, key=lambda s: abs((s["date"] - step["date"]).days))
-            rows.append(("both", step["date"], step["jump"], twin["jump"]))
+            # Agreeing that something happened is not agreeing on what. Two
+            # passes that report 113 px and 72 px for one move have not
+            # measured the same thing, and saying "both" without the caveat
+            # reads as corroboration it has not earned. Half again is already
+            # a wide allowance for two measurements of one rigid displacement:
+            # where the passes really do agree at Walton they land within a
+            # few percent of each other (8.5 / 8.8 px, 4.8 / 4.8 px).
+            big, small = sorted((step["jump"], twin["jump"]), reverse=True)
+            verdict = "both" if big <= 1.5 * max(small, 1e-6) \
+                else "both, but the sizes disagree"
+            rows.append((verdict, step["date"], step["jump"], twin["jump"]))
         elif covered(step["date"], second_dates):
             rows.append(("whole frame only", step["date"], step["jump"], None))
         else:
@@ -2389,7 +2438,7 @@ def main():
         for verdict, date, jump, twin in rows:
             size = f"{jump:5.1f} px" + (f" / {twin:.1f} px" if twin else "")
             print(f"  {date:%Y-%m-%d}  {size:<20} {verdict}")
-        agreed = [row for row in rows if row[0] == "both"]
+        agreed = [row for row in rows if row[0].startswith("both")]
         print(f"\n{len(agreed)} of {len(rows)} candidate move"
               f"{'' if len(rows) == 1 else 's'} are seen BY BOTH passes. "
               "Those are the")
