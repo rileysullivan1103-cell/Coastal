@@ -37,10 +37,13 @@ from that is not "guess better", it is "carry where the number came from".
 
 import math
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import numpy as np
 import pandas as pd
+import requests
 
 from . import config
 
@@ -82,6 +85,115 @@ def cell_centre(lat, lon, size=None):
 _EMPTY_MARKER = "_no_rows_returned"
 
 
+class SourceUnavailable(RuntimeError):
+    """A source did not answer for one site.
+
+    This is NOT 'answered, and there is nothing there'. That second thing is
+    a fact about the site -- this gauge carries no water temperature, this
+    cell is not ocean -- and is worth caching. A gateway timeout is a fact
+    about one minute of one afternoon, and caching it would freeze that
+    minute into a permanent answer that nothing downstream could tell apart
+    from a real absence.
+
+    Never fatal either. One unhandled 504 out of NOAA killed a 2854-site
+    covariate pull at site 405, forty minutes in. The covariate a refusal
+    costs goes missing, the coverage rule sees the hole, and the manifest
+    records it -- which is the honest outcome and costs one site, not a run.
+    """
+
+    def __init__(self, message, quiet=False):
+        super().__init__(message)
+        self.quiet = quiet
+
+
+# After this many consecutive refusals a source is given up on for the rest
+# of the run. Making a refusal non-fatal is only half the fix: a source that
+# is down stays down, and asking it again at every remaining site pays its
+# whole retry ladder two thousand more times. Open-Meteo's daily quota is the
+# case that matters here -- once it is spent it is spent until tomorrow, and
+# before this the run just kept going, quietly handing every remaining site
+# no rain, no wind and no waves.
+CIRCUIT_THRESHOLD = 3
+_FAILURES = {}
+_SUCCESSES = {}
+_TRIPPED = {}
+# Reasons a site went without a covariate, collected while that site is being
+# built and written into its row of the per-site source table.
+_MISSING = []
+
+
+def _host_check(host):
+    if host in _TRIPPED:
+        raise SourceUnavailable(
+            f"{host} was given up on earlier this run ({_TRIPPED[host]})",
+            quiet=True)
+
+
+def _host_record(host, ok, reason=""):
+    if ok:
+        _SUCCESSES[host] = _SUCCESSES.get(host, 0) + 1
+        _FAILURES[host] = 0
+        return
+    _FAILURES[host] = _FAILURES.get(host, 0) + 1
+    if _FAILURES[host] >= CIRCUIT_THRESHOLD and host not in _TRIPPED:
+        _TRIPPED[host] = reason
+        served = _SUCCESSES.get(host, 0)
+        print(f"      GIVING UP on {host} after {_FAILURES[host]} consecutive "
+              f"refusals ({served} successful response(s) this run): {reason}. "
+              "Every site from here on goes without what it supplied, and the "
+              "coverage rule will drop those covariates.")
+
+
+def unavailable_sources():
+    """Hosts abandoned this run, for the run summary and the manifest."""
+    return dict(_TRIPPED)
+
+
+def reset_sources():
+    """Forget this run's refusals. For tests and for a second attempt."""
+    _FAILURES.clear()
+    _SUCCESSES.clear()
+    _TRIPPED.clear()
+    _MISSING.clear()
+
+
+def _note_missing(reason):
+    if reason not in _MISSING:
+        _MISSING.append(reason)
+
+
+# A refusal, as opposed to an answer of 'nothing here'. The difference
+# decides whether the answer may be cached, so it is defined once, here,
+# and pull_site_observations imports it for the notes it writes.
+REFUSAL_STATUS = {408, 425, 429, 500, 502, 503, 504}
+_REFUSAL_WORDS = re.compile(
+    r"\b(Timeout|ConnectTimeout|ReadTimeout|ConnectionError|"
+    r"ChunkedEncodingError|TooManyRedirects|SSLError)\b")
+
+
+def is_refusal(note):
+    """True when the note means 'the service did not answer'.
+
+    False for 'the service answered, and there is nothing here' -- which is
+    what 'no ocean cell found within ~22 km' and a 404 are. The first is a
+    fact about this afternoon, the second a fact about the site, and only
+    the second is worth writing down.
+    """
+    text = str(note or "")
+    match = re.search(r"HTTP (\d{3})", text)
+    if match:
+        code = int(match.group(1))
+        return code in REFUSAL_STATUS or code >= 500
+    return bool(_REFUSAL_WORDS.search(text))
+
+
+def _short_error(exc):
+    response = getattr(exc, "response", None)
+    if response is not None:
+        return f"HTTP {response.status_code}"
+    return type(exc).__name__
+
+
 def _cached(name, builder):
     """Read a cached CSV, or build it and write it.
 
@@ -90,6 +202,9 @@ def _cached(name, builder):
     a header-only CSV carrying _EMPTY_MARKER so that reading it back yields
     that answer instead of an exception: a cache that cannot be read is not
     a cache, it is a landmine under the next caller.
+
+    A source that did not answer is not that, and nothing is written for it.
+    See SourceUnavailable.
     """
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, f"{name}.csv")
@@ -104,12 +219,48 @@ def _cached(name, builder):
         if frame.empty or _EMPTY_MARKER in frame.columns:
             return None
         return frame
-    frame = builder()
+    try:
+        frame = builder()
+    except SourceUnavailable as exc:
+        _note_missing(str(exc))
+        if not exc.quiet:
+            print(f"      {exc} — not cached, so it is asked again next run")
+        return None
     if frame is None or frame.empty:
         pd.DataFrame(columns=[_EMPTY_MARKER]).to_csv(path, index=False)
         return None
     frame.to_csv(path, index=False)
     return frame
+
+
+def clear_empty_cache():
+    """Delete the cached 'nothing here' answers, keeping the populated ones.
+
+    For after a run that was refused rather than answered. Before this module
+    told the two apart, a walk that Open-Meteo rate-limited was recorded as
+    'no ocean cell found within ~22 km' and cached -- so a beach with waves
+    stayed waveless on every later run, and no amount of re-running fixed it.
+    New runs no longer cache a refusal; this is the way to undo the ones that
+    already were.
+    """
+    if not os.path.isdir(CACHE_DIR):
+        return 0
+    removed = 0
+    for name in sorted(os.listdir(CACHE_DIR)):
+        if not name.endswith(".csv"):
+            continue
+        path = os.path.join(CACHE_DIR, name)
+        try:
+            frame = pd.read_csv(path, low_memory=False)
+            empty = frame.empty or _EMPTY_MARKER in frame.columns
+        except pd.errors.EmptyDataError:
+            empty = True
+        except Exception:  # noqa: BLE001 -- an unreadable cache is not an answer
+            empty = True
+        if empty:
+            os.remove(path)
+            removed += 1
+    return removed
 
 
 def window(years_back=None):
@@ -121,10 +272,16 @@ def window(years_back=None):
 
 def fetch_era5(lat, lon, start, end):
     import pull_site_observations as pso
+    host = urlsplit(pso.ERA5).netloc
+    _host_check(host)
     frame, note = pso.open_meteo(pso.ERA5, lat, lon, start, end, pso.ERA5_VARS)
     if frame is None:
         print(f"      ERA5 failed: {note}")
+        if is_refusal(note):
+            _host_record(host, False, str(note)[:120])
+            raise SourceUnavailable(f"ERA5: {note}")
         return None
+    _host_record(host, True)
     return pso.add_rain_windows(frame)
 
 
@@ -137,11 +294,17 @@ def fetch_marine(lat, lon, start, end):
     estimate of which way the beach faces.
     """
     import pull_site_observations as pso
+    host = urlsplit(pso.MARINE).netloc
+    _host_check(host)
     frame, note, used = pso.fetch_marine(lat, lon, start, end,
                                         return_cell=True)
     if frame is None:
         print(f"      marine failed: {note}")
+        if is_refusal(note):
+            _host_record(host, False, str(note)[:120])
+            raise SourceUnavailable(f"marine: {note}")
         return None, None
+    _host_record(host, True)
     bearing = None
     if isinstance(used, (tuple, list)) and len(used) == 2:
         dlat, dlon = float(used[0]) - lat, float(used[1]) - lon
@@ -201,9 +364,18 @@ def nearest_coops(lat, lon, stations, max_km=None):
 
 def coops_for(station_id, product, start, end):
     import pull_observations as obs
+    host = urlsplit(obs.COOPS_DATA).netloc
 
     def build():
-        frame = obs.pull_coops_series(station_id, product, start, end)
+        _host_check(host)
+        try:
+            frame = obs.pull_coops_series(station_id, product, start, end)
+        except requests.RequestException as exc:
+            reason = _short_error(exc)
+            _host_record(host, False, reason)
+            raise SourceUnavailable(
+                f"CO-OPS {product} at gauge {station_id}: {reason}") from exc
+        _host_record(host, True)
         if frame is not None and not frame.empty and product == "water_level":
             frame = obs.add_tide_state(frame)
         return frame
@@ -217,9 +389,27 @@ def coops_datums(station_ids):
     rows = []
     for station in station_ids:
         def build(station=station):
-            resp = scan.get_with_retry(COOPS_DATUMS_URL.format(station=station))
+            host = urlsplit(COOPS_DATUMS_URL).netloc
+            _host_check(host)
+            try:
+                resp = scan.get_with_retry(
+                    COOPS_DATUMS_URL.format(station=station))
+            except requests.RequestException as exc:
+                reason = _short_error(exc)
+                _host_record(host, False, reason)
+                raise SourceUnavailable(
+                    f"CO-OPS datums at gauge {station}: {reason}") from exc
             if resp.status_code != 200:
+                # A 404 is this gauge saying it has no published datums, which
+                # is an answer. A 5xx or a 429 is the service not answering.
+                reason = f"HTTP {resp.status_code}"
+                if is_refusal(reason):
+                    _host_record(host, False, reason)
+                    raise SourceUnavailable(
+                        f"CO-OPS datums at gauge {station}: {reason}")
+                _host_record(host, True)
                 return pd.DataFrame()
+            _host_record(host, True)
             payload = resp.json()
             values = {str(d.get("name", "")).upper(): d.get("value")
                       for d in payload.get("datums", [])}
@@ -291,6 +481,11 @@ def hourly_frame(site, start, end, coops_stations=None, overrides=None):
     meta = {"station_id": site.get("station_id"), "sources": [],
             "tide_station": None, "tide_km": np.nan}
     parts = []
+    # Why this site went without something, if it did. A site with no waves
+    # because it is thirty kilometres up an estuary and a site with no waves
+    # because the wave model was rate-limiting are the same empty column, and
+    # only one of them is a fact about the beach.
+    _MISSING.clear()
 
     era5 = era5_for(lat, lon, start, end)
     if era5 is not None:
@@ -336,6 +531,7 @@ def hourly_frame(site, start, end, coops_stations=None, overrides=None):
                 meta["sources"].append("water_temp")
 
     if not parts:
+        meta["unavailable"] = "; ".join(_MISSING)
         return None, meta
 
     frame = parts[0]
@@ -353,6 +549,7 @@ def hourly_frame(site, start, end, coops_stations=None, overrides=None):
     for column in config.PREDICTORS:
         if column not in frame.columns:
             frame[column] = np.nan
+    meta["unavailable"] = "; ".join(_MISSING)
     return frame[config.PREDICTORS].sort_index(), meta
 
 
@@ -421,4 +618,32 @@ def build(sites, samples, coops_stations=None, overrides=None, start=None,
         notes.append(meta)
     if not joined:
         return pd.DataFrame(), pd.DataFrame()
-    return (pd.concat(joined, ignore_index=True), pd.DataFrame(notes))
+    frame = pd.DataFrame(notes)
+    _report_refusals(frame)
+    return (pd.concat(joined, ignore_index=True), frame)
+
+
+def _report_refusals(notes):
+    """Say, at the end, how much of this run was answered and how much was not.
+
+    Without this the damage is invisible. A run that spends Open-Meteo's
+    daily quota at site 600 writes exactly the same tables as one that got
+    every request, only with two thousand sites' weather quietly missing --
+    and the coverage rule then drops the predictor for everybody, including
+    the six hundred sites that did have it.
+    """
+    given_up = unavailable_sources()
+    starved = 0
+    if "unavailable" in notes.columns:
+        starved = int(notes["unavailable"].fillna("").astype(bool).sum())
+    if not given_up and not starved:
+        return
+    print("\n  SOURCES THAT DID NOT ANSWER")
+    for host, reason in sorted(given_up.items()):
+        print(f"    gave up on {host}: {reason}")
+    if starved:
+        print(f"    {starved}/{len(notes)} site(s) went without at least one "
+              "source. covariate_sources.csv says which, per site, in the "
+              "'unavailable' column.")
+    print("    Nothing about this was cached, so re-running --covariates "
+          "asks again for exactly those sites.")

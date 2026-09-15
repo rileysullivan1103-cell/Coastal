@@ -332,6 +332,10 @@ def stage_covariates(args):
     except Exception as exc:  # noqa: BLE001
         print(f"  CO-OPS station list unavailable ({exc}) — no tide or water "
               "temperature covariates")
+    if getattr(args, "refetch_empty", False):
+        removed = covariates.clear_empty_cache()
+        print(f"  cleared {removed} cached 'nothing here' answer(s); they are "
+              "asked again this run")
     overrides = strata.load_overrides()
     joined, meta = covariates.build(wanted, samples, coops, overrides)
     if joined.empty:
@@ -430,6 +434,11 @@ def main():
                              "dropped by the coverage rule.")
     parser.add_argument("--review-n", type=int,
                         help="limit the beach_type review list")
+    parser.add_argument("--refetch-empty", action="store_true",
+                        help="before --covariates, delete the cached 'nothing "
+                             "here' answers so they are asked again. For after "
+                             "a run that was rate-limited: a refusal cached as "
+                             "an absence never expires on its own.")
     parser.add_argument("--no-datums", action="store_true",
                         help="skip the CO-OPS datums pull (tidal_range_m is "
                              "then dropped by the coverage rule)")

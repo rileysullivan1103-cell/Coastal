@@ -51,6 +51,45 @@ and touches no service:
 python -m wq.run_wq --explain-spatial
 ```
 
+### A refusal is not an absence
+
+`--covariates` caches per grid cell and per tide gauge, which is what makes a
+national pull finishable: two beaches 3 km apart are one ERA5 cell, and a
+county of beaches shares one gauge. It caches emptiness too, because "this
+gauge publishes no water temperature" is a real answer and re-asking it at
+every site costs a request to learn nothing.
+
+A service that **did not answer** is not that, and is never cached. The
+distinction is `wq.covariates.is_refusal`: a 429, a 5xx or a timeout is a fact
+about this afternoon; a 404, or "no ocean cell found within ~22 km", is a fact
+about the site and will be just as true tomorrow.
+
+> Both halves were learned the hard way in one Northeast run. A single **504
+> out of NOAA CO-OPS** came up through `pull_coops_series` and out of
+> `build()`, ending a 2854-site pull at site 405. And when Open-Meteo's daily
+> quota ran out part way through, `fetch_marine`'s seaward walk reported every
+> rate-limited cell as `no ocean cell found within ~22 km` — which the cache
+> then kept, so beaches that have waves were recorded as having none, on every
+> later run, until the file was deleted by hand.
+
+So: a refusal costs one covariate at one site, never the run. Nothing is
+written for it, so the next run asks again. After three consecutive refusals a
+host is **given up on** for the rest of the run and says so once — a spent
+daily quota is spent, and asking it at two thousand more sites only buys two
+thousand more empty columns. The end of the stage prints what did not answer
+and how many sites went without, and `covariate_sources.csv` carries the
+reason per site in its `unavailable` column.
+
+For caches written before that distinction existed — where a refusal is on
+disk as an absence and will never expire on its own:
+
+```bash
+python -m wq.run_wq --covariates --refetch-empty
+```
+
+which deletes the cached "nothing here" answers, keeps the populated ones, and
+asks again.
+
 ### Why the samples come before the spatial layers
 
 The WQP pull returns **32,513 coastal stations** nationally. The first version

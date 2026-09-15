@@ -22,6 +22,7 @@ import os
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -96,6 +97,217 @@ def test_a_cached_nothing_can_be_read_back():
                   None if back is None else str(list(back.columns)))
         finally:
             covariates.CACHE_DIR = original
+
+
+def test_a_refusal_is_not_an_absence():
+    """One gateway timeout out of NOAA killed a 2854-site run at site 405.
+
+    Two separate things have to hold. A source that raises must not end the
+    run -- the site goes without that covariate and the pull carries on. And
+    the refusal must not be CACHED: 'this gauge has no water temperature' is
+    a fact worth keeping, 'the gateway timed out at 14:32' is not, and a
+    cache cannot tell them apart after the fact.
+    """
+    print("\na refusal is not an absence")
+    import requests
+    with tempfile.TemporaryDirectory() as root:
+        original = covariates.CACHE_DIR
+        covariates.CACHE_DIR = root
+        covariates.reset_sources()
+        try:
+            def gateway_timeout():
+                response = requests.Response()
+                response.status_code = 504
+                raise covariates.SourceUnavailable("CO-OPS: HTTP 504")
+
+            answer = covariates._cached("coops_water_temperature_8534720",
+                                        gateway_timeout)
+            check("a source that refuses answers None instead of raising",
+                  answer is None)
+            check("and nothing is written, so the next run asks again",
+                  not os.path.exists(os.path.join(
+                      root, "coops_water_temperature_8534720.csv")))
+
+            # Whereas a service that answers 'nothing here' IS cached.
+            covariates._cached("coops_water_temperature_9999999",
+                               lambda: None)
+            check("an answer of 'nothing here' is still cached",
+                  os.path.exists(os.path.join(
+                      root, "coops_water_temperature_9999999.csv")))
+
+            check("504 reads as a refusal", covariates.is_refusal("HTTP 504"))
+            check("429 reads as a refusal",
+                  covariates.is_refusal("HTTP 429: Daily API request limit "
+                                         "exceeded. Please try again tomorrow."))
+            check("a timeout reads as a refusal",
+                  covariates.is_refusal("ConnectionError"))
+            check("but 'no ocean cell' is an answer about the site, not a "
+                  "refusal",
+                  not covariates.is_refusal("no ocean cell found within "
+                                             "~22 km"))
+            check("and a 404 is an answer too",
+                  not covariates.is_refusal("HTTP 404"))
+
+            # clear_empty_cache undoes the emptiness cached by the older code,
+            # which could not tell a refusal from an absence.
+            frame = pd.DataFrame({"t": ["2020-01-01"], "v": [12.5]})
+            covariates._cached("coops_water_level_8452944", lambda: frame)
+            removed = covariates.clear_empty_cache()
+            check("clearing empties removes the cached nothings", removed == 1,
+                  f"{removed} removed")
+            check("and keeps the populated ones",
+                  os.path.exists(os.path.join(
+                      root, "coops_water_level_8452944.csv")))
+        finally:
+            covariates.CACHE_DIR = original
+            covariates.reset_sources()
+
+
+def test_a_covariate_pull_survives_a_gauge_that_refuses():
+    """The crash itself, at the level it happened.
+
+    A 504 out of api.tidesandcurrents.noaa.gov came up through
+    pull_coops_series, through _cached, through hourly_frame, and out of
+    build() -- taking 404 sites' worth of finished work with it. The pull has
+    to come back with the sites it could do, and say which source it could
+    not reach.
+    """
+    print("\na gauge that refuses costs one covariate, not the run")
+    import types
+    import requests
+
+    refused = types.ModuleType("pull_observations")
+    refused.COOPS_DATA = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
+    calls = []
+
+    def raising(station_id, product, start, end):
+        calls.append(station_id)
+        response = requests.Response()
+        response.status_code = 504
+        raise requests.exceptions.HTTPError("504 Server Error: Gateway Timeout",
+                                            response=response)
+
+    refused.pull_coops_series = raising
+    refused.add_tide_state = lambda frame: frame
+
+    sites = pd.DataFrame({"station_id": ["A", "B"],
+                          "lat": [41.49, 41.52], "lon": [-71.31, -71.29],
+                          "region": ["Atlantic", "Atlantic"]})
+    samples = pd.DataFrame({
+        "station_id": ["A"] * 3 + ["B"] * 3,
+        "sampled_at": pd.date_range("2024-06-01 09:00", periods=6, freq="D",
+                                    tz="UTC").astype(str),
+        "date": pd.date_range("2024-06-01", periods=6, freq="D").astype(str),
+        "analyte": ["enterococcus"] * 6, "value": [10.0] * 6})
+    gauges = pd.DataFrame({"station_id": ["8452660"], "lat": [41.50],
+                           "lon": [-71.30]})
+
+    with tempfile.TemporaryDirectory() as root:
+        keep = (covariates.CACHE_DIR, covariates.era5_for,
+                covariates.marine_for, sys.modules.get("pull_observations"))
+        covariates.CACHE_DIR = root
+        covariates.era5_for = lambda *a, **k: None
+        covariates.marine_for = lambda *a, **k: (None, None)
+        sys.modules["pull_observations"] = refused
+        covariates.reset_sources()
+        try:
+            joined, meta = covariates.build(
+                sites, samples, gauges, None,
+                start=datetime(2024, 6, 1), end=datetime(2024, 6, 8),
+                progress=False)
+        finally:
+            (covariates.CACHE_DIR, covariates.era5_for,
+             covariates.marine_for) = keep[:3]
+            if keep[3] is None:
+                sys.modules.pop("pull_observations", None)
+            else:
+                sys.modules["pull_observations"] = keep[3]
+            covariates.reset_sources()
+
+    check("the pull finishes instead of raising", len(joined) == 6,
+          f"{len(joined)} row(s)")
+    check("every site is still in the output", set(meta["station_id"]) == {"A", "B"},
+          str(sorted(meta["station_id"])))
+    check("the predictors it could not fetch are NaN, not absent",
+          all(c in joined.columns for c in config.PREDICTORS))
+    check("and each site records what refused it",
+          "unavailable" in meta.columns
+          and meta["unavailable"].str.contains("CO-OPS").all(),
+          str(list(meta.get("unavailable", []))[:1]))
+    check("the gauge was asked for both products at the first site, then "
+          "given up on", len(calls) == covariates.CIRCUIT_THRESHOLD,
+          f"{len(calls)} request(s)")
+
+
+def test_a_dead_source_is_given_up_on_and_said_out_loud():
+    """A source that is down stays down.
+
+    Making a refusal non-fatal is only half of it. Open-Meteo's daily quota,
+    once spent, is spent until tomorrow -- and a run that keeps asking hands
+    two thousand more sites an empty column while printing nothing that says
+    the run is now worthless.
+    """
+    print("\na source that is down is given up on, out loud")
+    covariates.reset_sources()
+    try:
+        host = "archive-api.open-meteo.com"
+        for _ in range(covariates.CIRCUIT_THRESHOLD):
+            covariates._host_record(host, False, "HTTP 429: Daily API request "
+                                                 "limit exceeded")
+        check("the host is recorded as given up on",
+              host in covariates.unavailable_sources())
+        raised = None
+        try:
+            covariates._host_check(host)
+        except covariates.SourceUnavailable as exc:
+            raised = exc
+        check("and the next site is refused without a request",
+              raised is not None)
+        check("quietly, because saying it 2000 times is not saying it",
+              raised is not None and raised.quiet)
+
+        other = "marine-api.open-meteo.com"
+        covariates._host_record(other, True)
+        covariates._host_record(other, False, "HTTP 503")
+        covariates._host_check(other)   # must not raise
+        check("a host with one bad response is not given up on",
+              other not in covariates.unavailable_sources())
+    finally:
+        covariates.reset_sources()
+
+
+def test_a_rate_limited_wave_walk_does_not_claim_there_is_no_ocean():
+    """The quiet one. fetch_marine walks 33 cells looking for water and
+    reported 'no ocean cell found within ~22 km' whatever went wrong -- so a
+    rate-limited walk was recorded, and cached, as a fact about the beach."""
+    print("\na refused wave walk does not claim the beach has no ocean")
+    try:
+        import pull_site_observations as pso
+    except ImportError as exc:   # the NDBC SDK, which this check never calls
+        print(f"  skip  needs pull_site_observations ({exc})")
+        return
+    calls = []
+
+    def refused(url, lat, lon, start, end, variables, probe=False, models=None):
+        calls.append((lat, lon))
+        return None, "HTTP 429: Minutely API request limit exceeded"
+
+    original, sleep = pso.open_meteo, pso.time.sleep
+    pso.open_meteo, pso.time.sleep = refused, lambda *_: None
+    try:
+        frame, note = pso.fetch_marine(41.49, -71.31,
+                                       datetime(2024, 1, 1),
+                                       datetime(2024, 1, 8))
+    finally:
+        pso.open_meteo, pso.time.sleep = original, sleep
+
+    check("no frame comes back", frame is None)
+    check("and the note says it was refused, not that there is no ocean",
+          "429" in note and "no ocean cell found" not in note, note)
+    check("the walk stops at the first refusal instead of spending 33 "
+          "requests on a quota that has run out", len(calls) == 1,
+          f"{len(calls)} request(s)")
+    check("so the caller treats it as a refusal", covariates.is_refusal(note))
 
 
 def test_grid_cell_sharing():
@@ -477,6 +689,10 @@ def test_a_cache_from_an_older_schema_is_not_an_answer():
 def main():
     for test in (test_grid_cell_sharing,
                  test_a_cached_nothing_can_be_read_back,
+                 test_a_refusal_is_not_an_absence,
+                 test_a_covariate_pull_survives_a_gauge_that_refuses,
+                 test_a_dead_source_is_given_up_on_and_said_out_loud,
+                 test_a_rate_limited_wave_walk_does_not_claim_there_is_no_ocean,
                  test_a_cache_from_an_older_schema_is_not_an_answer,
                  test_an_empty_layer_has_to_say_why,
                  test_shore_normal_priority,

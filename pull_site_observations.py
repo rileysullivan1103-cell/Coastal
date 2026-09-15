@@ -39,6 +39,10 @@ import requests
 
 import find_candidate_sites as f
 import pull_observations as obs
+# Whether a note means 'the service did not answer' or 'the service answered,
+# and there is nothing here' is defined in wq.covariates, because that is the
+# module that has to decide whether the emptiness may be cached.
+from wq.covariates import is_refusal
 
 CANDIDATES_CSV = "camera_candidates.csv"
 OUT_DIR = "data"
@@ -136,6 +140,12 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
     def done(frame, note, cell=None):
         return (frame, note, cell) if return_cell else (frame, note)
 
+    # Whether any cell actually ANSWERED, and what the last one said if none
+    # did. Reporting a rate-limited walk as 'no ocean cell found' is a lie
+    # with consequences: the caller caches that as a fact about the site, and
+    # a beach that has waves is recorded as having none until someone clears
+    # the cache by hand.
+    answered, last_note = False, ""
     for nudge in MARINE_NUDGES:
         bearings = [(0, 0)] if nudge == 0 else MARINE_BEARINGS
         for dlat, dlon in bearings:
@@ -144,6 +154,7 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
                                      MARINE_VARS, probe=probe and nudge == 0,
                                      models=models)
             if frame is not None:
+                answered = True
                 # An all-NaN frame is a land cell answering politely.
                 data_cols = [c for c in frame.columns if c != "time"]
                 if data_cols and frame[data_cols].notna().any().any():
@@ -152,9 +163,18 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
                         print(f"      exact point has no wave data; used a cell "
                               f"~{km:.0f} km away ({try_lat:.3f}, {try_lon:.3f})")
                     return done(frame, "ok", (try_lat, try_lon))
-            elif nudge == 0:
-                print(f"      at the site itself: {note}")
+            else:
+                last_note = note
+                if nudge == 0:
+                    print(f"      at the site itself: {note}")
+                if is_refusal(note):
+                    # The neighbouring cell will be rate-limited too. Walking
+                    # all 33 of them to find that out costs 33 requests
+                    # against a quota that has already run out.
+                    return done(None, f"no cell answered; last was {note}")
             time.sleep(0.2)
+    if not answered and last_note:
+        return done(None, f"no cell answered; last was {last_note}")
     return done(None, "no ocean cell found within ~22 km")
 
 

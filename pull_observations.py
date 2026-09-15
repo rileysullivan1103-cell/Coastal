@@ -224,7 +224,15 @@ def coops_stations(station_type):
 
 
 def pull_coops_series(station_id, product, start, end):
-    """A CO-OPS product over the window, stitched from 31-day chunks."""
+    """A CO-OPS product over the window, stitched from 31-day chunks.
+
+    Raises on a response the service never recovered from, after the retry
+    ladder. A single gateway timeout out of NOAA is not news and should cost
+    one request, not one caller -- but a caller pulling thousands of gauges
+    still has to decide what a dead service means for its run, so the error
+    is raised rather than swallowed here.
+    """
+    import scan_cameras as scan
     frames, chunk_start = [], start
     while chunk_start < end:
         chunk_end = min(chunk_start + timedelta(days=COOPS_CHUNK_DAYS), end)
@@ -236,7 +244,7 @@ def pull_coops_series(station_id, product, start, end):
         if product == "water_level":
             params["datum"] = COOPS_DATUM
 
-        resp = requests.get(COOPS_DATA, params=params, timeout=120)
+        resp = scan.get_with_retry(COOPS_DATA, params=params)
         resp.raise_for_status()
         payload = resp.json()
         # CO-OPS answers 200 with an {"error": ...} body for a station that does
