@@ -45,6 +45,59 @@ def check(name, condition, detail=""):
 
 # ---------------------------------------------------------------------------
 
+def test_a_cached_nothing_can_be_read_back():
+    """A gauge with no water temperature killed a 120-site run at site 17.
+
+    The first site cached the emptiness; the second site sharing that gauge
+    read the cache and pandas raised EmptyDataError on the bare newline that
+    an empty frame serialises to. Caching an absence is right. Caching it in
+    a form that cannot be reopened is a landmine under the next caller.
+    """
+    print("\na cached nothing is still readable")
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        original = covariates.CACHE_DIR
+        covariates.CACHE_DIR = root
+        try:
+            calls = []
+
+            def nothing():
+                calls.append(1)
+                return None
+
+            first = covariates._cached("coops_water_temperature_8452660",
+                                       nothing)
+            check("a service with nothing to say answers None", first is None)
+            check("and the builder ran once", len(calls) == 1)
+
+            second = covariates._cached("coops_water_temperature_8452660",
+                                        nothing)
+            check("the next site reads that answer instead of crashing",
+                  second is None)
+            check("without asking the service again", len(calls) == 1,
+                  f"{len(calls)} call(s)")
+
+            # The file the OLD code wrote, which is still on disk for anyone
+            # who ran before this fix: a single newline, no header.
+            stale = os.path.join(root, "coops_water_level_9999999.csv")
+            with open(stale, "w") as handle:
+                handle.write("\n")
+            check("a cache written by the older form is still an answer",
+                  covariates._cached("coops_water_level_9999999",
+                                     lambda: None) is None)
+
+            # And a real frame still round-trips.
+            frame = pd.DataFrame({"t": ["2020-01-01"], "v": [12.5]})
+            covariates._cached("coops_water_level_8452944", lambda: frame)
+            back = covariates._cached("coops_water_level_8452944",
+                                      lambda: None)
+            check("a populated cache comes back populated",
+                  back is not None and len(back) == 1 and "v" in back.columns,
+                  None if back is None else str(list(back.columns)))
+        finally:
+            covariates.CACHE_DIR = original
+
+
 def test_grid_cell_sharing():
     print("\nnearby sites share one grid cell")
     a = covariates.cell_key(36.9612, -122.0088)   # Walton Lighthouse
@@ -423,6 +476,7 @@ def test_a_cache_from_an_older_schema_is_not_an_answer():
 
 def main():
     for test in (test_grid_cell_sharing,
+                 test_a_cached_nothing_can_be_read_back,
                  test_a_cache_from_an_older_schema_is_not_an_answer,
                  test_an_empty_layer_has_to_say_why,
                  test_shore_normal_priority,

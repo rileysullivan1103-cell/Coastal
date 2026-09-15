@@ -72,18 +72,44 @@ def cell_centre(lat, lon, size=None):
             math.floor(float(lon) / size) * size + size / 2)
 
 
+# A cached emptiness has to be written so that it can be READ BACK. An
+# empty DataFrame with no columns serialises to a single newline, and
+# pd.read_csv raises EmptyDataError on that -- so the first gauge with no
+# water temperature cached a file that the next site sharing that gauge
+# could not open, and a 120-site run died at site 17. The marker column
+# makes the emptiness a header pandas can parse rather than a byte it
+# chokes on.
+_EMPTY_MARKER = "_no_rows_returned"
+
+
 def _cached(name, builder):
-    """Read a cached CSV, or build it and write it. A cached empty file means
-    'this was tried and there is nothing there', which is a real answer and
-    is not retried on every run."""
+    """Read a cached CSV, or build it and write it.
+
+    A cached empty file means 'this was asked and there is nothing there',
+    which is a real answer and is not retried on every run. It is written as
+    a header-only CSV carrying _EMPTY_MARKER so that reading it back yields
+    that answer instead of an exception: a cache that cannot be read is not
+    a cache, it is a landmine under the next caller.
+    """
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, f"{name}.csv")
     if os.path.exists(path):
-        frame = pd.read_csv(path, low_memory=False)
-        return frame if not frame.empty else None
+        try:
+            frame = pd.read_csv(path, low_memory=False)
+        except pd.errors.EmptyDataError:
+            # Written by the older form of this function, which serialised
+            # an empty frame to a bare newline. Same meaning, so answer it
+            # rather than making the caller fall over on a stale file.
+            return None
+        if frame.empty or _EMPTY_MARKER in frame.columns:
+            return None
+        return frame
     frame = builder()
-    (frame if frame is not None else pd.DataFrame()).to_csv(path, index=False)
-    return frame if frame is not None and not frame.empty else None
+    if frame is None or frame.empty:
+        pd.DataFrame(columns=[_EMPTY_MARKER]).to_csv(path, index=False)
+        return None
+    frame.to_csv(path, index=False)
+    return frame
 
 
 def window(years_back=None):
