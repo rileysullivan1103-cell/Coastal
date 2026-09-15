@@ -164,8 +164,22 @@ def _circuit_record(host, ok):
               "covariates will be empty and the coverage rule will drop them.")
 
 
+# Hosts where a COLD 429 means "queued", not "no". Overpass hands out a
+# small fixed number of execution slots and answers 429 while they are all
+# busy, which is the ordinary daytime state of the public instance -- so the
+# first refusal there is back-pressure to wait out, not a verdict. ECHO's
+# cold 429 really is a verdict, which is why this is a list and not a new
+# default: the Northeast run gave all three mirrors one 15-second retry each
+# and abandoned every one of them within three tiles, leaving the coastline
+# covariates at 8% for want of about four minutes of patience.
+PATIENT_WHEN_COLD = ("overpass-api.de", "overpass.kumi.systems",
+                     "overpass.private.coffee")
+
+
 def _ladder(host):
-    return RATE_LIMIT_BACKOFF if _SUCCESSES.get(host) else COLD_BACKOFF
+    if _SUCCESSES.get(host) or host in PATIENT_WHEN_COLD:
+        return RATE_LIMIT_BACKOFF
+    return COLD_BACKOFF
 
 
 def circuit_report():
