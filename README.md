@@ -585,6 +585,63 @@ alongside ordinary exceptions, because the single-camera helpers exit rather
 than raise, and an uncaught one would abandon the sweep with no record of what
 had already succeeded.
 
+### --match-observations is scoped to one camera
+
+`observation_window()` intersects the spans of the observation CSVs, because a
+rip hour is only usable where the conditions that would explain it also exist.
+It used to intersect **every** file in `data/`, which was fine while the
+project held one region and silently fatal the moment it held two: Cala
+Millor's weather ends 2024-09-28 and Corolla's begins 2025-09-08, so with both
+on disk the intersection was empty and `--match-observations` skipped all eight
+cameras — Walton included, whose own observations were perfectly good.
+
+It now matches only the files written for the camera being pulled, found by
+the stem its writer chose. Note that is **not** `slugify()`:
+`pull_site_observations.py` and `pull_gridded_weather.py` build filenames with
+underscores cut at 48 characters (`gridded_Beachfront_from_Hampton_Inn__Corolla__NC.csv`)
+while this module uses dashes for service and directory names. Two slug
+conventions in one pipeline is a trap, so `obs_slug()` exists to name the
+difference rather than leave it to be rediscovered.
+
+Tide and buoy files are named after a **station**, not a camera, and are shared
+between sites — `tide_8651370.csv` serves both Corolla cameras. Which one
+belongs to a camera is a distance question `analyze_drivers.py` answers at join
+time, so they are listed but do not constrain the window.
+
+### The denominator is camera uptime, not detector uptime
+
+`--coverage` answers "was the camera looking". It does not answer "was the
+detector running", and the rip feed cannot: it publishes an element on a
+detection, so silence means *no rip* or *no detector* and nothing separates
+them. Two different mistakes follow, and the national sweep surfaced both.
+
+**Outside the rip record, the hours are not zeros.** `--coverage` defaults to
+the last year of the **stills** inventory, which is longer than the rip record
+at every camera checked — Virginia Beach publishes stills from 2026-02-03 and
+rips from 2026-04-25. Counting that gap would manufacture about 1,200 quiet
+hours from eleven weeks when nothing was watching for rips, all of them in one
+season, so the invented zeros land on the month control too. `apply_coverage()`
+now clips to the rip record and says how many hours it dropped.
+
+The clip is by **day**, not by hour. The feed fires on a detection, so the last
+detection is not the end of the detector's shift; an hour-level clip would
+discard the genuinely quiet hours after the final firing of the last day, which
+are exactly the observed zeros the coverage file exists to supply.
+
+**Inside the record, a silent day is ambiguous and stays ambiguous.** At
+Corolla the rip feed has data on **89 days of 906** while the camera was up for
+4,627 hours, so nearly the whole denominator is days that published nothing.
+Resolving that silently either way is wrong: keeping them makes
+`detection_rate` mostly a measure of detector uptime, and dropping them biases
+the rate up by deleting calm days. The run reports the share, warns when it is
+over half, and `--detector-days-only` drops them if you decide that is the
+question you want:
+
+    python analyze_drivers.py --target rip --site <slug> --detector-days-only
+
+Walton is the one camera where this barely matters — 713 populated rip bins
+against 1,093 stills bins. It is the reason the problem went unnoticed.
+
 ### Making a new camera analysable
 
 The rip feed on its own correlates against nothing. For a camera outside the
@@ -1042,6 +1099,120 @@ not that season drives the outcome. If month explains a lot, season is a real
 competitor to every driver in the table.
 
 Without it the two cases look identical in the correlation columns.
+
+## Is the camera one geometric record, or several
+
+    python check_camera_geometry.py --camera <slug> --detections   # read-only
+    python check_camera_geometry.py --camera <slug> --sample        # downloads
+
+A pan, zoom, remount or housing shift breaks the pixel-to-ground mapping. A
+shoreline trend computed across a camera move looks exactly like erosion, and
+`bbox_area_max` pooled across one is comparing two different scales. This is a
+gate on any coastal-change work, and it is worth running before the pixel
+metric is trusted rather than after.
+
+**The stills are not on disk.** `--coverage` enumerates element timestamps and
+downloads nothing — that is what lets it build a denominator over 650,000
+frames without moving a byte — so there is no local imagery to register. Any
+imagery pass has to fetch frames.
+
+`--detections` is the part that is genuinely read-only, and it answers what the
+rip table can answer:
+
+- **detector version.** `model_name` / `model_version` runs, with dates and row
+  counts. A retrain is a discontinuity in `score_max` and `bbox_area_max` even
+  when the camera never moved, and the pixel metrics are not comparable across
+  one.
+- **frame extent.** Boxes are in native image pixels, so the largest coordinate
+  ever seen is a floor on the frame size. A resolution change shows up here and
+  nowhere else in what has already been downloaded.
+- **where detections sit.** Reported, but the weakest of the three — detections
+  are in the surf zone and the surf moves on its own.
+
+It cannot see a pan or a remount that left the detector and the resolution
+alone, and says so rather than reading as a clean bill.
+
+`--sample` takes one frame per `--every` days (7 by default) at a fixed UTC
+hour, caches them under `data/geometry/<slug>/`, and registers each against the
+first readable frame.
+
+### Phase correlation, not ORB
+
+Descriptor matching answers "where did this corner go" per frame and then needs
+outlier rejection to survive fog, glare and a gull on the railing. Phase
+correlation on a fixed patch answers "how far did this patch move" directly,
+carries its own confidence in the height of the correlation peak, and needs no
+feature library — the whole thing is an FFT and a parabolic peak refinement.
+Frames whose peak is flat (fog, night, heavy rain) are reported and dropped
+rather than averaged in.
+
+Sign convention is the easy mistake: the correlation peak gives the shift that
+maps the frame back onto the reference, which is the **negative** of the
+displacement. It is negated before returning, so a feature that slid 5 px right
+reads `dx = +5`.
+
+### The banner at the top of the frame
+
+Walton's stills carry a composited strip across the top — "Walton Lighthouse
+Cam by UCSC" on the left, a running timestamp on the right. It is drawn after
+capture, so it **cannot move when the camera does**, and it is the single most
+attractive thing in the frame to a picker that rewards sharpness and stillness:
+letter edges are the hardest edges anywhere in the image. All four patches
+landed on it and reported 0.03 px of agreement, which is a measurement of
+nothing.
+
+An absolute floor on temporal variation does not catch it. The timestamp digits
+genuinely change every frame, and JPEG ringing around the static letters moves
+by several grey levels, so the strip measured 4.6–9.1 and read as live scene.
+The test that works is **relative and anchored to the frame edges**: a banner is
+a contiguous strip touching the top or bottom that varies far less than the
+scene rows around it. Flooding inward from an edge lets the ratio be generous
+without risk — the flood stops at the first row that behaves like scene — and
+`MAX_EDGE_FLOOD` caps how far it can eat.
+
+If the automatic test does not fire — and at Walton it did not, through two
+rounds of increasingly careful detection — use the margin instead:
+
+    python check_camera_geometry.py --camera <slug> --sample --top-margin 100
+
+A camera's overlay is a fixed, known property of that camera. Stating its
+height directly beats another inference that might also miss it. Every run
+prints the row-variation profile at the top edge against the frame's typical
+row, so you can see whether the banner is quiet enough for the automatic test
+to have had a chance.
+
+### Agreement between features is the actual test
+
+One patch moving is a sign that blew over. Every patch moving by the same
+vector on the same date is the camera. The run reports both — the median offset
+across features, and the spread between them — and splits epochs on the median.
+A large offset with a large spread is a feature problem; a large offset with a
+near-zero spread is a camera move.
+
+Features are auto-proposed by preferring patches that are sharp in space
+(something to correlate against; flat sky aligns equally well everywhere) and
+still in time (structure rather than weather), restricted to the top
+`--land-fraction` of the frame, because the beach and the water move for real
+reasons. **Eyeball them before trusting a result** — an auto-picked patch on a
+moored boat tracks the boat. `--roi name:x,y,w,h` overrides.
+
+### Dating a step
+
+A step is a level change that persists, not a spike, so the test compares the
+median of the `PERSIST` samples before a date against the median of the
+`PERSIST` after. That test is deliberately blunt and fires on every index whose
+window straddles the change, so one event produces a run of hits; the event is
+then dated by the largest single-sample jump inside the run. Without that
+second step the reported date is the last frame *before* the move, because a
+window centred there already sees the new level in its tail.
+
+Epochs are reported in **stills**, not in sampled frames, by joining the
+coverage file. A weekly sample says nothing about how much imagery an epoch
+holds, and a short epoch can be the dense one — that is the number that decides
+whether an epoch is worth salvaging.
+
+Nothing is corrected or re-registered. This pass only answers whether the
+archive is one record or several.
 
 ## Rip detection at Walton, once the waves came from the beach
 

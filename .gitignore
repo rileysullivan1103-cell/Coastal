@@ -14,3 +14,4 @@ data/cdip_mop_catalog.html
 node_modules/
 package-lock.json
 package.json
+data/geometry/

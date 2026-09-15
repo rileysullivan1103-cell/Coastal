@@ -107,6 +107,13 @@ MOP_COLUMNS = ["wave_height", "wave_period", "wave_period_peak",
 # normal is chosen.
 MOP_META = {}
 
+# Set from --detector-days-only. A day the rip feed published nothing is
+# ambiguous between "the detector saw no rip" and "the detector was off", and
+# which way you resolve it changes detection_rate more than any driver does.
+# Off by default: dropping those days biases the rate up, keeping them biases
+# it down, and silently picking one would hide the choice.
+DETECTOR_DAYS_ONLY = False
+
 
 # ---------------------------------------------------------------------------
 # Statistics
@@ -785,21 +792,85 @@ def apply_coverage(frame, stem):
     at all. Assuming every missing hour is a zero would instead score every
     camera outage as "no rip", and outages cluster in bad weather, which is
     correlated with the drivers being tested.
+
+    Two denominators are wrong here, and the camera being up rules out only
+    one of them. An hour is an observed zero when the camera was LOOKING and
+    the DETECTOR was running. The stills feed answers the first; nothing
+    answers the second directly, because the rip feed publishes on a detection
+    and is silent both when the detector saw nothing and when it was not
+    running at all. So:
+
+      * outside the rip record entirely -- before its first element or after
+        its last -- the detector demonstrably was not publishing, and those
+        hours are dropped rather than counted as quiet. They are the dangerous
+        ones: the stills feed at Virginia Beach starts 2026-02-03 and its rip
+        feed starts 2026-04-25, so keeping them would manufacture about 1,200
+        zeros out of eleven weeks when nothing was watching for rips.
+      * inside the record, a day with no rip element at all is ambiguous and
+        is reported rather than resolved. At Corolla the rip feed has data on
+        89 days of 906 while the camera was up for 4,627 hours, so nearly the
+        whole denominator is that ambiguity. --detector-days-only drops those
+        days; the default keeps them and says how many there are.
     """
     paths = glob.glob(f"{DATA_DIR}/**/coverage_{stem}_hourly.csv", recursive=True)
     if not paths:
         print("  no coverage file — hours without a detection stay UNKNOWN, not"
-              " zero.\n    run: pull_rip_detection.py --coverage --start ... --end ...")
+              " zero.\n    run: pull_rip_detection.py --coverage")
         return frame, False
     coverage = pd.read_csv(paths[0])
     coverage["hour"] = to_hour(coverage["hour"])
     before = len(frame)
+
+    # Clip to the span the rip product actually covers. A coverage file pulled
+    # over a wider window than the rip feed is the normal case, not an odd one:
+    # --coverage defaults to the last year of the STILLS inventory, which is
+    # longer than the rip record at every camera checked.
+    # Clipped by DAY, not by hour. The feed publishes on a detection, so the
+    # last detection is not the end of the detector's shift: an hour-level clip
+    # would throw away the genuinely quiet hours after the final firing of the
+    # last day, which are exactly the observed zeros this function exists to
+    # keep. A day with no detection anywhere in it is a different case.
+    span_lo = frame["hour"].min().floor("D")
+    span_hi = frame["hour"].max().floor("D") + pd.Timedelta(days=1)
+    outside = int(((coverage["hour"] < span_lo)
+                   | (coverage["hour"] >= span_hi)).sum())
+    if outside:
+        coverage = coverage[(coverage["hour"] >= span_lo)
+                            & (coverage["hour"] < span_hi)]
+        print(f"  coverage: dropped {outside} hours outside the rip record "
+              f"({span_lo:%Y-%m-%d} to {frame['hour'].max():%Y-%m-%d}) — the "
+              "camera was up but nothing was publishing rips, so they are not "
+              "zeros")
 
     merged = coverage.merge(frame, on="hour", how="left")
     for column, fill in (("frames", 0), ("frames_with_detection", 0),
                          ("detections", 0)):
         if column in merged.columns:
             merged[column] = merged[column].fillna(0)
+
+    # Days the rip feed said nothing at all. Inside the record this is either
+    # "the detector ran and saw no rip all day" or "the detector was off", and
+    # no field in either feed separates them.
+    merged["_day"] = merged["hour"].dt.floor("D")
+    live_days = set(merged.loc[merged["frames_with_detection"] > 0, "_day"])
+    silent = merged[~merged["_day"].isin(live_days)]
+    if len(silent):
+        share = 100.0 * len(silent) / max(len(merged), 1)
+        print(f"  coverage: {len(silent)} of {len(merged)} hours ({share:.0f}%) "
+              f"fall on {merged['_day'].nunique() - len(live_days)} days the rip "
+              "feed published nothing —")
+        print("    either the detector saw no rip all day or it was not running;"
+              " nothing here separates those.")
+        if DETECTOR_DAYS_ONLY:
+            merged = merged[merged["_day"].isin(live_days)]
+            print(f"    --detector-days-only: dropped, {len(merged)} hours left")
+        elif share > 50:
+            print("    they are MOST of the denominator, so detection_rate here"
+                  " is mostly a statement about")
+            print("    detector uptime. Re-run with --detector-days-only before"
+                  " believing any rate at this site.")
+    merged = merged.drop(columns="_day")
+
     # Rate against images examined, not against elements published.
     merged["detection_rate"] = (merged["frames_with_detection"]
                                 / merged["images"].replace(0, np.nan))
@@ -1340,7 +1411,15 @@ def main():
                     help="keep only hours containing an annotated rip and drop "
                          "the presence targets. Use this wherever a person "
                          "chose which frames the dataset contains (RipAID).")
+    ap.add_argument("--detector-days-only", action="store_true",
+                    help="drop days on which the rip feed published nothing. "
+                         "Those hours are camera uptime, not detector uptime, "
+                         "and at a camera where they are most of the "
+                         "denominator detection_rate measures the detector "
+                         "being switched on.")
     args = ap.parse_args()
+    global DETECTOR_DAYS_ONLY
+    DETECTOR_DAYS_ONLY = args.detector_days_only
     sites = load_sites()
     print(f"{len(sites)} qualifying sites\n")
     if args.target in ("rip", "both"):

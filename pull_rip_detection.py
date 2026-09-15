@@ -273,25 +273,54 @@ def _csv_span(path):
     return None
 
 
-def observation_window():
-    """The window every observation CSV on disk covers, as (start, end).
+def obs_slug(text):
+    """The filename stem pull_site_observations.py and pull_gridded_weather.py
+    write. Not slugify(): those use underscores and a 48-character cut, this
+    module uses dashes, and a rip camera's own weather file has to be found by
+    the name its writer chose."""
+    return "".join(c if c.isalnum() else "_" for c in str(text))[:48]
+
+
+def observation_window(camera_label=None):
+    """The window THIS CAMERA's observation CSVs cover, as (start, end).
 
     The overlap is the intersection, not the union: a rip hour is only usable
     where the conditions it would be explained by also exist. A first pull
     took three months of 2025 while the observations ran Aug 2025 to Aug 2026,
     and the join landed on 39 hours of gridded weather and 1 of buoy.
+
+    It is scoped to one camera because the intersection of EVERY file in
+    data/ is the wrong quantity and becomes empty as soon as the project
+    covers more than one place. Cala Millor's weather ends 2024-09-28 and
+    Corolla's begins 2025-09-08, so once both were on disk the global
+    intersection was empty and --match-observations skipped every camera,
+    Walton included -- a site whose own observations were fine.
+
+    Tide and buoy files are named after a STATION, not a camera, and are
+    shared between sites; which one belongs to this camera is a distance
+    question that analyze_drivers.py answers at join time. They are reported
+    but do not constrain the window.
     """
+    if camera_label is None:
+        patterns = OBS_PATTERNS
+    else:
+        stem = obs_slug(camera_label)
+        patterns = (f"gridded_{stem}*.csv", f"marine_{stem}*.csv")
+
     spans = []
-    for pattern in OBS_PATTERNS:
+    for pattern in patterns:
         for path in sorted(glob.glob(os.path.join(OBS_DIR, pattern))):
             span = _csv_span(path)
             if span:
                 spans.append((os.path.basename(path), span[0], span[1]))
     if not spans:
+        if camera_label is not None:
+            print(f"  no observation CSVs for {camera_label!r} "
+                  f"(looked for gridded_{obs_slug(camera_label)}*.csv)")
         return None
-    print("  observation sources on disk:")
+    print("  observation sources for this camera:")
     for name, first, last in spans:
-        print(f"    {name:<28} {first:%Y-%m-%d} to {last:%Y-%m-%d}")
+        print(f"    {name:<56} {first:%Y-%m-%d} to {last:%Y-%m-%d}")
     start = max(first for _, first, _ in spans)
     end = min(last for _, _, last in spans)
     if start >= end:
@@ -993,9 +1022,10 @@ def run_for_camera(asset, args):
 
     if args.match_observations:
         print("\nmatching the observation window")
-        window = observation_window()
+        window = observation_window(camera_label)
         if window is None:
-            sys.exit("No observation CSVs to match — run pull_observations.py first.")
+            sys.exit(f"No observation CSVs for this camera — run "
+                     f"pull_site_observations.py --camera {slugify(camera_label)!r}")
         obs_start, obs_end = window
         # Clip to what the product actually holds, so the request is not
         # partly outside the inventory.

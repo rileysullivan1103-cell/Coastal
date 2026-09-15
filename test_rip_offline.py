@@ -70,6 +70,72 @@ TWO_RIP = asset("Two Products", state="Florida", products=[
 ])
 
 
+def test_observation_window_is_per_camera():
+    """Once a second region is on disk the global intersection is empty.
+
+    Cala Millor's weather ends 2024-09-28, Corolla's begins 2025-09-08. With
+    both present, intersecting every file in data/ yields nothing and
+    --match-observations skipped all eight cameras -- including Walton, whose
+    own observations were perfectly good.
+    """
+    print("the observation window is scoped to one camera")
+    tmp = tempfile.mkdtemp()
+    old_dir = r.OBS_DIR
+    try:
+        r.OBS_DIR = tmp
+
+        def write(name, start, end):
+            hours = pd.date_range(start, end, freq="D", tz="UTC")
+            pd.DataFrame({"time": hours, "x": range(len(hours))}).to_csv(
+                os.path.join(tmp, name), index=False)
+
+        walton = "Walton Lighthouse, Santa Cruz, CA"
+        corolla = "Beachfront from Hampton Inn, Corolla, NC"
+        write(f"gridded_{r.obs_slug(walton)}.csv", "2025-08-25", "2026-08-25")
+        write(f"marine_{r.obs_slug(walton)}.csv", "2025-08-25", "2026-08-25")
+        write(f"gridded_{r.obs_slug(corolla)}.csv", "2025-09-08", "2026-09-08")
+        # The file that used to poison the intersection for everybody.
+        write("gridded_Cala_Millor.csv", "2011-05-21", "2024-09-28")
+
+        check("the global intersection is empty, as it was in the real run",
+              r.observation_window() is None)
+
+        window = r.observation_window(walton)
+        check("Walton still gets a window", window is not None)
+        if window:
+            check("and it is Walton's own span",
+                  window[0].strftime("%Y-%m-%d") == "2025-08-25"
+                  and window[1].strftime("%Y-%m-%d") == "2026-08-25",
+                  [str(w) for w in window])
+
+        corolla_window = r.observation_window(corolla)
+        check("Corolla gets its own, different window",
+              corolla_window is not None
+              and corolla_window[0].strftime("%Y-%m-%d") == "2025-09-08",
+              corolla_window)
+
+        check("a camera with no observation file is reported, not intersected "
+              "with someone else's",
+              r.observation_window("Nowhere Beach") is None)
+    finally:
+        r.OBS_DIR = old_dir
+        shutil.rmtree(tmp)
+
+
+def test_obs_slug_matches_the_writers():
+    print("the observation filename stem")
+    # pull_site_observations.py and pull_gridded_weather.py both build the stem
+    # this way; pull_rip_detection.slugify uses dashes and would never match.
+    check("non-alphanumerics become underscores",
+          r.obs_slug("Beachfront from Hampton Inn, Corolla, NC")
+          == "Beachfront_from_Hampton_Inn__Corolla__NC",
+          r.obs_slug("Beachfront from Hampton Inn, Corolla, NC"))
+    check("it is cut at 48 characters, as the writers cut it",
+          len(r.obs_slug("x" * 80)) == 48)
+    check("it is NOT the dashed slug this module uses elsewhere",
+          r.obs_slug("Walton Lighthouse") != r.slugify("Walton Lighthouse"))
+
+
 def test_rip_cameras():
     print("the national rip roster")
     found = r.rip_cameras([CAPITOLA, COROLLA, WALTON, TWO_RIP])
@@ -585,6 +651,8 @@ if __name__ == "__main__":
     test_duration_format()
     test_coverage_resumes()
     test_describe_json()
+    test_observation_window_is_per_camera()
+    test_obs_slug_matches_the_writers()
     test_rip_cameras()
     test_list_rip_cameras_survives_a_thin_catalogue()
     test_sweep_isolates_each_camera()
