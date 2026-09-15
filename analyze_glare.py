@@ -163,6 +163,31 @@ def collinear_pairs(frame, columns, threshold=0.85):
     return out
 
 
+def load_cloud_sidecar(frame, camera_name):
+    """Merge data/cloud_<slug>.csv in, if pull_cloud_cover.py has run.
+
+    Cloud cover can arrive two ways: inside gridded_*.csv when the ERA5 pull was
+    recent enough to have requested it, or in a sidecar written by
+    pull_cloud_cover.py. The sidecar exists because re-pulling six variables to
+    obtain one kept being refused for quota, so it must be read here or it was
+    pointless to fetch. A column already present wins -- it came from the same
+    service and the same cell, and re-merging would only risk a suffix clash.
+    """
+    if CLOUD_COLUMN in frame.columns and frame[CLOUD_COLUMN].notna().any():
+        return frame, "gridded file"
+    sidecar = ad.read_csv(f"{ad.DATA_DIR}/cloud_{ad.grid_slug(camera_name)}.csv")
+    if sidecar is None or sidecar.empty or CLOUD_COLUMN not in sidecar.columns:
+        return frame, None
+    column = "time" if "time" in sidecar.columns else sidecar.columns[0]
+    sidecar = sidecar.copy()
+    sidecar["hour"] = ad.to_hour(sidecar[column])
+    hourly = (sidecar[["hour", CLOUD_COLUMN]].dropna(subset=["hour"])
+              .groupby("hour").mean(numeric_only=True))
+    merged = frame.drop(columns=[CLOUD_COLUMN], errors="ignore").merge(
+        hourly, on="hour", how="left")
+    return merged, "sidecar from pull_cloud_cover.py"
+
+
 def analyse(sites, want):
     frame, name, has_coverage = ad.assemble_rip(sites, want=want)
     if frame is None:
@@ -204,11 +229,13 @@ def analyse(sites, want):
         facing = observed.loc[lit, "sun_in_view"] > 0
         print(f"  and in front of the camera in {facing.mean():.0%} of those")
 
+    observed, cloud_source = load_cloud_sidecar(observed, name)
     have_cloud = (CLOUD_COLUMN in observed.columns
                   and observed[CLOUD_COLUMN].notna().any())
     if have_cloud:
         share = float(observed[CLOUD_COLUMN].notna().mean())
-        print(f"  {CLOUD_COLUMN}: present on {share:.0%} of hours")
+        print(f"  {CLOUD_COLUMN}: present on {share:.0%} of hours "
+              f"({cloud_source})")
     else:
         print(f"  {CLOUD_COLUMN}: NOT ON DISK. ERA5 serves it, but the pull "
               "that wrote\n    gridded_*.csv predates it being requested.")
@@ -217,11 +244,10 @@ def analyse(sites, want):
         # ERA5 file to less than the rip record, and a narrower conditions
         # file silently shrinks every n in every table downstream. That has
         # already cost this project two analyses.
-        print("    Re-pull with a window at least as wide as the rip record,")
-        print("    NOT the default one-year window:")
-        print(f"      python pull_site_observations.py --camera \"{name}\" \\")
-        print(f"          --start {observed['hour'].min():%Y-%m-%d} "
-              f"--end {observed['hour'].max():%Y-%m-%d}")
+        print("    Fetch just that one variable — six times cheaper against the")
+        print("    quota than re-pulling every ERA5 column, and it overwrites")
+        print("    nothing:")
+        print(f"      python pull_cloud_cover.py --camera \"{name}\"")
         print("    The solar half below is unaffected — it needs no file.")
 
     height, period = wave_columns(observed)
@@ -310,9 +336,16 @@ def analyse(sites, want):
                 by_model.get("+ elevation"), by_model.get("+ glare geometry"),
                 len(bearing_terms))
             if pd.notna(gain):
-                verdict = ("the bearing terms do real work"
-                           if pd.notna(p_value) and p_value < 0.01 and gain > 0.005
-                           else "the bearing terms add nothing")
+                # Significant and negligible are different statements. At
+                # n=8569 a dR2 of 0.003 lands at p=2e-07 and is still nothing
+                # anyone should act on; calling that "adds nothing" misreports
+                # the test, and calling it "real work" misreports the size.
+                if pd.isna(p_value) or p_value >= 0.01:
+                    verdict = "the bearing terms add nothing"
+                elif gain > 0.005:
+                    verdict = "the bearing terms do real work"
+                else:
+                    verdict = "significant but negligible (dR2 < 0.005)"
                 detail = f"F={f_stat:.2f}, p={p_value:.2g}" if pd.notna(p_value) else ""
                 print(f"  bearing terms over elevation alone: dR2={gain:+.4f}"
                       f"  {detail}  -> {verdict}")
