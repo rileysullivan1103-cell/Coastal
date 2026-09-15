@@ -487,6 +487,58 @@ def test_the_reference_is_the_one_the_record_matches():
         shutil.rmtree(tmp)
 
 
+def test_water_is_rejected_under_changing_light():
+    """The failure visible in Walton's preview: four of twelve patches on the sea.
+
+    The picker rejects water by asking what MOVED between frames. Fog, sun and
+    exposure move the whole frame at once -- a gain and an offset -- and that
+    global swing dwarfs the difference between a roofline that never moves and
+    surf that never stops. Measured raw, land and water came out 15 and 27, a
+    ratio no threshold can split, and every Walton candidate reported variation
+    ~20 whether it sat on a house or on the open sea.
+
+    Levelling each frame by its own WHOLE-FRAME median and spread removes the
+    gain and offset and leaves the churn. The scale must come from the whole
+    frame: per patch it would divide out the very variance being looked for.
+    """
+    print("\nwater, under changing light")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        rng = np.random.default_rng(3)
+        paths = []
+        for index in range(16):
+            gain, lift = rng.uniform(0.55, 1.0), rng.uniform(0, 80)
+            frame = np.empty((256, 384))
+            # Land across the top: buildings that never move.
+            frame[:120] = 60.0
+            for x in range(20, 360, 70):
+                frame[40:110, x:x + 40] = 200
+                frame[20:40, x + 8:x + 32] = 235
+            frame[:120] += rng.normal(0, 2, (120, 384))
+            # Water below: churns on its own, every frame different.
+            frame[120:] = rng.normal(125, 35, (136, 384))
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray((frame * gain + lift).clip(0, 255).astype(np.uint8)
+                            ).save(path)
+            paths.append(path)
+
+        # land_fraction 1.0: the picker may search the water and must decline.
+        rois = g.propose_rois(paths, size=64, count=6, land_fraction=1.0)
+        # Fewer than asked for is fine and expected: the land strip is narrow
+        # and local suppression keeps the patches apart. Declining to fill the
+        # quota from the sea is the behaviour under test.
+        check("it proposes patches", len(rois) >= 3, len(rois))
+        wet = [r for r in rois if r["y"] > 120]
+        check("none of them land on the water", not wet,
+              [(r["name"], r["y"]) for r in rois])
+        check("and the motion figure separates the two",
+              all(r.get("motion", 9) < 2.0 for r in rois),
+              [(r["name"], round(r.get("motion", -1), 2)) for r in rois])
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_fog_is_measured_and_excluded():
     """Walton's contact sheet: every frame that failed to register is a whiteout.
 
@@ -1364,6 +1416,7 @@ def main():
                  test_a_blank_frame_cannot_register_or_anchor,
                  test_the_search_window_is_a_prior_that_reports_itself,
                  test_fog_is_measured_and_excluded,
+                 test_water_is_rejected_under_changing_light,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_disagreement_is_measured_as_a_vector,

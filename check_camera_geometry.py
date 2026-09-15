@@ -716,8 +716,29 @@ def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
     shape = min((g.shape for g in stack), key=lambda s: (s[0], s[1]))
     stack = np.stack([g[:shape[0], :shape[1]] for g in stack])
 
-    median = np.median(stack, axis=0)
-    spread = np.median(np.abs(stack - median), axis=0)
+    # LEVEL THE ILLUMINATION BEFORE ASKING WHAT MOVED. Fog, sun and exposure
+    # change the whole frame at once -- a gain and an offset -- and that global
+    # swing is far larger than the difference between a roofline that never
+    # moves and surf that never stops. Measured raw at Walton, land and water
+    # came out 15 and 27: a ratio of 1.76, which no threshold can split, and
+    # every candidate duly reported variation ~20 whether it sat on a house or
+    # on the open sea. Four of twelve landed on water.
+    #
+    # Dividing each frame by its OWN WHOLE-FRAME median and spread removes the
+    # gain and the offset while leaving the water's own churn intact. On the
+    # same fixture that separation goes from 1.76x to 17x. The scale has to come
+    # from the whole frame: taken per patch it would divide out exactly the
+    # variance being looked for.
+    middle = np.median(stack, axis=(1, 2), keepdims=True)
+    swing = np.median(np.abs(stack - middle), axis=(1, 2), keepdims=True)
+    levelled = (stack - middle) / np.maximum(swing, 1e-6)
+
+    median = np.median(levelled, axis=0)
+    spread = np.median(np.abs(levelled - median), axis=0)
+    # The banner and blank-region tests below are about ABSOLUTE grey levels
+    # ("this never changes by even half a level"), so they keep the raw scale.
+    raw_median = np.median(stack, axis=0)
+    raw_spread = np.median(np.abs(stack - raw_median), axis=0)
     gy, gx = np.gradient(median)
     structure = np.hypot(gy, gx)
 
@@ -727,8 +748,12 @@ def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
     window = max(3, size // 2)
     patch_structure = uniform_filter(structure, window)
     patch_spread = uniform_filter(spread, window)
+    # Reported in grey levels beside the levelled figure, because "this patch
+    # varies by 0.08 levels" is how an overlay announces itself and the
+    # levelled number cannot say it.
+    patch_raw_spread = uniform_filter(raw_spread, window)
 
-    row_spread = np.median(spread, axis=1)
+    row_spread = np.median(raw_spread, axis=1)
     typical = float(np.median(row_spread))
 
     half = size // 4  # working at downsample=2
@@ -783,7 +808,7 @@ def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
         if not quiet[-1 - row]:
             break
         composited[-1 - row] = True
-    dead = (spread <= OVERLAY_SPREAD) | composited[:, None]
+    dead = (raw_spread <= OVERLAY_SPREAD) | composited[:, None]
     dead_fraction = uniform_filter(dead.astype(float), window)
     if composited.any():
         hit = np.flatnonzero(composited)
@@ -841,7 +866,8 @@ def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
                          # chosen. A patch reported with near-zero variation is
                          # an overlay whatever else the output says.
                          "structure": float(patch_structure[cy, cx]),
-                         "spread": float(patch_spread[cy, cx])})
+                         "spread": float(patch_raw_spread[cy, cx]),
+                         "motion": float(patch_spread[cy, cx])})
             # Suppress a generous neighbourhood so the patches are not all one
             # corner of one roof.
             y0, y1 = max(0, cy - half * 3), cy + half * 3
@@ -1754,8 +1780,10 @@ def main():
         for roi in rois:
             extra = ""
             if "spread" in roi:
+                # motion is illumination-levelled: water churns, land does not.
                 extra = (f"  structure={roi['structure']:.2f} "
-                         f"variation={roi['spread']:.2f}")
+                         f"variation={roi['spread']:.2f} "
+                         f"motion={roi.get('motion', float('nan')):.2f}")
             print(f"  {roi['name']:<6} x={roi['x']:>5} y={roi['y']:>5} "
                   f"{roi['w']}x{roi['h']}{extra}")
 
