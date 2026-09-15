@@ -1143,6 +1143,67 @@ def report_outcomes(frame, want=None):
     return table
 
 
+STREAMCAT_LEGACY = "https://java.epa.gov/StreamCAT/metrics"
+
+
+def probe_streams(lat, lon):
+    """Ask the services themselves which stream/land-cover path is real.
+
+    Every characteristics path in this module was transcribed from
+    documentation and none of them answers: 115 of 120 Rhode Island stations
+    got a comid and then a 404 from all three. The documented example is for a
+    CRAWLED feature source (nwissite/USGS-...), not a raw comid, which would
+    explain a clean 404 for a comid that certainly exists -- but that is a
+    guess, and guessing is what produced the three dead paths. This asks.
+
+    Prints raw status and body. It interprets nothing.
+    """
+    def show(label, url, params=None):
+        print(f"\n--- {label}\n    {url}")
+        if params:
+            print(f"    params {params}")
+        try:
+            response = _get(url, params=params, probe=False,
+                            count_failures=False)
+            body = response.text
+            print(f"    HTTP {response.status_code}  {len(body)} bytes")
+            print(f"    {body[:400]}")
+            return response
+        except LayerFailed as exc:
+            print(f"    FAILED {exc}")
+            return None
+
+    show("the feature sources NLDI will accept", NLDI_BASE, {"f": "json"})
+
+    comid = None
+    try:
+        comid, _geometry, properties = fetch_comid(lat, lon)
+        print(f"\n--- comid at POINT({lon} {lat})\n    {comid}")
+        print(f"    properties: {sorted(properties)[:12]}")
+    except LayerFailed as exc:
+        print(f"\n--- comid at POINT({lon} {lat})\n    FAILED {exc}")
+
+    if comid:
+        for path in NLDI_CHARACTERISTIC_PATHS:
+            show("characteristics", path.format(base=NLDI_BASE, comid=comid),
+                 {"f": "json"})
+        # The documented example uses a crawled source, so try that shape too:
+        # if this answers and the comid one does not, the featureSource is the
+        # problem rather than the path.
+        show("characteristics for a known crawled feature (the documented "
+             "example)",
+             f"{NLDI_BASE}/nwissite/USGS-05429700/local",
+             {"characteristicId": "CAT_BFI", "f": "json"})
+        show("StreamCat, which is keyed on comid rather than on a feature",
+             STREAMCAT_LEGACY,
+             {"name": "pcturbhi2019,pcturbmd2019,pcturblo2019,pcturbop2019",
+              "areaOfInterest": "watershed", "comid": comid})
+
+    for path in NLDI_CATALOGUE_PATHS:
+        show("characteristic catalogue",
+             path.format(lookups=NLDI_LOOKUPS, base=NLDI_BASE), {"f": "json"})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lat", type=float)
@@ -1151,7 +1212,27 @@ def main():
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--probe", action="store_true",
                         help="print what each layer actually returns, then stop")
+    parser.add_argument("--probe-streams", action="store_true",
+                        help="ask NLDI and StreamCat which stream/land-cover "
+                             "path actually answers, and print it raw")
     args = parser.parse_args()
+
+    if args.probe_streams:
+        lat, lon = args.lat, args.lon
+        if lat is None or lon is None:
+            path = os.path.join(config.DATA_DIR, "site_covariates.csv")
+            sites_path = os.path.join(config.DATA_DIR, "stations.csv")
+            if not os.path.exists(sites_path):
+                sys.exit("give --lat/--lon, or run --stations first")
+            sites = pd.read_csv(sites_path, low_memory=False)
+            if os.path.exists(path):
+                done = set(pd.read_csv(path)["station_id"].astype(str))
+                sites = sites[sites["station_id"].astype(str).isin(done)]
+            row = sites.dropna(subset=["lat", "lon"]).iloc[0]
+            lat, lon = float(row["lat"]), float(row["lon"])
+            print(f"probing at {row['station_id']}  ({lat}, {lon})")
+        probe_streams(lat, lon)
+        return
 
     if args.lat is not None and args.lon is not None:
         site = pd.Series({"station_id": args.site or "probe",
