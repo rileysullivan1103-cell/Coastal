@@ -145,10 +145,25 @@ def stage_spatial(args):
 
     print("\ncoverage (the ~70% rule drops anything under it):")
     print(spatial.coverage(frame).to_string(index=False))
+    spatial.report_outcomes(frame, want=want)
     _write(frame, SPATIAL)
     with open(_path(LAYER_RECORD), "w") as handle:
         json.dump(record, handle, indent=2)
     print(f"wrote {_path(LAYER_RECORD)}")
+
+
+def stage_explain_spatial(args):
+    """Read the coverage zeros back off the file, without touching a service.
+
+    The reasons are written into site_covariates.csv as they happen, so this
+    can answer "why is coastline empty" for a run that finished hours ago.
+    """
+    print("\n=== WHY THE SPATIAL LAYERS CAME BACK THAT WAY ===")
+    frame = _read(SPATIAL, "run --spatial first")
+    print(f"{len(frame)} stations in {SPATIAL}")
+    print("\ncoverage:")
+    print(spatial.coverage(frame).to_string(index=False))
+    spatial.report_outcomes(frame)
 
 
 def _analysable(sites, args):
@@ -411,7 +426,16 @@ def main():
                              "then dropped by the coverage rule)")
     parser.add_argument("--no-caffeinate", action="store_true",
                         help="do not re-exec under a sleep inhibitor")
+    # Deliberately not a stage: it is a reader, it touches no service, and it
+    # must never be part of --all.
+    parser.add_argument("--explain-spatial", action="store_true",
+                        help="say why each spatial layer is empty, from the "
+                             "file a previous --spatial already wrote")
     args = parser.parse_args()
+
+    if args.explain_spatial:
+        stage_explain_spatial(args)
+        return
 
     if args.states:
         args.states = [s.strip().upper() for s in args.states.split(",") if s.strip()]

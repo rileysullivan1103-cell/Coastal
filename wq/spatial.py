@@ -63,7 +63,11 @@ BASIN_AREA_ID = "TOT_BASIN_AREA"
 # routinely serves dozens of stations, and the request count falls by roughly
 # two orders of magnitude.
 TILE_DEGREES = 0.25
-COASTLINE_BBOX_KM = 30.0   # must exceed the fetch cap, or fetch is censored
+COASTLINE_BBOX_KM = 30.0
+# The furthest any coastline covariate reaches from the station: land_fraction
+# samples to 5 km, so a defect beyond this cannot enter any of them. The extra
+# kilometre is slack, not a second opinion.
+SANITY_VETO_M = 6000.0   # must exceed the fetch cap, or fetch is censored
 FETCH_CAP_KM = 25.0
 STREAM_SEARCH_KM = 2.0
 OUTFALL_SEARCH_KM = 2.0
@@ -389,11 +393,29 @@ def coastline_covariates(lat, lon, lines, vintage=None):
     out["coastline_sane"] = ok
     out["coastline_check"] = detail
     if not ok:
-        # Everything below reads land and water off this linework. If the
-        # linework disagrees with itself, the covariates would be confidently
-        # inverted, which is worse than missing.
-        out["coastline_note"] = detail
-        return out
+        # Everything below reads land and water off this linework, so where
+        # the linework disagrees with itself the covariates would be
+        # confidently inverted -- worse than missing.
+        #
+        # But the disagreement is LOCAL to the ways involved, and the box is
+        # 30 km across. Voiding every station in a tile because of one bad
+        # edit at its far corner discards good geometry to punish geometry
+        # nobody read. So the veto is scoped: if a suspect way is close enough
+        # to be read by any covariate below, refuse; otherwise proceed and
+        # keep saying, in coastline_check, that the box has a defect in it.
+        suspect = geo.way_junctions(local)[2]
+        distance = None
+        if suspect:
+            found = geo.nearest_segment(station, [local[i] for i in suspect])
+            distance = None if found is None else found[0]
+        if distance is None or distance <= SANITY_VETO_M:
+            out["coastline_note"] = detail
+            return out
+        out["coastline_defect_km"] = round(distance / 1000.0, 2)
+        out["coastline_note"] = (
+            f"{detail} — but the nearest such way is "
+            f"{distance / 1000.0:.1f} km away, beyond everything read here, "
+            "so the covariates are kept")
 
     found = geo.nearest_segment(station, local)
     out["dist_to_coastline_m"] = round(found[0], 1) if found else None
@@ -787,7 +809,10 @@ def for_site(site, record=None, probe=False, want=None):
     station = str(site["station_id"])
     record = record if record is not None else layers.blank_record()
     want = want or set(layers.LAYERS)
-    out = {"station_id": station}
+    # The tile is carried through because the tiled layers succeed or fail per
+    # TILE, not per station. Without it a hundred identical failure lines look
+    # like a hundred failures instead of the four they actually are.
+    out = {"station_id": station, "tile": _tile_slug(lat, lon)}
 
     if "coastline" in want:
         record[ "coastline"]["sites_attempted"] += 1
@@ -800,7 +825,8 @@ def for_site(site, record=None, probe=False, want=None):
             values = coastline_covariates(lat, lon, payload["lines"],
                                           payload.get("vintage"))
             out.update(values)
-            layers.record_access(record, "coastline", payload.get("vintage"))
+            layers.record_access(record, "coastline", payload.get("vintage"),
+                                 note=values.get("coastline_note"))
             if values.get("shore_normal_deg") is not None:
                 record["coastline"]["sites_populated"] += 1
         except LayerFailed as exc:
@@ -992,6 +1018,82 @@ def coverage(frame, covariates=None):
                      "coverage": round(share, 4),
                      "keeps": share >= config.COVARIATE_MIN_COVERAGE})
     return pd.DataFrame(rows)
+
+
+def _note_of(row, key):
+    value = row.get(f"{key}_note")
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def outcomes(frame, want=None, width=150):
+    """Why each layer came back the way it did, counted by reason.
+
+    `coverage` says a layer produced nothing. It does not say WHICH nothing,
+    and there are four, with four different owners:
+
+      - the service refused or errored        -> theirs, retry or back off
+      - it answered, and the box was empty    -> the geography, nothing to fix
+      - it answered, and the check rejected it-> mine, the parsing or the check
+      - empty with no reason recorded at all  -> mine, and the worst of the four
+
+    A zero in the coverage table looks identical for all four, which is how
+    seven tiles of coastline came back empty through a run that printed no
+    coastline error. The last row above is the one this exists for: a layer
+    that fails silently is indistinguishable from one nobody called.
+    """
+    tiled = "tile" in frame.columns
+    rows = []
+    for key in sorted(layers.LAYERS):
+        if want is not None and key not in want:
+            continue
+        supplies = [c for c in layers.LAYERS[key]["supplies"]
+                    if c in frame.columns]
+        if frame.empty:
+            continue
+        for _, row in frame.iterrows():
+            note = _note_of(row, key)
+            empty = (not supplies) or all(pd.isna(row.get(c))
+                                          for c in supplies)
+            if not empty:
+                reason = "populated" if note is None else f"partial: {note}"
+            elif note is not None:
+                reason = note
+            else:
+                reason = "EMPTY, NO REASON RECORDED"
+            if len(reason) > width:
+                reason = reason[:width - 1] + "\u2026"
+            rows.append({"layer": key, "reason": reason,
+                         "tile": row.get("tile") if tiled else None})
+    if not rows:
+        return pd.DataFrame(columns=["layer", "reason", "sites", "tiles"])
+    table = pd.DataFrame(rows)
+    grouped = (table.groupby(["layer", "reason"])
+               .agg(sites=("reason", "size"),
+                    tiles=("tile", lambda s: int(s.dropna().nunique())))
+               .reset_index())
+    if not tiled:
+        grouped = grouped.drop(columns=["tiles"])
+    return grouped.sort_values(["layer", "sites"], ascending=[True, False])
+
+
+def report_outcomes(frame, want=None):
+    table = outcomes(frame, want=want)
+    print("\nwhy each layer came back that way (a zero above is one of "
+          "these):")
+    if table.empty:
+        print("  nothing to report — no sites.")
+        return table
+    print(table.to_string(index=False))
+    silent = table[table["reason"] == "EMPTY, NO REASON RECORDED"]
+    if not silent.empty:
+        print("\n  A layer that is empty with no reason recorded is a bug in "
+              "this code,")
+        print("  not in the service: something returned nothing and said "
+              "nothing about it.")
+    return table
 
 
 def main():

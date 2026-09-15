@@ -14,10 +14,13 @@ segment and take the sign of the cross product. Left is land, right is water.
 
 It is also the assumption most likely to be wrong in a specific place -- a
 way digitised backwards inverts land and sea locally -- so
-`coastline_sanity()` checks it against a fact known independently: the
-station is a beach monitoring site, so a point a short way inland of it
-should come out as land. A coastline that fails that check is reported and
-its covariates are dropped, rather than being used upside down.
+`coastline_sanity()` checks it against a fact the linework knows about
+itself: coastline ways chain head to TAIL, so where two ways share a node,
+one's end must meet the other's start. Two ends, or two starts, means one of
+the pair runs the wrong way. `way_junctions()` names which ways those are, so
+a station is refused its covariates when a suspect way is near enough to
+affect them and keeps them when the bad edit is twenty kilometres up the
+coast.
 """
 
 import math
@@ -126,7 +129,45 @@ def is_closed(line, tolerance_m=1.0):
                       line[0][1] - line[-1][1]) <= tolerance_m
 
 
-def coastline_sanity(lines, join_tolerance_m=50.0):
+# Ways that chain share a NODE, so their endpoints are the same coordinate and
+# the only gap is projection round-off, well under a metre. The first version
+# of this allowed 50 m, which in a dense estuary counts two ways merely passing
+# near each other as a junction and then calls the pair a reversal.
+JOIN_TOLERANCE_M = 1.0
+
+
+def way_junctions(lines, join_tolerance_m=JOIN_TOLERANCE_M):
+    """(joins, mismatches, suspect) for a set of coastline ways.
+
+    `suspect` is the indices of the ways meeting at a junction that does not
+    chain head to tail. Both ways of such a pair are suspect: the geometry
+    says one of them runs the wrong way, not which.
+    """
+    joins = mismatches = 0
+    suspect = set()
+    for i, first in enumerate(lines):
+        if len(first) < 2:
+            continue
+        for j in range(i + 1, len(lines)):
+            second = lines[j]
+            if len(second) < 2:
+                continue
+            for a_point, a_is_end in ((first[0], False), (first[-1], True)):
+                for b_point, b_is_end in ((second[0], False),
+                                          (second[-1], True)):
+                    if math.hypot(a_point[0] - b_point[0],
+                                  a_point[1] - b_point[1]) > join_tolerance_m:
+                        continue
+                    joins += 1
+                    # Head to tail is one end and one start. Two ends or two
+                    # starts means one of the pair runs the wrong way.
+                    if a_is_end == b_is_end:
+                        mismatches += 1
+                        suspect.update((i, j))
+    return joins, mismatches, suspect
+
+
+def coastline_sanity(lines, join_tolerance_m=JOIN_TOLERANCE_M):
     """Do these ways agree with each other about which side is land?
 
     An earlier version of this probed each segment against itself: offset a
@@ -145,24 +186,15 @@ def coastline_sanity(lines, join_tolerance_m=50.0):
 
     Returns (ok, detail). A single unconnected way cannot be cross-checked
     against anything, and says so rather than claiming to have been verified.
+    The verdict is about the whole box; whether the suspect way is anywhere
+    near a given station is a separate question, and the caller asks it with
+    way_junctions() rather than throwing away a whole tile of good linework.
     """
     usable = [line for line in lines if len(line) >= 2]
     if not usable:
         return False, "no coastline"
 
-    joins = mismatches = 0
-    for i, first in enumerate(usable):
-        for second in usable[i + 1:]:
-            for a_point, a_is_end in ((first[0], False), (first[-1], True)):
-                for b_point, b_is_end in ((second[0], False), (second[-1], True)):
-                    if math.hypot(a_point[0] - b_point[0],
-                                  a_point[1] - b_point[1]) > join_tolerance_m:
-                        continue
-                    joins += 1
-                    # Head to tail is one end and one start. Two ends or two
-                    # starts means one of the pair runs the wrong way.
-                    if a_is_end == b_is_end:
-                        mismatches += 1
+    joins, mismatches, _suspect = way_junctions(usable, join_tolerance_m)
     if joins == 0:
         closed = sum(1 for line in usable if is_closed(line))
         return True, (f"{len(usable)} way(s), {closed} closed, none joined — "

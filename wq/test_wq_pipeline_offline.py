@@ -28,7 +28,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from wq import clean, config, covariates, fit, manifest, pull, report, strata  # noqa: E402
+from wq import (clean, config, covariates, fit, manifest, pull, report,  # noqa: E402
+                spatial, strata)
+from wq import layers  # noqa: E402
 
 FAILURES = []
 RNG = np.random.default_rng(11031103)
@@ -242,8 +244,54 @@ def test_fit_refuses_without_a_manifest():
     check("no manifest means no fit", caught)
 
 
+def test_an_empty_layer_has_to_say_why():
+    """A zero in the coverage table is four different bugs wearing one face.
+
+    Seven tiles of coastline came back empty through a run that printed no
+    coastline error at all. Coverage said 0/120 and stopped there, so the
+    question "did Overpass refuse, or is there no coastline in the box, or did
+    my own check reject the linework" had no answer anywhere in the output.
+    """
+    print("\nwhy a layer is empty, not just that it is")
+    frame = pd.DataFrame([
+        {"station_id": "ok", "tile": "t1", "shore_normal_deg": 12.0,
+         "curvature_1_per_km": 0.1, "embayment_ratio": 1.0,
+         "land_fraction_5km": 0.3, "fetch_km_mean": 5.0,
+         "fetch_km_min": 1.0, "fetch_km_max": 9.0},
+        {"station_id": "refused", "tile": "t2",
+         "coastline_note": "HTTP 429 overpass-api.de"},
+        {"station_id": "refused-too", "tile": "t2",
+         "coastline_note": "HTTP 429 overpass-api.de"},
+        {"station_id": "empty-box", "tile": "t3",
+         "coastline_note": "no natural=coastline within the search box"},
+        {"station_id": "silent", "tile": "t4"},
+    ])
+    table = spatial.outcomes(frame, want={"coastline"})
+    reasons = dict(zip(table["reason"], table["sites"]))
+    check("the service refusing is its own reason",
+          reasons.get("HTTP 429 overpass-api.de") == 2, str(reasons))
+    check("an empty search box is a different one",
+          reasons.get("no natural=coastline within the search box") == 1)
+    check("a populated site is not counted as a failure",
+          reasons.get("populated") == 1)
+    check("and a site that failed with nothing recorded is named as such, "
+          "because that one is a bug in this code",
+          reasons.get("EMPTY, NO REASON RECORDED") == 1, str(reasons))
+    tiles = dict(zip(table["reason"], table["tiles"]))
+    check("two sites failing for one tiled request count as one tile",
+          tiles.get("HTTP 429 overpass-api.de") == 1, str(tiles))
+
+    # Every covariate the coverage table names has to have a layer beside it,
+    # or nobody can check its vintage.
+    orphans = [name for name in config.SITE_COVARIATES
+               if not layers.COVARIATE_LAYER.get(name)]
+    check("every pre-registered covariate names the layer it comes from",
+          not orphans, str(orphans))
+
+
 def main():
     for test in (test_grid_cell_sharing,
+                 test_an_empty_layer_has_to_say_why,
                  test_shore_normal_priority,
                  test_wind_components,
                  test_covariate_join_resolution,

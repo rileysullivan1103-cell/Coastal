@@ -41,6 +41,16 @@ python -m wq.run_wq --fit           # per site, per analyte, per predictor
 python -m wq.run_wq --report        # the distribution
 ```
 
+A zero in the spatial coverage table is four different things — the service
+refused, the box has no coastline in it, the sanity check rejected the
+linework, or nothing was recorded at all — and coverage cannot tell them
+apart. This reads the reasons back off the file a finished run already wrote,
+and touches no service:
+
+```bash
+python -m wq.run_wq --explain-spatial
+```
+
 ### Why the samples come before the spatial layers
 
 The WQP pull returns **32,513 coastal stations** nationally. The first version
@@ -164,9 +174,20 @@ product.
 It is also the assumption most likely to be wrong in a specific place, because
 OSM ways are edited piecemeal and one reversed way inverts land and sea
 exactly where it is wrong. `coastline_sanity()` therefore checks that ways
-meeting at a shared endpoint chain head-to-**tail**; two ends or two starts
-meeting means a reversal, and **every coastline covariate at that site is
-withheld** rather than returned upside down.
+meeting at a shared node chain head-to-**tail**; two ends or two starts
+meeting means a reversal.
+
+The veto that follows is **scoped to the ways involved**. The search box is
+30 km across and the furthest any covariate here reaches is `land_fraction`'s
+5 km, so `way_junctions()` names the suspect ways and a station loses its
+coastline covariates only when one of them is within 6 km. A bad edit at the
+far corner of the box is recorded in `coastline_check` and otherwise ignored,
+because voiding forty stations over geometry none of them read is not caution,
+it is just a different way of getting the answer wrong.
+
+The join tolerance is **1 m**, not the 50 m it started at: ways that really
+chain share a node, and at 50 m two ways merely passing near each other in an
+estuary register as a junction and then get called a reversal.
 
 > An earlier version of that check probed each segment against itself and
 > agreed 100% of the time on every input, including a deliberately reversed

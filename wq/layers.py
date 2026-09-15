@@ -93,9 +93,14 @@ LAYERS = {
     "coastline": {
         "name": "OpenStreetMap coastline (natural=coastline) via Overpass",
         "endpoint": "https://overpass-api.de/api/interpreter",
+        # These are the COLUMN names, not the concepts. "fetch_km_by_octant"
+        # is how the spec names the idea; what the frame actually carries is
+        # the three summaries, and naming the idea here left them with no
+        # layer beside them in the coverage table -- a covariate whose source
+        # reads "None" is one nobody can check the vintage of.
         "supplies": ["shore_normal_deg", "curvature_1_per_km",
                      "embayment_ratio", "land_fraction_5km",
-                     "fetch_km_by_octant"],
+                     "fetch_km_mean", "fetch_km_min", "fetch_km_max"],
         "declared_vintage": "continuously edited",
         "vintage_source": "osm3s.timestamp_osm_base in every response — the "
                           "planet timestamp the answer was built from",

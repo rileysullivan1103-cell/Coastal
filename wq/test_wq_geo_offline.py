@@ -103,6 +103,46 @@ def test_sanity_check_catches_a_reversed_way():
           values.get("shore_normal_deg") is None
           and values.get("coastline_sane") is False, str(values.get("coastline_note")))
 
+    check("both ways at a bad junction are named suspect, since the geometry "
+          "cannot say which one is reversed",
+          geo.way_junctions(geo.project_lines(mixed, 0.0, 0.0))[2] == {0, 1})
+
+    # 50 m of tolerance called two ways merely passing near each other a
+    # junction, and then called the pair a reversal. Ways that really chain
+    # share a node.
+    passing = [[(0.0, -20000.0), (0.0, 0.0)],
+               [(30.0, 20000.0), (30.0, 0.0)]]
+    joins, mismatches, _ = geo.way_junctions(passing)
+    check("two ways passing 30 m apart are not a junction",
+          joins == 0 and mismatches == 0, f"{joins} join(s)")
+
+
+def test_a_far_away_defect_does_not_void_the_whole_tile():
+    print("\na bad edit at the far corner of the box")
+    # The box is 30 km across and land_fraction reaches 5 km. A reversed
+    # junction 40 km up the coast cannot enter any covariate computed here,
+    # and voiding the station for it discards good geometry to punish geometry
+    # nobody read.
+    far = [[(32.9, -117.3), (33.1, -117.3)],
+           [(33.40, -117.3), (33.50, -117.3)],
+           [(33.60, -117.3), (33.50, -117.3)]]
+    values = spatial.coastline_covariates(33.0, -117.29, far)
+    check("the box is still reported as defective",
+          values.get("coastline_sane") is False, values.get("coastline_check"))
+    check("but the covariates survive",
+          values.get("shore_normal_deg") is not None,
+          str(values.get("coastline_note")))
+    check("and the distance to the defect is recorded",
+          (values.get("coastline_defect_km") or 0) > 6.0,
+          values.get("coastline_defect_km"))
+
+    near = [[(32.9, -117.3), (33.0, -117.3)],
+            [(33.1, -117.3), (33.0, -117.3)]]
+    values = spatial.coastline_covariates(33.0, -117.29, near)
+    check("a defect the covariates would actually read still withholds them",
+          values.get("shore_normal_deg") is None,
+          str(values.get("coastline_note")))
+
 
 def test_shore_normal():
     print("\nshore normal (outward, the way you face looking to sea)")
@@ -634,6 +674,7 @@ def test_overrides_cannot_smuggle_beach_type():
 def main():
     for test in (test_land_and_water,
                  test_sanity_check_catches_a_reversed_way,
+                 test_a_far_away_defect_does_not_void_the_whole_tile,
                  test_shore_normal,
                  test_curvature_sign_and_magnitude,
                  test_embayment_and_land_fraction,
