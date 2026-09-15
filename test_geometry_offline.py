@@ -668,6 +668,116 @@ def test_features_with_no_overlapping_dates_are_not_linked():
           "c" not in kept, kept)
 
 
+def test_a_move_bigger_than_a_patch():
+    """The bug that made every patch at Walton disagree with every other.
+
+    A patch of N pixels can only resolve a displacement of N/2. Past that the
+    two patches hold non-overlapping ground, the correlation peak is spurious,
+    and -- this is the part that misleads -- it is spurious in a DIFFERENT
+    direction in each patch, because each is matching different accidental
+    content. The symptom is "no two patches agree", which is also what patches
+    on water look like, so the disagreement alone cannot tell you which you
+    have.
+
+    The fix is to register the whole frame first, which has no such cap, and
+    cut each patch from the moved position so it only ever measures a residual.
+    This plants a 150 px move behind a 96 px patch and checks both halves: that
+    the naive pass fails, and that the corrected pass recovers the move and
+    dates it.
+    """
+    print("\na camera move larger than the patch")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        # Proportioned like a coastal camera rather than scaled up from the
+        # small fixture: a real frame gives phase correlation a decent SHARE
+        # of rigid content, and the whole-frame pass only works because of
+        # that share. Structure here occupies the upper third; the rest is
+        # re-randomised every frame.
+        base = np.full((768, 1024), 55.0)
+        # IRREGULAR spacing on purpose. Evenly spaced buildings make the scene
+        # periodic, and a shift of one period is indistinguishable from no
+        # shift: an earlier version of this fixture spaced them 130 px apart
+        # and the 138 px move was recovered as 8. Real streets are irregular,
+        # but a picket fence or a row of pilings is not, and a camera looking
+        # at one has a genuine ambiguity no correlator can resolve.
+        edges = [40, 150, 330, 395, 560, 690, 745, 900]
+        for index, x in enumerate(edges):
+            width = 45 + 11 * (index % 4)
+            base[150:260, x:x + width] = 205      # a row of buildings
+            base[110:150, x + 8:x + width - 8] = 240   # roofs
+        base[90:100, :] = 175                    # a treeline
+        base[260:270, :] = 140                   # a sea wall
+        dates = pd.date_range("2024-01-07", periods=30, freq="7D", tz="UTC")
+        move_at, planted = 15, (-60.0, 138.0)   # 150 px, well past 96/2
+        rng = np.random.default_rng(7)
+        paths = []
+        for index, _ in enumerate(dates):
+            dy, dx = (0.0, 0.0) if index < move_at else planted
+            frame = shifted(base, int(dy), int(dx)).copy()
+            frame[300:, :] = 110 + rng.normal(0, 35, (768 - 300, 1024))
+            frame += rng.normal(0, 4, frame.shape)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        rois = [{"name": "roof", "x": 180, "y": 120, "w": 96, "h": 96},
+                {"name": "tower", "x": 440, "y": 130, "w": 96, "h": 96},
+                {"name": "eaves", "x": 700, "y": 125, "w": 96, "h": 96}]
+
+        # 1. the failure, reproduced deliberately
+        naive, _ = g.track(paths, list(dates), rois, 0)
+        naive_signal = g.agreeing_signal(naive)
+        naive_offset = naive_signal["offset"][
+            naive_signal.index >= dates[move_at]].median()
+        # The patches do not merely lose precision past their own size: what
+        # they report bears no relation to the move. Whether they also disagree
+        # with each other depends on what accidental content they land on --
+        # the frames here are similar enough that they can agree on the same
+        # wrong answer, which is the more dangerous of the two failures.
+        check("without the coarse pass the patches are simply wrong",
+              abs(naive_offset - np.hypot(*planted)) > 20.0, naive_offset)
+
+        # 2. the whole frame, which has no such cap
+        coarse = g.coarse_shifts(paths, list(dates), 0, downsample=2)
+        check("the whole frame registers every date",
+              len(coarse) == len(dates), len(coarse))
+        # Slice by DATE, not position: dropped frames shift the positions and
+        # a positional slice then compares the wrong halves of the record.
+        cut = dates[move_at]
+        moved = coarse["offset"][coarse.index >= cut].median()
+        before = coarse["offset"][coarse.index < cut].max()
+        check("and recovers the planted magnitude",
+              abs(moved - np.hypot(*planted)) < 3.0, moved)
+        check("with nothing before the move", before < 2.0, before)
+        steps = g.find_steps(coarse["offset"], threshold=3.0, persist=3)
+        check("the whole-frame pass finds one step", len(steps) == 1, steps)
+        if steps:
+            check("on the planted date", steps[0]["date"] == dates[move_at],
+                  f"{steps[0]['date']} vs {dates[move_at]}")
+
+        # 3. the patches, now measuring a residual
+        fixed, _ = g.track(paths, list(dates), rois, 0, coarse=coarse)
+        signal = g.agreeing_signal(fixed)
+        check("with the coarse pass the patches agree",
+              signal["spread"].median() < 1.0, signal["spread"].median())
+        kept, rejected, _ = g.agreeing_features(fixed, tolerance=3.0)
+        check("and all three survive the agreement test",
+              len(kept) == 3, (kept, rejected))
+        after = signal["offset"][signal.index >= dates[move_at]].median()
+        check("the patch total is the displacement, not the residual",
+              abs(after - np.hypot(*planted)) < 3.0, after)
+        patch_steps = g.find_steps(signal["offset"], threshold=3.0, persist=3)
+        check("the patches date the move too", len(patch_steps) == 1,
+              patch_steps)
+        if patch_steps:
+            check("to the same date",
+                  patch_steps[0]["date"] == dates[move_at],
+                  patch_steps[0]["date"])
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_the_survey_tiles_the_whole_frame():
     """The survey asks nothing about appearance, so it must cover everything.
 
@@ -810,6 +920,7 @@ def main():
                  test_the_agreeing_group_is_recovered_from_noise,
                  test_a_frame_with_nothing_rigid_in_it_returns_nothing,
                  test_features_with_no_overlapping_dates_are_not_linked,
+                 test_a_move_bigger_than_a_patch,
                  test_the_survey_tiles_the_whole_frame,
                  test_a_large_survey_still_finds_the_rigid_block,
                  test_a_changed_frame_size_is_reported,

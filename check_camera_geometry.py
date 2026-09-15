@@ -81,6 +81,17 @@ HOUR_TOLERANCE = 3
 
 # Patch size for tracking.
 ROI_SIZE = 128
+# A patch of N pixels can only resolve a displacement of N/2. Past that the two
+# patches hold non-overlapping ground and the correlation peak is spurious --
+# and spurious in a DIFFERENT direction in every patch, because each one is
+# matching different accidental content. That is not a subtle failure: it is
+# exactly "no two patches agree with each other", which is also the signature
+# of patches on water, so the two are indistinguishable from the disagreement
+# alone. The whole frame is registered first, at this downsample, and the
+# patches then measure only what is left over. At downsample 2 on a 2560 px
+# frame the coarse pass resolves +/- 640 px, which is any camera move short of
+# a repoint.
+COARSE_DOWNSAMPLE = 2
 # How many candidates to propose and track before the agreement test picks the
 # keepers. More candidates is cheap -- the frames are already loaded, and a
 # 128x128 FFT is nothing next to decoding a 2560x1920 JPEG -- and it is the
@@ -100,7 +111,17 @@ LAND_FRACTION = 0.55
 # A shift is only a discontinuity if it is bigger than this and it persists.
 STEP_PX = 3.0
 PERSIST = 3          # samples on each side that must agree
-MIN_CONFIDENCE = 0.05  # phase-correlation peak sharpness below this is fog
+# Peak-to-sidelobe ratio: how far the correlation peak stands above the rest
+# of its own surface, in standard deviations. NOT the raw peak height, which
+# was the first version and does not survive being asked about two array sizes:
+# a delta in an N-pixel surface has height 1 whatever N is, but a real partial
+# match has height proportional to the correlated SHARE, so the same 0.05 that
+# dropped fog in a 128px patch dropped 29 of 30 perfectly good whole frames.
+# PSR has no such problem, because the quantity it is compared against is the
+# surface's own noise. Pure noise peaks at about sqrt(2 ln N) sidelobes -- 4.4
+# for a 128px patch, 5.0 for a 2.5 MP frame -- so a single threshold above that
+# means "better than chance" at any size.
+MIN_CONFIDENCE = 8.0
 # Temporal spread, in grey levels, below which a patch is not scene at all.
 # Real imagery weeks apart never repeats exactly: sun angle, haze and JPEG
 # noise alone put the median absolute deviation well above one level. A region
@@ -319,9 +340,15 @@ def phase_shift(reference, image):
     negative of the displacement; it is negated before returning, so a feature
     that has slid 5 px right reads dx = +5 on the plot rather than -5.
 
-    Confidence is the correlation peak height against the mean of the surface.
-    A sharp peak means one unambiguous alignment; fog, night and heavy rain
-    flatten it, and those frames are dropped rather than averaged in.
+    Confidence is the PEAK-TO-SIDELOBE RATIO: how far the peak stands above
+    the rest of its own correlation surface, in standard deviations of that
+    surface, with a small neighbourhood of the peak excluded so a broad peak
+    does not inflate its own noise estimate. A sharp peak means one
+    unambiguous alignment; fog, night and heavy rain flatten it, and those
+    frames are dropped rather than averaged in.
+
+    It is a ratio rather than the raw peak height so that one threshold works
+    for a 128 px patch and for a 2.5 MP frame. See MIN_CONFIDENCE.
     """
     if reference.shape != image.shape:
         return None
@@ -335,10 +362,24 @@ def phase_shift(reference, image):
     surface = np.fft.ifft2(cross / magnitude).real
 
     peak = np.unravel_index(int(np.argmax(surface)), surface.shape)
-    # The cross-power surface is normalised, so the peak height is already a
-    # 0-1 measure of how unambiguous the alignment is. A clean structural match
-    # gives a spike; fog gives a plateau near 1/N.
-    confidence = float(surface[peak])
+    # Mask a few pixels around the peak before measuring the background, so a
+    # peak two or three pixels wide is not counted as part of its own noise.
+    background = np.ones(surface.shape, dtype=bool)
+    guard = 3
+    rows_, cols_ = surface.shape
+    background[max(0, peak[0] - guard): peak[0] + guard + 1,
+               max(0, peak[1] - guard): peak[1] + guard + 1] = False
+    sidelobes = surface[background]
+    spread = float(sidelobes.std())
+    if spread <= 1e-12:
+        # A surface with no sidelobe variation at all is a perfect delta: the
+        # two arrays are identical. That is the most confident result possible
+        # and the first version scored it ZERO, by dividing by the spread it
+        # had just found to be nothing -- which dropped every reference frame
+        # as if it were fog.
+        confidence = float("inf")
+    else:
+        confidence = float(surface[peak] - sidelobes.mean()) / spread
 
     dy = peak[0] + _parabolic(surface[:, peak[1]], peak[0])
     dx = peak[1] + _parabolic(surface[peak[0], :], peak[1])
@@ -349,6 +390,61 @@ def phase_shift(reference, image):
     if dx > cols / 2:
         dx -= cols
     return float(-dy), float(-dx), confidence
+
+
+def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
+                  min_confidence=MIN_CONFIDENCE):
+    """Whole-frame displacement per date, against the reference frame.
+
+    Two reasons this runs before the patches rather than instead of them.
+
+    RANGE. A 128 px patch cannot see a 200 px move; it reports something, and
+    what it reports is noise. The full frame can, so the coarse pass puts every
+    patch back on its own ground before the patch is asked anything.
+
+    ROBUSTNESS. Phase correlation is not confused by a frame that is mostly
+    water. Uncorrelated content -- surf, cloud, glare -- contributes a flat
+    pedestal to the cross-power surface rather than a competing peak, so the
+    only thing that can produce a peak is content common to both frames, which
+    is the rigid scene however small a share of the frame it occupies. A
+    scene-wide correlation is therefore the RIGHT primary measurement here and
+    the patches are the cross-check, not the other way round.
+
+    Returns a frame indexed by date with dy, dx, offset and confidence, in
+    ORIGINAL pixels.
+    """
+    reference = load_gray(paths[pick], downsample=downsample)
+    if reference is None:
+        return pd.DataFrame()
+    rows = []
+    for path, date in zip(paths, dates):
+        image = load_gray(path, downsample=downsample)
+        if image is None:
+            continue
+        if image.shape != reference.shape:
+            # A resolution change is reported separately and loudly; cropping
+            # to the common area at least keeps the rest of the record usable.
+            height = min(reference.shape[0], image.shape[0])
+            width = min(reference.shape[1], image.shape[1])
+            base, moved = (reference[:height, :width], image[:height, :width])
+        else:
+            base, moved = reference, image
+        got = phase_shift(base, moved)
+        if got is None:
+            continue
+        dy, dx, confidence = got
+        rows.append({"date": date, "dy": dy * downsample, "dx": dx * downsample,
+                     "confidence": confidence})
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows).set_index("date").sort_index()
+    weak = int((frame["confidence"] < min_confidence).sum())
+    if weak:
+        print(f"  {weak}/{len(frame)} frames below confidence "
+              f"{min_confidence} (fog, night, rain) — dropped")
+        frame = frame[frame["confidence"] >= min_confidence]
+    frame["offset"] = np.hypot(frame["dx"], frame["dy"])
+    return frame
 
 
 def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
@@ -620,10 +716,19 @@ def sharpest(paths, rois):
     return best
 
 
-def track(paths, dates, rois, pick=0, min_confidence=MIN_CONFIDENCE):
-    """dx/dy per frame per feature, against the reference frame at `pick`."""
+def track(paths, dates, rois, pick=0, min_confidence=MIN_CONFIDENCE,
+          coarse=None):
+    """dx/dy per frame per feature, against the reference frame at `pick`.
+
+    `coarse` is the whole-frame displacement per date. Each patch is cut from
+    the moved position rather than from the reference position, so what the
+    correlation measures is the RESIDUAL -- which is inside a patch's range by
+    construction -- and the residual is added back to the coarse shift to give
+    the displacement. Without this a move larger than half a patch is
+    unmeasurable and reads as patches that disagree.
+    """
     reference, reference_date = load_gray(paths[pick]), dates[pick]
-    rows, unreadable = [], 0
+    rows, unreadable, offscreen = [], 0, 0
     for path, date in zip(paths, dates):
         image = load_gray(path)
         if image is None:
@@ -631,17 +736,32 @@ def track(paths, dates, rois, pick=0, min_confidence=MIN_CONFIDENCE):
             continue
         if reference is None:
             reference, reference_date = image, date
+        shift_y, shift_x = (0.0, 0.0)
+        if coarse is not None and date in coarse.index:
+            shift_y = float(coarse.at[date, "dy"])
+            shift_x = float(coarse.at[date, "dx"])
         for roi in rois:
-            base, patch = crop(reference, roi), crop(image, roi)
+            base = crop(reference, roi)
+            moved = dict(roi, x=int(round(roi["x"] + shift_x)),
+                         y=int(round(roi["y"] + shift_y)))
+            patch = crop(image, moved)
             if base is None or patch is None:
+                # The patch walked off the edge of the moved frame. That is a
+                # fact about this date, not a bad measurement to substitute
+                # for, so it is counted and skipped.
+                offscreen += 1
                 continue
             shifted = phase_shift(base, patch)
             if shifted is None:
                 continue
             dy, dx, confidence = shifted
             rows.append({"date": date, "feature": roi["name"],
-                         "dx": dx, "dy": dy, "confidence": confidence,
+                         "dx": dx + shift_x, "dy": dy + shift_y,
+                         "confidence": confidence,
                          "frame": os.path.basename(path)})
+    if offscreen:
+        print(f"  {offscreen} patch positions fell outside the moved frame, "
+              "skipped")
     if unreadable:
         print(f"  {unreadable} files were not readable images, skipped")
     frame = pd.DataFrame(rows)
@@ -869,6 +989,32 @@ def describe_epochs(steps, dates, counts=None):
     return epochs
 
 
+def report_record(steps, dates, slug, step_px, what):
+    """Print the epoch split, or its absence, for one registration pass."""
+    if not steps:
+        print(f"\nNo step larger than {step_px} px persists in {what}.")
+        print("The record reads as ONE geometric epoch. That is evidence of")
+        print("stability, not proof: a move smaller than the step threshold,")
+        print("or one inside a gap in the sampling, would not appear. Re-run")
+        print("with --every 3 and a lower --step-px before committing to a")
+        print("shoreline trend.")
+        return []
+    print(f"\n{len(steps)} candidate discontinuit"
+          f"{'y' if len(steps) == 1 else 'ies'} in {what}:")
+    for step in steps:
+        print(f"  {step['date']:%Y-%m-%d}  {step['before']:.1f} px -> "
+              f"{step['after']:.1f} px  (jump {step['jump']:.1f})")
+    epochs = describe_epochs(steps, list(dates), counts=coverage_counts(slug))
+    print(f"\n{len(epochs)} epochs:")
+    for index, epoch in enumerate(epochs, 1):
+        stills = f", {epoch['stills']:,} stills" if "stills" in epoch else ""
+        print(f"  {index}. {epoch['start']:%Y-%m-%d} to {epoch['end']:%Y-%m-%d}"
+              f"  {epoch['frames']} sampled frames{stills}")
+    print("\nNothing has been corrected or re-registered. Before pooling any")
+    print("pixel metric across these dates, decide per epoch.")
+    return epochs
+
+
 def coverage_counts(slug):
     """Hourly image counts, so an epoch can be measured in stills not samples."""
     paths = glob.glob(os.path.join(RIP_DIR, f"coverage_{slug}_hourly.csv"))
@@ -1050,6 +1196,11 @@ def main():
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--no-coarse", action="store_true",
+                    help="skip the whole-frame registration and measure with "
+                         "patches alone. Only useful for reproducing the "
+                         "failure it exists to fix: a move bigger than half a "
+                         "patch is invisible to a patch.")
     ap.add_argument("--survey", action="store_true",
                     help="ignore the feature picker: tile the WHOLE frame and "
                          "report which cells agree with each other. Use this "
@@ -1141,8 +1292,46 @@ def main():
     if preview:
         print(f"    {os.path.abspath(preview)}")
 
-    print("\nregistering")
-    frame, reference_date = track(paths, dates, rois, pick)
+    coarse = None
+    if not args.no_coarse:
+        print("\n" + "=" * 74)
+        print("WHOLE-FRAME REGISTRATION")
+        print("=" * 74)
+        print("Every pixel at once, against the reference. This is the primary")
+        print("measurement. It is not capped by patch size, and a frame that is")
+        print("mostly water does not confuse it: uncorrelated content raises the")
+        print("floor of the correlation surface rather than competing for the")
+        print("peak, so the peak comes from whatever IS common to both frames.")
+        coarse = coarse_shifts(paths, dates, pick)
+        if coarse.empty:
+            print("  no frame could be registered against the reference")
+            coarse = None
+        else:
+            print(f"  registered {len(coarse)} of {len(paths)} frames")
+            print(f"  median offset across the record: "
+                  f"{coarse['offset'].median():.2f} px")
+            print(f"  largest single-date offset:      "
+                  f"{coarse['offset'].max():.2f} px on "
+                  f"{coarse['offset'].idxmax():%Y-%m-%d}")
+            coarse_steps = find_steps(coarse["offset"], threshold=args.step_px)
+            report_record(coarse_steps, coarse.index, slug, args.step_px,
+                          "the whole frame")
+            if coarse["offset"].max() > args.roi_size / 2:
+                print(f"\n  NOTE: the record moves further than half a "
+                      f"{args.roi_size} px patch "
+                      f"({coarse['offset'].max():.0f} px).")
+                print("  Patches could not have measured this on their own, "
+                      "and without the")
+                print("  coarse pass above they would each have reported a "
+                      "different wrong")
+                print("  answer. They are now cut from the moved position, so "
+                      "what follows")
+                print("  measures the residual.")
+
+    print("\nregistering patches" +
+          (" against the coarse-corrected position" if coarse is not None
+           else " (NO coarse correction — --no-coarse)"))
+    frame, reference_date = track(paths, dates, rois, pick, coarse=coarse)
     if frame.empty:
         sys.exit("no usable measurements")
 
@@ -1249,7 +1438,7 @@ def main():
                                                        f"geometry_{slug}.png"))
 
     print("\n" + "=" * 74)
-    print("RESULT")
+    print("PATCH CROSS-CHECK")
     print("=" * 74)
     print(f"reference frame {reference_date:%Y-%m-%d}; every offset is "
           "measured from it")
@@ -1288,15 +1477,11 @@ def main():
         print("orange boxes are on structure, then re-run with --every 3.")
         print("!" * 74)
 
-    if not steps:
-        verdict = ("The record reads as ONE geometric epoch."
-                   if trustworthy else
-                   "No epoch split can be claimed — see the warning above.")
-        print(f"\nNo step larger than {args.step_px} px persists. {verdict}")
-        print("That is evidence of stability, not proof: a move smaller than")
-        print("the step threshold, or one inside a gap in the sampling, would")
-        print("not appear. Re-run with --every 3 and a lower --step-px before")
-        print("committing to a shoreline trend.")
+    if not trustworthy and not steps:
+        print("\nNo epoch split can be claimed from the patches — see above.")
+    elif not steps:
+        report_record([], signal.index, slug, args.step_px,
+                      "the agreeing patches")
     elif not trustworthy:
         # Steps found among features that do not agree are steps in the
         # disagreement, not in the camera. Printing dates and epoch sizes under
@@ -1308,22 +1493,8 @@ def main():
         print("describe the disagreement, not the camera. Fix the patches "
               "first.")
     else:
-        print(f"\n{len(steps)} candidate discontinuit"
-              f"{'y' if len(steps) == 1 else 'ies'}:")
-        for step in steps:
-            print(f"  {step['date']:%Y-%m-%d}  {step['before']:.1f} px -> "
-                  f"{step['after']:.1f} px  (jump {step['jump']:.1f})")
-        epochs = describe_epochs(steps, list(signal.index),
-                                 counts=coverage_counts(slug))
-        print(f"\n{len(epochs)} epochs:")
-        for index, epoch in enumerate(epochs, 1):
-            stills = (f", {epoch['stills']:,} stills" if "stills" in epoch
-                      else "")
-            print(f"  {index}. {epoch['start']:%Y-%m-%d} to "
-                  f"{epoch['end']:%Y-%m-%d}  "
-                  f"{epoch['frames']} sampled frames{stills}")
-        print("\nNothing has been corrected or re-registered. Before pooling")
-        print("any pixel metric across these dates, decide per epoch.")
+        report_record(steps, signal.index, slug, args.step_px,
+                      "the agreeing patches")
 
     print(f"\nwrote {csv_path}")
     if png_path:
