@@ -393,13 +393,58 @@ def still_url(row, service, cache):
     if not elements:
         return None, "stills service", None
 
-    # A detected row knows the moment the detector ran. A blank hour does not,
-    # so it keeps the old behaviour and takes the middle of the hour -- there
-    # is no frame to match, only an hour to sample from.
+    # A detected row knows the moment the detector ran and is matched to it.
+    # A blank hour carries its hour AS its timestamp, so it matches the top of
+    # the hour rather than the middle -- which is fine, because a blank hour
+    # has no box to line up and any still inside it is equally representative.
+    # (An earlier comment here claimed blank hours kept the mid-hour rule. They
+    # do not, and saying so would have made the offset report unreadable.)
     stamp = pd.Timestamp(row["timestamp"]) if pd.notna(row.get("timestamp")) \
         else hour + pd.Timedelta(minutes=30)
     best = min(elements, key=lambda e: abs(pd.Timestamp(e["timestamp"]) - stamp))
     return best["url"], "stills service", pd.Timestamp(best["timestamp"])
+
+
+BOX_OFFSET_TOLERANCE_S = 60.0
+
+
+def report_offsets(rows):
+    """How far each still sits from the moment it is supposed to show.
+
+    Split by whether the row carries boxes, because the two cases mean
+    different things and pooling them hides the one that matters. A blank hour
+    has nothing to line up: any still inside the hour is equally representative
+    of it, so a large offset there is not an error. A DETECTION with a large
+    offset is a frame whose boxes will not sit on the water the detector saw --
+    the original bug, surviving in whatever rows the stills feed is too sparse
+    to match closely.
+    """
+    detections = [r for r in rows
+                  if r.get("offset") is not None
+                  and pd.notna(r["_row"].get("score_max"))]
+    blanks = [r for r in rows
+              if r.get("offset") is not None and r not in detections]
+
+    for label, group in (("detections", detections), ("blank hours", blanks)):
+        if not group:
+            continue
+        series = pd.Series([abs(r["offset"]) for r in group])
+        print(f"  still offset, {label:<12} n={len(group):>3}  "
+              f"median {series.median():>6.0f}s  90th {series.quantile(0.9):>6.0f}s"
+              f"  worst {series.max():>6.0f}s")
+
+    if detections:
+        stale = [r for r in detections
+                 if abs(r["offset"]) > BOX_OFFSET_TOLERANCE_S]
+        if stale:
+            print(f"  {len(stale)} of {len(detections)} detection rows are more "
+                  f"than {BOX_OFFSET_TOLERANCE_S:.0f}s from their still —")
+            print("    their boxes will not line up. image_offset_s records "
+                  "each one, so they can be\n    excluded at analysis rather "
+                  "than mistaken for detector error.")
+        else:
+            print(f"  every detection row is within "
+                  f"{BOX_OFFSET_TOLERANCE_S:.0f}s of its still")
 
 
 def report_boxes(table):
@@ -598,14 +643,7 @@ def main():
                      "_row": row})
     print(f"  {len(rows)} of {len(sample)} rows have an image url "
           f"({', '.join(sorted(sources)) or 'none'})")
-    if offsets:
-        series = pd.Series(offsets)
-        print(f"  still-vs-detection offset: median {series.median():.0f}s, "
-              f"90th pct {series.quantile(0.9):.0f}s, worst {series.max():.0f}s")
-        if series.median() > 120:
-            print("  WARNING: the stills being labelled are minutes away from "
-                  "the detections.\n           Boxes will not line up with the "
-                  "water in front of you.")
+    report_offsets(rows)
     if not rows:
         sys.exit("  No image urls resolved; nothing to download.")
 

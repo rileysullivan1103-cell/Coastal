@@ -432,6 +432,47 @@ def check_a_repair_does_not_lose_labels():
               after["boxes"].iloc[0] != "[]")
 
 
+def check_offsets_are_reported_by_kind_not_pooled():
+    """A blank hour's offset and a detection's offset mean different things.
+
+    A blank hour has no box to line up, so any still inside it represents it
+    equally well and a large offset is not an error. A detection with a large
+    offset is the original bug surviving in a row the stills feed was too
+    sparse to match. Pooling them hides the second behind the first: on the
+    real rebuild the pooled numbers read "median 19s, worst 1546s", which says
+    nothing about whether any box-carrying row is affected.
+    """
+    import io
+    import contextlib
+    import build_label_sample as bls
+
+    rows = []
+    for i in range(8):                      # detections, all close
+        rows.append({"offset": 5.0 + i, "_row": {"score_max": 0.8}})
+    rows.append({"offset": 900.0, "_row": {"score_max": 0.9}})   # one stale
+    for i in range(5):                      # blank hours, far by design
+        rows.append({"offset": 1500.0, "_row": {"score_max": float("nan")}})
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        bls.report_offsets(rows)
+    text = buffer.getvalue()
+
+    check("detections and blank hours are reported separately",
+          "detections" in text and "blank hours" in text, text.strip()[:80])
+    check("the stale detection is counted",
+          "1 of 9 detection rows" in text, text.strip()[-200:])
+    check("the blank hours' 1500s does not appear as a detection worst",
+          "n=  9" in text and "n=  5" in text, text.strip()[:200])
+
+    clean = [{"offset": 3.0, "_row": {"score_max": 0.8}} for _ in range(4)]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        bls.report_offsets(clean)
+    check("a clean sample says so plainly",
+          "every detection row is within" in buffer.getvalue())
+
+
 def main():
     print("labelling pipeline offline checks\n")
     check_weighting_beats_the_sample()
@@ -447,6 +488,7 @@ def main():
     check_missing_wave_height_does_not_eat_the_budget()
     check_boxes_come_off_disk_and_belong_to_their_frame()
     check_a_repair_does_not_lose_labels()
+    check_offsets_are_reported_by_kind_not_pooled()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
 
