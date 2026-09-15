@@ -891,6 +891,38 @@ def test_a_move_the_magnitude_cannot_see():
           g.find_steps(still, threshold=5.0) == [], g.find_steps(still, 5.0))
 
 
+def test_a_step_says_how_much_record_stands_behind_it():
+    """Narrowing the window starves the medians rather than sharpening them.
+
+    The window test needs only `persist` samples on each side, and with
+    exactly that many each median is about one reading. Walton's 2026-01-18
+    step measured 31 px across 44 frames and 11 px across 8 -- same date, same
+    camera, a third of the size -- because the narrower run left three frames
+    before the date. The date survives that; the magnitude does not, and a
+    step standing on the minimum has to say so.
+    """
+    print("\nhow much record stands behind a step")
+    rng = np.random.default_rng(3)
+
+    def record(length, at, jump=30.0):
+        when = pd.date_range("2025-12-07", periods=length, freq="7D", tz="UTC")
+        dx = np.where(np.arange(length) < at, 0.0, jump)
+        return pd.DataFrame({"dx": dx + rng.normal(0, 0.3, length),
+                             "dy": rng.normal(0, 0.3, length)}, index=when)
+
+    thin = g.find_steps(record(8, 3), threshold=5.0)
+    check("a step with 3 frames on one side is found", len(thin) == 1, thin)
+    if thin:
+        check("  and is marked as thin", thin[0]["thin"] is True, thin[0])
+        check("  with the support named", thin[0]["support"] == 3,
+              thin[0]["support"])
+
+    thick = g.find_steps(record(40, 20), threshold=5.0)
+    check("a step in the middle of a long record is not marked",
+          len(thick) == 1 and thick[0]["thin"] is False,
+          [(s["support"], s["thin"]) for s in thick])
+
+
 def test_the_two_passes_are_set_against_each_other():
     """Two epoch lists are not an answer until someone diffs them.
 
@@ -1642,6 +1674,7 @@ def main():
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_the_two_passes_are_set_against_each_other,
+                 test_a_step_says_how_much_record_stands_behind_it,
                  test_a_move_the_magnitude_cannot_see,
                  test_disagreement_is_measured_as_a_vector,
                  test_the_agreeing_group_is_recovered_from_noise,

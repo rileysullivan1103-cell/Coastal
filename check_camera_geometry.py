@@ -1339,8 +1339,18 @@ def find_steps(series, threshold=STEP_PX, persist=PERSIST):
         index = max(candidates, key=lambda i: apart(values[i], values[i - 1]))
         before = level(values[max(0, index - persist): index])
         after = level(values[index: index + persist])
+        # HOW MUCH RECORD STANDS BEHIND THIS STEP. The window test needs only
+        # `persist` samples on each side, and with exactly that many the two
+        # medians are each one sample from being a single reading. Walton's
+        # 2026-01-18 step read 31 px measured across 44 frames and 11 px across
+        # 8 -- same date, same camera, a third of the size, because narrowing
+        # the window starved the medians rather than sharpening them. A step
+        # standing on the minimum is a candidate, not a measurement, and has
+        # to say so.
         steps.append({"date": dates[index], "jump": apart(after, before),
-                      "before": size(before), "after": size(after)})
+                      "before": size(before), "after": size(after),
+                      "support": min(index, len(values) - index),
+                      "thin": min(index, len(values) - index) < 2 * persist})
     return steps
 
 
@@ -1564,8 +1574,20 @@ def report_record(steps, dates, slug, step_px, what, noise=None):
     print(f"\n{len(steps)} candidate discontinuit"
           f"{'y' if len(steps) == 1 else 'ies'} in {what}:")
     for step in steps:
+        thin = (f"   <- only {step['support']} frames on one side"
+                if step.get("thin") else "")
         print(f"  {step['date']:%Y-%m-%d}  {step['before']:.1f} px -> "
-              f"{step['after']:.1f} px  (jump {step['jump']:.1f})")
+              f"{step['after']:.1f} px  (jump {step['jump']:.1f}){thin}")
+    if any(step.get("thin") for step in steps):
+        print("\n  A step marked above rests on the fewest frames the test "
+              "accepts, so its")
+        print("  two medians are each about one reading. Its DATE is worth as "
+              "much as any")
+        print("  other; its SIZE is not, and narrowing the window further "
+              "shrinks the")
+        print("  support rather than sharpening it. Sample that stretch more "
+              "densely")
+        print("  (--every 1) before believing the magnitude.")
     epochs = describe_epochs(steps, list(dates), counts=coverage_counts(slug))
     print(f"\n{len(epochs)} epochs:")
     for index, epoch in enumerate(epochs, 1):
