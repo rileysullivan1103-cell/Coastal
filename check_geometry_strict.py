@@ -877,6 +877,17 @@ def main():
 
     geo.require_imaging()
 
+    # THE CHEAP HALF OF THE INVENTORY COMES BEFORE THE DOWNLOAD. Per-day
+    # availability is one request against the service inventory and needs no
+    # imagery at all, so asking for it should not first cost a daily pull of
+    # the whole record. Reported first, it also says whether a daily sample is
+    # even meaningful before the frames are fetched.
+    if args.inventory and not args.cached:
+        import pull_rip_detection as rip
+        asset = rip.find_camera(rip.load_assets(), args.camera)
+        service, _ = rip.find_stills_service(asset)
+        availability(service)
+
     # ---- frames -----------------------------------------------------------
     if args.cached:
         slug, paths, dates = geo.cached_frames(args.camera)
@@ -902,12 +913,11 @@ def main():
             print(f"    {run[0]:%Y-%m-%d} to {run[-1]:%Y-%m-%d}  {len(run)} days")
 
     if args.inventory:
-        if not args.cached:
-            import pull_rip_detection as rip
-            asset = rip.find_camera(rip.load_assets(), args.camera)
-            service, _ = rip.find_stills_service(asset)
-            availability(service)
         print("\nInventory only. Nothing registered.")
+        print("Frame sizes above cover the SAMPLED frames. A size change "
+              "shorter than the\nsampling interval can still hide; at Walton "
+              "the change lasted five days and\nweekly sampling missed it, "
+              "which is why the default here is daily.")
         return
 
     # Registration happens INSIDE one frame size. Across a size change there is
