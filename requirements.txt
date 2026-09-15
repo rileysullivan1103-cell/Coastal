@@ -5,3 +5,9 @@ pywebcoos @ git+https://github.com/WebCOOS/py-webcoos-client.git
 ndbc-api
 pandas
 requests
+
+# check_camera_geometry.py only. Pillow reads the sampled stills; matplotlib
+# draws the offset plot and the script degrades to CSV plus a text report
+# without it, so neither is needed to run the pipeline.
+Pillow
+matplotlib
