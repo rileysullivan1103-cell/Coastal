@@ -53,6 +53,11 @@ HOURLY_VARS = [
     "wind_direction_10m",
     "wind_gusts_10m",
     "temperature_2m",
+    # Kept in step with ERA5_VARS in pull_site_observations.py, which is the
+    # puller that actually writes gridded_*.csv for the camera sites. Two
+    # lists naming different variables would give two sites different columns
+    # and make a cross-site comparison quietly incomparable.
+    "cloud_cover",
 ]
 
 # True hourly windows now, not calendar days.

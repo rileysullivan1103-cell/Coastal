@@ -46,8 +46,14 @@ OUT_DIR = "data"
 ERA5 = "https://archive-api.open-meteo.com/v1/archive"
 MARINE = "https://marine-api.open-meteo.com/v1/marine"
 
+# cloud_cover is here for the glare question: at Virginia Beach air
+# temperature is the second strongest thing in the rip table and negative,
+# which has no story as a driver of rips and an obvious one as a driver of the
+# DETECTOR -- warm hours are clear, high-sun, hazy hours. Separating "warm" from
+# "bright" needs a brightness column, and total cloud cover is the one ERA5
+# already serves for free alongside the rest.
 ERA5_VARS = ["precipitation", "wind_speed_10m", "wind_direction_10m",
-             "wind_gusts_10m", "temperature_2m"]
+             "wind_gusts_10m", "temperature_2m", "cloud_cover"]
 MARINE_VARS = ["wave_height", "wave_direction", "wave_period",
                "wind_wave_height", "wind_wave_period",
                "swell_wave_height", "swell_wave_direction", "swell_wave_period"]
