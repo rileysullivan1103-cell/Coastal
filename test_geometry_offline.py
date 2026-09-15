@@ -118,6 +118,63 @@ def test_features_are_chosen_on_land():
         shutil.rmtree(tmp)
 
 
+def beach_scene(width=512, height=384, seed=0):
+    """The shape that broke the first auto-picker: sky on top, then land.
+
+    A beach camera looks out, so the top of the frame is sky -- bright, almost
+    gradient-free, and the stillest thing in the record. The first version
+    scored structure DIVIDED BY temporal spread, which made stillness pay, and
+    it put three of four patches at y=0. Nothing up there is correlatable.
+    """
+    rng = np.random.default_rng(seed)
+    image = np.zeros((height, width))
+    sky = int(height * 0.28)
+    image[:sky, :] = 205 + rng.normal(0, 0.4, (sky, width))   # still, featureless
+    image[sky:, :] = 70 + rng.normal(0, 3, (height - sky, width))
+    # A lighthouse and a roofline, below the sky and above the waterline.
+    image[sky + 10: sky + 90, 120:150] = 225
+    image[sky + 2: sky + 12, 112:158] = 245
+    image[sky + 50: sky + 70, 300:430] = 215
+    image[sky + 40: sky + 50, 330:400] = 180
+    return image
+
+
+def test_the_picker_avoids_sky():
+    print("\nfeature proposal on a sky-topped frame")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene()
+        sky = int(384 * 0.28)
+        paths = []
+        for index in range(12):
+            frame = water(base, seed=index)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        rois = g.propose_rois(paths, size=64, count=3, land_fraction=0.6)
+        check("it proposes features", len(rois) == 3, len(rois))
+        # A patch whose whole body is above the horizon is the failure mode.
+        in_sky = [r for r in rois if r["y"] + r["h"] <= sky]
+        check("no patch lies entirely in the sky", not in_sky,
+              [(r["name"], r["y"]) for r in rois])
+        check("none is flush against the top edge",
+              not [r for r in rois if r["y"] == 0],
+              [(r["name"], r["y"]) for r in rois])
+
+        # And the patches it does pick must actually be correlatable: a known
+        # shift has to come back out of each one.
+        moved = shifted(base, -4, 6)
+        for roi in rois:
+            got = g.phase_shift(g.crop(base, roi), g.crop(moved, roi))
+            check(f"{roi['name']} recovers a planted shift",
+                  got is not None and abs(got[0] + 4) < 1.0
+                  and abs(got[1] - 6) < 1.0, got)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_roi_preview_is_written():
     print("\nthe ROI preview image")
     tmp = tempfile.mkdtemp()
@@ -242,6 +299,7 @@ def test_epochs_count_stills_not_just_samples():
 def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
+                 test_the_picker_avoids_sky,
                  test_roi_preview_is_written,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,

@@ -268,8 +268,21 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
 
     Sharp in space so there is something to correlate: a patch of flat sky
     aligns equally well everywhere and returns noise. Still in time so the
-    patch is structure rather than weather: the score divides spatial gradient
-    by temporal spread, which prefers a roofline over a wave crest.
+    patch is structure rather than weather.
+
+    Two things the first version got wrong, both visible in its first real
+    run at Walton, which put three of four patches at y=0 -- the sky.
+
+      * It scored per PIXEL. The argmax of a pixel-wise gradient is a single
+        bright speck, and a patch centred on one has nothing else in it to
+        align. Both terms are now averaged over the patch footprint, so the
+        question is "does this 128 px box contain structure", not "is there
+        one sharp pixel here".
+      * It scored structure DIVIDED BY spread. A ratio rewards being still as
+        much as being sharp, and nothing is stiller than sky: a featureless
+        patch with a spread near zero beat a roofline whose shadows move.
+        Stability is now a constraint -- reject the patches that move most --
+        and sharpness alone is the objective among those that pass.
     """
     chosen_paths = paths[:: max(1, len(paths) // sample)][:sample]
     stack = [g for g in (load_gray(p, downsample=2) for p in chosen_paths)
@@ -284,14 +297,28 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
     gy, gx = np.gradient(median)
     structure = np.hypot(gy, gx)
 
+    # Average both over the patch footprint. `size` is in full-resolution
+    # pixels and the stack is at downsample 2, so the window is size // 2.
+    from scipy.ndimage import uniform_filter
+    window = max(3, size // 2)
+    patch_structure = uniform_filter(structure, window)
+    patch_spread = uniform_filter(spread, window)
+
     half = size // 4  # working at downsample=2
-    score = structure / (1.0 + spread)
-    score[: half, :] = 0
-    score[-half:, :] = 0
-    score[:, : half] = 0
-    score[:, -half:] = 0
+    usable = np.zeros(shape, dtype=bool)
+    usable[half: shape[0] - half, half: shape[1] - half] = True
     # Land only. Everything below the line is beach and water, which move.
-    score[int(shape[0] * land_fraction):, :] = 0
+    usable[int(shape[0] * land_fraction):, :] = False
+    if not usable.any():
+        return []
+
+    # Stability as a constraint: keep the calmer half of the candidates, then
+    # maximise sharpness among them. Sky passes the stability test and then
+    # loses on sharpness, which is the behaviour that was missing.
+    calm = patch_spread <= np.percentile(patch_spread[usable], 50)
+    score = np.where(usable & calm, patch_structure, 0.0)
+    if not score.any():
+        score = np.where(usable, patch_structure, 0.0)
 
     rois = []
     working = score.copy()
@@ -667,12 +694,31 @@ def main():
           f"{signal['offset'].median():.2f} px")
     print(f"largest single-date offset:      {signal['offset'].max():.2f} px "
           f"on {signal['offset'].idxmax():%Y-%m-%d}")
-    print(f"typical disagreement between features: "
-          f"{signal['spread'].median():.2f} px")
+    disagreement = float(signal["spread"].median())
+    print(f"typical disagreement between features: {disagreement:.2f} px")
+
+    # The whole method rests on the patches tracking one rigid scene. When
+    # they disagree by more than the size of the step being looked for, they
+    # are not measuring a common thing and NEITHER answer below is worth
+    # anything -- not the steps, and not their absence. The first Walton run
+    # reported a 0.02 px median offset with 16.6 px of disagreement and then
+    # called the record stable, which it had no basis for.
+    trustworthy = disagreement <= args.step_px
+    if not trustworthy:
+        print("\n" + "!" * 74)
+        print(f"FEATURES DO NOT AGREE ({disagreement:.1f} px apart, against a "
+              f"{args.step_px:.0f} px step threshold).")
+        print("They are not tracking one rigid scene, so the verdict below is")
+        print("not evidence either way. Open the ROI preview: a patch on sky,")
+        print("water or a moored boat produces exactly this. Fix the patches")
+        print("with --roi and run again.")
+        print("!" * 74)
 
     if not steps:
-        print(f"\nNo step larger than {args.step_px} px persists. The record "
-              "reads as ONE geometric epoch.")
+        verdict = ("The record reads as ONE geometric epoch."
+                   if trustworthy else
+                   "No epoch split can be claimed — see the warning above.")
+        print(f"\nNo step larger than {args.step_px} px persists. {verdict}")
         print("That is evidence of stability, not proof: a move smaller than")
         print("the step threshold, or one inside a gap in the sampling, would")
         print("not appear. Re-run with --every 3 and a lower --step-px before")
