@@ -199,7 +199,7 @@ def _cache_path(name):
 _FAILED_THIS_RUN = {}
 
 
-def _cached_json(name, builder, expects=()):
+def _cached_json(name, builder, expects=(), refresh=False):
     """Read the cached payload, or build and cache it.
 
     `expects` names the keys this caller is about to read. A cache file
@@ -208,9 +208,16 @@ def _cached_json(name, builder, expects=()):
     rather than served. Without this, adding a fetch to a builder is silent:
     the new covariates read `None` from the old payload, nothing raises, and
     the coverage table shows an empty layer with no reason recorded.
+
+    `refresh` fetches even when the cache would answer. A PROBE is a question
+    about the service, not about the covariate, so serving it from disk
+    answers the wrong question in silence: --probe on a cached ECHO tile
+    printed no QueryID, no row count and no column list, because
+    fetch_outfalls never ran. Every diagnostic a probe exists to print lives
+    inside the builder.
     """
     path = _cache_path(name)
-    if os.path.exists(path):
+    if os.path.exists(path) and not refresh:
         with open(path) as handle:
             payload = json.load(handle)
         missing = [key for key in expects
@@ -747,12 +754,22 @@ def fetch_outfalls(lat, lon, km=OUTFALL_SEARCH_KM, probe=False):
         "p_c1lon": f"{west:.5f}", "p_c1lat": f"{north:.5f}",
         "p_c2lon": f"{east:.5f}", "p_c2lat": f"{south:.5f}",
     }
+    if probe:
+        # The box is the first thing to doubt when a live service answers
+        # with nothing. ECHO names its corners c1/c2 rather than
+        # north/south, so print what was actually sent and let it be read
+        # against the station rather than inferred from the parameter names.
+        print(f"  ECHO box: c1 ({params['p_c1lat']}, {params['p_c1lon']}) "
+              f"to c2 ({params['p_c2lat']}, {params['p_c2lon']})")
+        print(f"  station sits at ({lat:.5f}, {lon:.5f}) — inside that box: "
+              f"{south <= lat <= north and west <= lon <= east}")
     payload = _get(ECHO_FACILITIES, params=params, probe=probe).json()
     results = payload.get("Results") or {}
     qid = results.get("QueryID")
     rows = results.get("QueryRows")
     if probe:
         print(f"  ECHO QueryID {qid}, rows {rows}")
+        print(f"  ECHO Results keys: {sorted(results)}")
         error = results.get("Error") or payload.get("Error")
         if error:
             print(f"  ECHO error: {error}")
@@ -861,7 +878,8 @@ def for_site(site, record=None, probe=False, want=None):
                 return {"lines": lines, "vintage": vintage}
 
             payload = _cached_json(f"coastline_{_tile_slug(lat, lon)}",
-                                   build, expects=("lines", "vintage"))
+                                   build, expects=("lines", "vintage"),
+                                   refresh=probe)
             values = coastline_covariates(lat, lon, payload["lines"],
                                           payload.get("vintage"))
             out.update(values)
@@ -902,7 +920,8 @@ def for_site(site, record=None, probe=False, want=None):
             payload = _cached_json(
                 f"nhd_{_slug(station)}", build,
                 expects=("comid", "flowlines", "flowline_note",
-                         "streamcat", "streamcat_note"))
+                         "streamcat", "streamcat_note"),
+                refresh=probe)
             lines = []
             cached = _cache_path(f"coastline_{_tile_slug(lat, lon)}")
             if os.path.exists(cached):
@@ -940,7 +959,7 @@ def for_site(site, record=None, probe=False, want=None):
             payload = _cached_json(
                 f"echo_{_tile_slug(lat, lon)}",
                 lambda: {"records": fetch_outfalls(lat, lon, probe=probe)},
-                expects=("records",))
+                expects=("records",), refresh=probe)
             records = payload.get("records") or []
             values = outfall_covariates(lat, lon, records)
             out.update(values)
