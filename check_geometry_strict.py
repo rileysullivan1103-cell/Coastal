@@ -949,6 +949,31 @@ def main():
                     "drop": [parse_polygon(p) for p in (args.mask_drop or [])],
                     "note": "passed on the command line for this run only"}
     spec = mask_spec(slug, override)
+
+    # THE PREVIEW IS THE TOOL FOR NOT HAVING A MASK YET, so it has to work
+    # before one exists. Exiting here with "declare a mask first" would send
+    # you to find a frame, open it, and guess at fractions by eye -- which is
+    # the step this is supposed to replace.
+    if args.mask_preview and spec is None:
+        sample = geo.load_gray(paths[len(paths) // 2])
+        if sample is None:
+            sys.exit("the middle frame is not a readable image")
+        out = os.path.join(OUT_DIR, f"grid_{slug}.jpg")
+        draw_grid_preview(paths[len(paths) // 2], out)
+        print(f"\nNo mask is declared for {slug!r} yet.\nwrote {out}")
+        print("\nThe grid is in FRACTIONS of the frame, which is what MASKS "
+              "takes. Read the\nland region off it and add an entry:\n")
+        print(f'    "{slug}": {{')
+        print('        "keep": [[(0.0, 0.60), (1.0, 0.56), (1.0, 1.0), '
+              '(0.0, 1.0)]],')
+        print('        "drop": [],')
+        print(f'        "note": "drawn by hand from '
+              f'{os.path.basename(paths[len(paths) // 2])}",')
+        print("    },")
+        print("\nOr try one without committing to it:")
+        print('    --mask-poly "0,0.60 1,0.56 1,1 0,1" --mask-preview')
+        return
+
     if spec is None:
         sys.exit(
             f"\nNo land mask is declared for {slug!r}, and registration will "
@@ -1250,6 +1275,36 @@ def write_series(slug, homography, phase):
         print("\nwrote:")
         for path in written:
             print(f"  {path}")
+
+
+def draw_grid_preview(path, out_path, step=0.05, label_every=2):
+    """The frame with a labelled grid in FRACTIONAL coordinates.
+
+    Fractions rather than pixels because that is what MASKS stores, and
+    because a mask read off a preview in pixels silently becomes wrong the
+    moment the camera's resolution changes.
+    """
+    from PIL import Image, ImageDraw
+    with Image.open(path) as img:
+        rgb = img.convert("RGB").copy()
+    draw = ImageDraw.Draw(rgb)
+    width, height = rgb.size
+    count = int(round(1.0 / step))
+    for index in range(count + 1):
+        fraction = index * step
+        x, y = int(fraction * (width - 1)), int(fraction * (height - 1))
+        heavy = index % label_every == 0
+        colour = (255, 200, 0) if heavy else (120, 120, 120)
+        draw.line([(x, 0), (x, height)], fill=colour, width=2 if heavy else 1)
+        draw.line([(0, y), (width, y)], fill=colour, width=2 if heavy else 1)
+        if heavy:
+            for spot, text in (((x + 3, 3), f"{fraction:.2f}"),
+                               ((3, y + 3), f"{fraction:.2f}")):
+                draw.text(spot, text, fill=(0, 0, 0))
+                draw.text((spot[0] - 1, spot[1] - 1), text, fill=(255, 255, 0))
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    rgb.save(out_path, quality=90)
+    return out_path
 
 
 def draw_mask_preview(path, mask, out_path):
