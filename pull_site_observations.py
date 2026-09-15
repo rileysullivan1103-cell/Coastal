@@ -128,7 +128,7 @@ def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
 
 
 def fetch_marine(lat, lon, start, end, probe=False, models=None,
-                 return_cell=False):
+                 return_cell=False, variables=None):
     """Marine reanalysis, nudging seaward if the exact point is a land cell.
 
     With return_cell, also returns the coordinate that actually answered. That
@@ -136,7 +136,15 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
     bearing to it is a free estimate of which way the beach faces -- which is
     what wq/covariates.py uses when nothing better is available. The default
     keeps the original two-value shape, so existing callers are unaffected.
+
+    `variables` narrows what is asked for. Open-Meteo's free tier is metered
+    by variables x days, not by requests, so a caller that keeps two of the
+    eight columns pays four times what it needs to. The default is still the
+    full list, because analyze_drivers.py uses the swell and wind-wave
+    columns; wq/covariates.py, which keeps only height and period, asks for
+    less and buys four times as many cells out of the same quota.
     """
+    variables = list(variables or MARINE_VARS)
     def done(frame, note, cell=None):
         return (frame, note, cell) if return_cell else (frame, note)
 
@@ -151,7 +159,7 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
         for dlat, dlon in bearings:
             try_lat, try_lon = lat + dlat * nudge, lon + dlon * nudge
             frame, note = open_meteo(MARINE, try_lat, try_lon, start, end,
-                                     MARINE_VARS, probe=probe and nudge == 0,
+                                     variables, probe=probe and nudge == 0,
                                      models=models)
             if frame is not None:
                 answered = True

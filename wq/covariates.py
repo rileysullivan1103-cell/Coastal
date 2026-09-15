@@ -38,6 +38,7 @@ from that is not "guess better", it is "carry where the number came from".
 import math
 import os
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
@@ -60,6 +61,17 @@ REGION_SHORE_NORMAL = {
 ERA5_COLUMNS = ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm",
                 "temperature_2m", "wind_speed_10m", "wind_direction_10m"]
 MARINE_COLUMNS = ["wave_height", "wave_period"]
+
+# What this pipeline ASKS Open-Meteo for, as opposed to what the rip pipeline
+# in analyze_drivers.py asks for out of the same fetchers. The free tier is
+# metered by variables x days rather than by requests, so every column fetched
+# and then thrown away is quota that buys no covariate: the wave model was
+# being asked for eight columns to keep two, at four times the necessary
+# price, and ERA5 for a gust column nothing here reads. Narrowing these two
+# lists is the cheapest way to make a Northeast-scale refetch fit.
+ERA5_VARS = ["precipitation", "wind_speed_10m", "wind_direction_10m",
+             "temperature_2m"]
+MARINE_VARS = ["wave_height", "wave_period"]
 
 
 def cell_key(lat, lon, size=None):
@@ -120,6 +132,32 @@ _TRIPPED = {}
 # Reasons a site went without a covariate, collected while that site is being
 # built and written into its row of the per-site source table.
 _MISSING = []
+
+
+# Open-Meteo's free tier has three ceilings -- roughly 600 units a minute,
+# 5,000 an hour and 10,000 a day -- and a unit is variables x days, not a
+# request. One cell over this project's window is worth something like a
+# hundred units, so an unpaced loop spends the MINUTE budget in about five
+# cells and then reads the 429 as a refusal: that is how the Northeast run
+# lost ERA5 at site 183 with its daily budget still largely unspent. Spacing
+# the calls costs an hour of waiting and buys the whole region.
+OPEN_METEO_MIN_INTERVAL = {
+    "archive-api.open-meteo.com": 15.0,
+    "marine-api.open-meteo.com": 15.0,
+}
+_LAST_CALL = {}
+
+
+def _throttle(host):
+    """Hold a host to its minimum spacing. No-op for hosts without one."""
+    wait = OPEN_METEO_MIN_INTERVAL.get(host)
+    if wait:
+        last = _LAST_CALL.get(host)
+        if last is not None:
+            remaining = wait - (time.time() - last)
+            if remaining > 0:
+                time.sleep(remaining)
+    _LAST_CALL[host] = time.time()
 
 
 def _host_check(host):
@@ -274,7 +312,8 @@ def fetch_era5(lat, lon, start, end):
     import pull_site_observations as pso
     host = urlsplit(pso.ERA5).netloc
     _host_check(host)
-    frame, note = pso.open_meteo(pso.ERA5, lat, lon, start, end, pso.ERA5_VARS)
+    _throttle(host)
+    frame, note = pso.open_meteo(pso.ERA5, lat, lon, start, end, ERA5_VARS)
     if frame is None:
         print(f"      ERA5 failed: {note}")
         if is_refusal(note):
@@ -296,8 +335,10 @@ def fetch_marine(lat, lon, start, end):
     import pull_site_observations as pso
     host = urlsplit(pso.MARINE).netloc
     _host_check(host)
+    _throttle(host)
     frame, note, used = pso.fetch_marine(lat, lon, start, end,
-                                        return_cell=True)
+                                        return_cell=True,
+                                        variables=MARINE_VARS)
     if frame is None:
         print(f"      marine failed: {note}")
         if is_refusal(note):
