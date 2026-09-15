@@ -1111,6 +1111,17 @@ scene rows around it. Flooding inward from an edge lets the ratio be generous
 without risk — the flood stops at the first row that behaves like scene — and
 `MAX_EDGE_FLOOD` caps how far it can eat.
 
+If the automatic test does not fire — and at Walton it did not, through two
+rounds of increasingly careful detection — use the margin instead:
+
+    python check_camera_geometry.py --camera <slug> --sample --top-margin 100
+
+A camera's overlay is a fixed, known property of that camera. Stating its
+height directly beats another inference that might also miss it. Every run
+prints the row-variation profile at the top edge against the frame's typical
+row, so you can see whether the banner is quiet enough for the automatic test
+to have had a chance.
+
 ### Agreement between features is the actual test
 
 One patch moving is a sign that blew over. Every patch moving by the same

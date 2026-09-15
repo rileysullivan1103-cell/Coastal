@@ -293,7 +293,8 @@ def phase_shift(reference, image):
 
 
 def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
-                 land_fraction=LAND_FRACTION, sample=16):
+                 land_fraction=LAND_FRACTION, sample=16,
+                 top_margin=0, bottom_margin=0):
     """Pick patches that are sharp in space and still in time.
 
     Sharp in space so there is something to correlate: a patch of flat sky
@@ -334,13 +335,32 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
     patch_structure = uniform_filter(structure, window)
     patch_spread = uniform_filter(spread, window)
 
+    row_spread = np.median(spread, axis=1)
+    typical = float(np.median(row_spread))
+
     half = size // 4  # working at downsample=2
     usable = np.zeros(shape, dtype=bool)
     usable[half: shape[0] - half, half: shape[1] - half] = True
     # Land only. Everything below the line is beach and water, which move.
     usable[int(shape[0] * land_fraction):, :] = False
+    # Explicit margins, in full-resolution pixels, for when the automatic
+    # banner test does not fire. It has failed on Walton repeatedly, and a
+    # camera's overlay is a fixed, known property of that camera: being able
+    # to say "ignore the top 100 px" beats another round of inference.
+    if top_margin:
+        usable[: top_margin // 2, :] = False
+    if bottom_margin:
+        usable[-(bottom_margin // 2):, :] = False
     if not usable.any():
+        print("  the margins leave nothing searchable")
         return []
+
+    # Why the banner test did or did not fire, in numbers. Printed near the
+    # edges because that is where composited strips live.
+    edge = min(60, len(row_spread) // 4)
+    head = ", ".join(f"{v:.1f}" for v in row_spread[:edge:max(1, edge // 6)])
+    print(f"  row variation, top edge inward: {head}  "
+          f"(frame typical {typical:.1f})")
 
     # Stability as a constraint: keep the calmer half of the candidates, then
     # maximise sharpness among them. Sky passes the stability test and then
@@ -356,8 +376,6 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
     # Rows that barely change compared with the rest of the frame. A banner
     # spans the full width, so this is a per-ROW question: a scene row somewhere
     # in the frame always has weather, shadow or surf moving through it.
-    row_spread = np.median(spread, axis=1)
-    typical = float(np.median(row_spread))
     quiet = row_spread < COMPOSITED_ROW_RATIO * typical
     limit = int(len(row_spread) * MAX_EDGE_FLOOD)
     composited = np.zeros(len(row_spread), dtype=bool)
@@ -719,6 +737,12 @@ def main():
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--top-margin", type=int, default=0,
+                    help="ignore this many pixels at the top of the frame. Use "
+                         "it for a composited banner the automatic test misses "
+                         "— Walton's is about 70 px, so --top-margin 100.")
+    ap.add_argument("--bottom-margin", type=int, default=0,
+                    help="ignore this many pixels at the bottom of the frame")
     ap.add_argument("--step-px", type=float, default=STEP_PX,
                     help=f"a shift this large counts as a step (default {STEP_PX})")
     args = ap.parse_args()
@@ -752,7 +776,9 @@ def main():
     if not rois:
         print("\nchoosing static features (sharp in space, still in time, "
               f"top {args.land_fraction:.0%} of frame)")
-        rois = propose_rois(paths, land_fraction=args.land_fraction)
+        rois = propose_rois(paths, land_fraction=args.land_fraction,
+                            top_margin=args.top_margin,
+                            bottom_margin=args.bottom_margin)
         if not rois:
             sys.exit("could not choose features; pass --roi name:x,y,w,h")
     for roi in rois:

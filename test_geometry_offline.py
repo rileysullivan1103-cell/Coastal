@@ -340,6 +340,51 @@ def test_a_banner_with_a_live_timestamp_is_still_rejected():
         shutil.rmtree(tmp)
 
 
+def test_explicit_margins_exclude_the_banner():
+    """The escape hatch for when the automatic test does not fire.
+
+    It did not fire on Walton: three of four patches stayed on the banner
+    through two rounds of increasingly clever detection. A camera's overlay is
+    a fixed, known property of that camera, so being able to say "ignore the
+    top 100 px" is worth more than another inference that might also miss.
+    """
+    print("\nexplicit top and bottom margins")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene(width=640, height=480)
+        rng = np.random.default_rng(23)
+        paths = []
+        for index in range(12):
+            frame = water(base, seed=index)
+            # A banner that defeats every automatic test: it varies as much as
+            # the scene does, because it is translucent.
+            frame[:40, :] = frame[:40, :] * 0.4 + rng.normal(120, 8, (40, 640))
+            for start in range(8, 620, 20):
+                frame[12:30, start:start + 11] = 245 + rng.normal(0, 4)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        # No claim about what the picker does WITHOUT the margin: whether a
+        # given banner attracts patches depends on the scene, and the point of
+        # the flag is that it does not have to be argued about.
+        tight = g.propose_rois(paths, size=64, count=3, land_fraction=0.6,
+                               top_margin=80)
+        check("with --top-margin none of them start inside it",
+              all(r["y"] >= 40 for r in tight), [r["y"] for r in tight])
+        check("and the patches are still usable",
+              all(r["spread"] > 0 for r in tight), tight)
+
+        # A margin that eats the whole searchable region says so rather than
+        # returning patches from nowhere.
+        check("an impossible margin returns nothing, loudly",
+              g.propose_rois(paths, size=64, count=3, land_fraction=0.6,
+                             top_margin=900) == [])
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_roi_preview_is_written():
     print("\nthe ROI preview image")
     tmp = tempfile.mkdtemp()
@@ -468,6 +513,7 @@ def main():
                  test_patches_are_spread_vertically,
                  test_the_picker_rejects_a_burned_in_overlay,
                  test_a_banner_with_a_live_timestamp_is_still_rejected,
+                 test_explicit_margins_exclude_the_banner,
                  test_roi_preview_is_written,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
