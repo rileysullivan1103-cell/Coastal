@@ -176,7 +176,7 @@ def test_rip_recovers_planted_driver():
         a.DATA_DIR, a.SITES_CSV = tmp, f"{tmp}/sites.csv"
         a.SHORE_NORMAL_DEG["Test Beach"] = 180.0
         sites = a.load_sites()
-        frame, name = a.assemble_rip(sites)
+        frame, name, _covered = a.assemble_rip(sites)
         check("the fixture site is resolved", name == "Test Beach", name)
         check("conditions joined onto the rip hours",
               "WVHT" in frame.columns and "temperature_2m" in frame.columns,
@@ -381,6 +381,70 @@ def test_coverage_creates_observed_zeros():
         shutil.rmtree(tmp)
 
 
+def test_conditions_reach_the_observed_zeros():
+    """The n=730 bug: coverage applied AFTER the condition join.
+
+    The rip table holds only the hours the detector fired. If the weather,
+    waves and tide are joined onto that table and the observed zeros are
+    added afterwards, every zero hour carries NaN for every predictor, drops
+    out of each correlation pairwise, and every rho is computed on
+    detection-hours only -- which is conditioning on the outcome.
+
+    It showed as a header saying "1,924 hours analysed" above a table where
+    every row said n=730, and nothing failed. The isolated apply_coverage
+    test above passed throughout, because it never asked whether the
+    conditions had reached the hours coverage created.
+    """
+    print("\nconditions must reach the observed zeros, not just the detections")
+    tmp = tempfile.mkdtemp()
+    old_data, old_sites = a.DATA_DIR, a.SITES_CSV
+    try:
+        write_rip_fixture(tmp)
+        a.DATA_DIR, a.SITES_CSV = tmp, f"{tmp}/sites.csv"
+        a.SHORE_NORMAL_DEG["Test Beach"] = 180.0
+
+        # The real feed publishes an element only when the detector fires, so
+        # the rip table holds ONLY those hours. The fixture writes a row per
+        # hour, so it is thinned here to match the shape the bug lived in.
+        every_hour = pd.read_csv(f"{tmp}/rip_test-beach_hourly.csv")
+        every_hour["hour"] = a.to_hour(every_hour["hour"])
+        detections = every_hour[every_hour["frames_with_detection"] > 0].copy()
+        detections.to_csv(f"{tmp}/rip_test-beach_hourly.csv", index=False)
+
+        # The camera LOOKED during every daylight hour, so coverage spans all
+        # of them and the hours with no detection are observed zeros.
+        looked = every_hour["hour"]
+        pd.DataFrame({"hour": looked, "images": 60}).to_csv(
+            f"{tmp}/coverage_test-beach_hourly.csv", index=False)
+
+        frame, name, covered = a.assemble_rip(a.load_sites())
+        check("coverage was applied", covered)
+        check("every hour the camera looked is analysed",
+              len(frame) == len(looked), f"{len(frame)} vs {len(looked)}")
+        check("and that is MORE than the hours with a detection",
+              len(frame) > len(detections), f"{len(frame)} vs {len(detections)}")
+
+        zeros = frame[frame["frames_with_detection"] == 0]
+        check("there are observed zeros to test", len(zeros) > 0, len(zeros))
+        for column in ("temperature_2m", "rain_24h_mm", "WVHT", "level_m"):
+            if column not in frame.columns:
+                continue
+            populated = pd.to_numeric(zeros[column], errors="coerce").notna().mean()
+            check(f"{column} reaches the zero hours", populated > 0.95,
+                  f"only {populated:.0%} populated — the join ran before the "
+                  "zeros existed")
+
+        table = a.report_correlations(frame, "detection_rate", a.RIP_PREDICTORS,
+                                      control=frame["hour_of_day"])
+        n_used = int(table["n"].max())
+        check("the reported n is the analysed hours, not the detections",
+              n_used == len(frame), f"n={n_used}, analysed={len(frame)}, "
+              f"detections={len(detections)}")
+    finally:
+        a.DATA_DIR, a.SITES_CSV = old_data, old_sites
+        shutil.rmtree(tmp)
+
+
 def test_between_site_effect_is_caught():
     print("\nwithin-site control on a purely between-site effect")
     # Two beaches. One is dirtier AND sits at a gauge with higher water level.
@@ -465,7 +529,7 @@ def test_thin_join_is_flagged():
                        "has_all_four": True}]).to_csv(f"{tmp}/sites.csv", index=False)
 
         a.DATA_DIR, a.SITES_CSV = tmp, f"{tmp}/sites.csv"
-        frame, name = a.assemble_rip(a.load_sites())
+        frame, name, _covered = a.assemble_rip(a.load_sites())
         check("the frame is still returned", frame is not None)
         overlap = frame["wind_speed_10m"].notna().sum()
         check("almost nothing joined", overlap == 0, overlap)
@@ -858,7 +922,7 @@ def test_the_published_shore_normal_beats_the_one_read_off_a_map():
         a.SHORE_NORMAL_DEG["Test Beach"] = 180.0
         a.MOP_META.clear()
         sites = a.load_sites()
-        frame, _ = a.assemble_rip(sites)
+        frame, _name, _covered = a.assemble_rip(sites)
         check("the MOP waves joined onto the rip hours",
               "mop_wave_height" in frame.columns)
         onshore = frame["mop_wave_onshore_peak"].dropna()
@@ -914,6 +978,7 @@ if __name__ == "__main__":
     test_between_site_effect_is_caught()
     test_focus_tide_reports_per_site()
     test_coverage_creates_observed_zeros()
+    test_conditions_reach_the_observed_zeros()
     test_regression_drops_identical_columns()
     test_regression_withholds_when_singular()
     test_degenerate_target_is_named()

@@ -89,7 +89,8 @@ USER_AGENT = ("coastal-wq/1.0 (research pipeline; "
               "https://github.com/rileysullivan1103-cell/Coastal)")
 
 
-def _get(url, params=None, timeout=120, method="GET", data=None, probe=False):
+def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
+         **_ignored):
     """One request, with the failure body attached to the error.
 
     A bare "HTTP 406" is not diagnosable -- it was 406 from Overpass that hid
@@ -159,18 +160,29 @@ def fetch_coastline(lat, lon, km=COASTLINE_BBOX_KM, probe=False):
     if probe:
         print(f"  overpass query: {query}")
 
+    # Two request shapes, because they fail differently: a mirror that
+    # rejects the form-encoded POST often serves the same query as a GET
+    # query-string, and the reverse happens on instances behind a proxy that
+    # strips bodies. Trying both turns "HTTP 406" from a dead end into a
+    # statement about which shape this instance wants.
     failures = []
     payload = None
     for mirror in OVERPASS_MIRRORS:
-        try:
-            response = _get(mirror, method="POST", data={"data": query},
-                            probe=probe)
-            payload = response.json()
+        for method, kwargs in (("POST", {"data": {"data": query}}),
+                               ("GET", {"params": {"data": query}})):
+            try:
+                response = _get(mirror, method=method, probe=probe, **kwargs)
+                payload = response.json()
+                break
+            except LayerFailed as exc:
+                failures.append(f"{method} {exc}")
+                if probe:
+                    print(f"    {method} failed: {exc}")
+            except ValueError as exc:
+                failures.append(f"{method} {mirror.split('/')[2]}: "
+                                f"not JSON ({exc})")
+        if payload is not None:
             break
-        except LayerFailed as exc:
-            failures.append(str(exc))
-            if probe:
-                print(f"    mirror failed: {exc}")
     if payload is None:
         raise LayerFailed(" | ".join(failures))
 

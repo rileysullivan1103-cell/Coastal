@@ -609,7 +609,7 @@ def assemble_rip(sites, want=None):
     paths = sorted(glob.glob(f"{DATA_DIR}/**/rip_*_hourly.csv", recursive=True))
     if not paths:
         print("No data/rip_*_hourly.csv — run pull_rip_detection.py --pull first.")
-        return None, None
+        return None, None, False
 
     stems = [os.path.basename(p)[len("rip_"):-len("_hourly.csv")] for p in paths]
     if want:
@@ -619,7 +619,7 @@ def assemble_rip(sites, want=None):
             print(f"No rip table matching {want!r}. Available:")
             for stem in stems:
                 print(f"  {stem}")
-            return None, None
+            return None, None, False
         path, stem = hits[0]
     else:
         # Taking paths[0] silently analysed whichever site sorted first and
@@ -641,7 +641,7 @@ def assemble_rip(sites, want=None):
         print("  Sites known here:")
         for _, s in sites.iterrows():
             print(f"    {rip_slug(s['camera_name'])}")
-        return None, None
+        return None, None, False
     site = match[0]
     name = site["camera_name"]
     # Several cameras can share one weather pull; see _ripaid_rows.
@@ -652,6 +652,16 @@ def assemble_rip(sites, want=None):
         print(f"  conditions come from the site pull for {weather!r}")
     print(f"  {len(frame)} hours of rip output, "
           f"{frame['hour'].min()} to {frame['hour'].max()}")
+
+    # Coverage FIRST, then the conditions. The other order is a bug that
+    # reported n=730 under a header saying 1,924 hours were analysed: the
+    # rip table holds only the hours the detector fired, so joining weather
+    # onto it and adding the observed zeros afterwards leaves every zero hour
+    # with NaN for every predictor. They then drop out of each correlation
+    # pairwise, and every rho is computed on detection-hours only -- which is
+    # conditioning on the outcome. The zeros are the whole reason --coverage
+    # exists; they have to be present before anything is joined to them.
+    frame, has_coverage = apply_coverage(frame, stem)
 
     merged = frame.set_index("hour")
     thin = []
@@ -748,7 +758,7 @@ def assemble_rip(sites, want=None):
 
     merged = merged.reset_index()
     merged["hour_of_day"] = merged["hour"].dt.hour
-    return merged, name
+    return merged, name, has_coverage
 
 
 def axial_offset(angles, normal):
@@ -797,6 +807,8 @@ def apply_coverage(frame, stem):
     zeros = int((merged["frames_with_detection"] == 0).sum())
     print(f"  coverage: {len(merged)} hours with imagery "
           f"({before} had detections, {zeros} are observed zeros)")
+    print("    conditions are joined to all of these, not just the "
+          f"{before} with a detection")
     return merged, True
 
 
@@ -816,10 +828,9 @@ PRESENCE_TARGETS = ("detection_rate", "detections", "doubt_rate")
 
 
 def analyze_rip(sites, want=None, positives_only=False):
-    frame, name = assemble_rip(sites, want=want)
+    frame, name, has_coverage = assemble_rip(sites, want=want)
     if frame is None:
         return
-    frame, has_coverage = apply_coverage(frame, rip_slug(name))
     observed = (frame.copy() if has_coverage
                 else frame[frame.get("frames", 0) > 0].copy())
 
@@ -839,6 +850,26 @@ def analyze_rip(sites, want=None, positives_only=False):
         print("  rip somebody drew a box around track the conditions?")
 
     print(f"\n{len(observed)} hours analysed")
+
+    # B5, the same assertion the wq module makes: the n a correlation will
+    # report has to be reconcilable with the row count printed above it. A
+    # predictor populated on far fewer rows than were analysed is not a
+    # detail -- it is the difference between a correlation over the whole
+    # record and one over a self-selected slice of it.
+    joinable = {}
+    for predictor in RIP_PREDICTORS:
+        if predictor in observed.columns:
+            joinable[predictor] = int(
+                pd.to_numeric(observed[predictor], errors="coerce").notna().sum())
+    if joinable:
+        best = max(joinable.values())
+        print(f"  predictors populated on {min(joinable.values())}-{best} of "
+              f"those hours")
+        if has_coverage and best < len(observed) * 0.9:
+            thin = sorted(k for k, v in joinable.items() if v < len(observed) * 0.9)
+            print(f"  NOTE: no predictor reaches 90% of the analysed hours. "
+                  f"Thinnest: {', '.join(thin[:6])}")
+            print("  Every n below is that smaller number, not the count above.")
 
     hours = sorted(observed["hour_of_day"].unique())
     print(f"  frames occur in hours {hours[0]}-{hours[-1]} UTC only "
