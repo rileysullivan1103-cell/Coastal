@@ -96,11 +96,23 @@ def main():
                     if s["camera_name"] == name), None)
         if row is None or pd.isna(row.get("lat")) or pd.isna(row.get("lon")):
             continue
-        start, end = existing_window(name)
-        if args.start:
+        # With both ends given, never open the gridded file. It is the one
+        # file this script reads, and pull_site_observations.py rewrites it --
+        # to_csv is not atomic, so a concurrent run can be caught mid-write.
+        # A parse error would at least be loud; the quiet failure is a file
+        # that parses while truncated, which yields a SHORTER window and a
+        # silently narrower cloud record. That is the same shape of bug that
+        # has already cost this project two analyses, so the explicit path
+        # skips the read rather than racing it.
+        if args.start and args.end:
             start = pd.Timestamp(args.start, tz="UTC")
-        if args.end:
             end = pd.Timestamp(args.end, tz="UTC")
+        else:
+            start, end = existing_window(name)
+            if args.start:
+                start = pd.Timestamp(args.start, tz="UTC")
+            if args.end:
+                end = pd.Timestamp(args.end, tz="UTC")
         if start is None or end is None:
             print(f"\n{name}: no gridded file to take a window from; "
                   "pass --start and --end, or run pull_site_observations.py")
