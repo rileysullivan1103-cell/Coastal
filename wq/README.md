@@ -389,10 +389,16 @@ two fields it reads were populated on **0 of 113** records, which is absent
 rather than blank: `get_qid` returns 24 fields and neither is one of them.
 Both are published by ECHO's `.metadata` among 260 columns, each with a
 numeric `ColumnID`, so the CSV download carries them when asked by number and
-they join back on `SourceID`. What made this findable was widening the probe
-to dump the *whole* record: it had been printing the first twenty keys, and a
-truncated record cannot distinguish a field the service does not publish from
-a field nobody looked at.
+they join back on `SourceID`. That worked: `outfall_type` populates at 120/120
+with 3 distinct values, which also settles by experiment what the column list
+only implied — `qcolumns` parses ColumnIDs, not ObjectNames.
+
+What made this findable was widening the probe to dump the *whole* record: it
+had been printing the first twenty keys, and a truncated record cannot
+distinguish a field the service does not publish from a field nobody looked
+at. Three separate ECHO failures came down to the same habit of reading only
+part of an answer — the download's default columns, the shallow cache key,
+and the truncated record.
 
 ### Recorded but never stratified on
 

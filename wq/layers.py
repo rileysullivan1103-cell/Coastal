@@ -123,7 +123,13 @@ LAYERS = {
                                   "that comes back is read rather than "
                                   "assumed, so asking for four columns and "
                                   "receiving two is visible instead of "
-                                  "silently mis-zipped.",
+                                  "silently mis-zipped. Verified 2026-09-15 "
+                                  "across the seven Rhode Island tiles: "
+                                  "outfall_type populated at 120 of 120 "
+                                  "sites, taking 3 distinct values. This "
+                                  "also confirms by experiment what the "
+                                  "column list only implied — qcolumns "
+                                  "parses ColumnIDs, not ObjectNames.",
         "vintage_source": "response carries no timestamp; accessed_at is the "
                           "only date available",
         "note": "the download needs an explicit qcolumns list — ECHO's "
