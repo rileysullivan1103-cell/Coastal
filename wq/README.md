@@ -29,7 +29,8 @@ Stage by stage, which is also the order the pre-registration requires:
 
 ```bash
 python -m wq.run_wq --stations      # coastal recreational stations, per state
-python -m wq.run_wq --neighbours    # streams and facilities, for the A2 proxies
+python -m wq.run_wq --spatial       # site covariates from the spatial layers
+python -m wq.run_wq --review        # the beach_type worklist, for a HUMAN
 python -m wq.run_wq --strata        # assign strata from METADATA ONLY
 python -m wq.run_wq --manifest      # freeze the specification, with a timestamp
 python -m wq.run_wq --results       # 10 years of samples, per (state, year)
@@ -52,6 +53,7 @@ Offline checks, no network:
 ```bash
 python wq/test_wq_offline.py           # hygiene, strata, the manifest guard
 python wq/test_wq_fit_offline.py       # the statistics, against planted answers
+python wq/test_wq_geo_offline.py       # coastline geometry, against known shapes
 python wq/test_wq_pipeline_offline.py  # the stages composed end to end
 python test_lint_offline.py            # covers wq/ too
 ```
@@ -83,27 +85,151 @@ and `impervious_frac` have no offline source wired in and are expected to be
 dropped this way. They are emitted as empty columns on purpose rather than
 quietly left out, so the drop is on the record instead of in someone's memory.
 
-## What the strata actually are
+## Site covariates, and where each one comes from
 
-| variable | source | how good |
+Everything below is derived automatically from the station's lat/lon. The
+source and the **vintage** of every layer is written into `wq_manifest.json`
+under `layers`, beside the count of stations it populated — because NLCD 2011
+and NLCD 2021 are not the same covariate, and a coefficient stratified on one
+is not a result about the other.
+
+| covariate | layer | notes |
 |---|---|---|
-| `region` | state code and coordinate boxes | solid |
-| `beach_type` | WQP site type, then station-name keywords | mixed — `beach_type_source` says which, per site |
-| `freshwater_input` | a WQP Stream/Spring station within 500 m | a proxy: detects creeks somebody monitors, misses creeks nobody does, so its **yes is stronger than its no** |
-| `outfall_present` | a WQP Facility station within 1 km, plus name keywords | same asymmetry |
-| `tidal_range_m` | CO-OPS MHHW − MLLW at the nearest gauge | solid where a gauge is within 50 km |
-| `watershed_area_km2` | nothing | dropped by the coverage rule |
-| `impervious_frac` | nothing | dropped by the coverage rule |
+| `dist_to_stream_m`, `stream_order`, `upstream_area_km2`, `n_streams_within_2km` | NHDPlus V2.1 via USGS NLDI, flowline attributes via EPA WATERS | a stream **mouth**, not a stream: only flowline endpoints landing within 300 m of the coastline count, so a creek passing 300 m inland on its way elsewhere is not counted as an input |
+| `dist_to_outfall_m`, `outfall_type`, `n_outfalls_within_2km` | EPA ECHO (CWA/NPDES) | major/minor and POTW/non-POTW where ECHO carries them |
+| `impervious_frac`, `developed_frac` | NLCD, accumulated to the upstream catchment by NLDI | the NLCD **year is read from the service catalogue**, not hardcoded, and written into the manifest |
+| `shore_normal_deg`, `curvature_1_per_km`, `embayment_ratio`, `land_fraction_5km`, `fetch_km_*` | OSM coastline via Overpass | see below |
+| `tidal_range_m`, `datum_gauge_dist_km` | NOAA CO-OPS datums | MHHW − MLLW at the nearest gauge |
 
-Nothing in `wq/strata.py` may read a sample value. It runs before the results
-are even pulled, which is the structural version of "assign these from station
-metadata, not from the results".
+Two caveats that travel with the layers in the manifest rather than living
+only here:
 
-Where a variable was never *checked* it stays `NaN` rather than becoming `no`.
-"Nothing is there" and "nothing was looked for" are different answers and only
-one of them is evidence.
+**ECHO gives the facility, not the pipe.** A treatment plant sited a
+kilometre inland of its own diffuser makes `dist_to_outfall_m` an
+overestimate, and the error is not random — big coastal plants discharge
+further offshore than small ones.
 
-`wq/strata_overrides.csv` beats every rule above, per station.
+**NLCD is accumulated over the upstream catchment of the flowline nearest the
+beach.** That is the right denominator for a creek-mouth beach and the wrong
+one for a beach whose nearest flowline drains somewhere else entirely.
+
+### The coastline covariates
+
+All five come from one Overpass request per site and one pass over the local
+linework, in a local tangent plane in metres. The whole thing rests on one
+convention: **OSM draws `natural=coastline` with land on the left of the way's
+direction**. That single fact makes land/water computable from linework alone,
+with no polygon fill and no raster — nearest segment, sign of the cross
+product.
+
+It is also the assumption most likely to be wrong in a specific place, because
+OSM ways are edited piecemeal and one reversed way inverts land and sea
+exactly where it is wrong. `coastline_sanity()` therefore checks that ways
+meeting at a shared endpoint chain head-to-**tail**; two ends or two starts
+meeting means a reversal, and **every coastline covariate at that site is
+withheld** rather than returned upside down.
+
+> An earlier version of that check probed each segment against itself and
+> agreed 100% of the time on every input, including a deliberately reversed
+> one — a segment cannot disagree with itself. It is in the test suite now
+> precisely because a check that cannot fail is worse than no check: it gets
+> read as evidence.
+
+- `shore_normal_deg` — the outward normal of a least-squares tangent fitted
+  over ±250 m, then **verified** by stepping 100 m along it and confirming
+  that point is water. Same convention as the rip pipeline's `sites.yaml`.
+- `curvature_1_per_km` — signed, from a circle through the station and points
+  ±1 km along the shore. **Negative is concave/embayed.** The sign comes from
+  which side of the coast the fitted centre falls on: in a bay the centre sits
+  in the water, on a headland it sits in the land.
+- `embayment_ratio` — straight-line over along-shore distance, ±2 km. 1.0 is
+  a straight coast. It **cannot tell a bay from a headland** — both score the
+  same — which is why curvature carries a sign and there is a test asserting
+  exactly that.
+- `land_fraction_5km` — sampled on rings whose radii go as √, so every sample
+  stands for the same area and the answer is an area fraction rather than a
+  count biased toward the middle.
+- `fetch_km_by_octant` — marches outward until it hits land. A value at the
+  25 km cap is **censored, not measured**, and carries a `fetch_capped_*`
+  companion saying so. The eight octants are recorded per site;
+  `fetch_km_min/mean/max` are what the pre-registration stratifies on, because
+  eight more groupings over the same sites is eight more chances to find a
+  flattering split.
+
+`natural=coastline` covers ocean and Gulf shorelines only — the Great Lakes
+are mapped as water polygons — so every coastline covariate is absent at a
+Great Lakes site, and the coverage rule sees that rather than the code
+pretending otherwise.
+
+## beach_type is assigned by hand. Deliberately.
+
+Enclosure is continuous. Any threshold on `land_fraction_5km` or
+`embayment_ratio` gets the obvious sites right and misclassifies exactly the
+ambiguous ones — a half-open embayment, a beach inside a breakwater, a lagoon
+mouth — and those are the sites that decide whether stratifying on beach type
+explains anything. An automatic label would put the hardest cases on whichever
+side of a cutoff nobody chose deliberately, and D2 would then be reporting the
+cutoff.
+
+So the continuous covariates **sort the work**; a person assigns the label.
+
+```bash
+python -m wq.review --worklist                    # hardest cases first
+python -m wq.review --ingest <csv> --by "name"    # provenance is required
+python -m wq.review --status
+```
+
+The worklist carries an imagery link and the ambiguity score that ordered it.
+Every ingested label records **who** assigned it and **when**; an ingest
+without `--by` is refused, and an invented label is refused. `strata.py` reads
+`beach_type` only from `beach_type_reviewed.csv` — putting one in
+`strata_overrides.csv` is an error, not a shortcut.
+
+A previous version classified `beach_type` from station-name keywords
+("Harbor" meant enclosed, "Ocean" meant open). That is a threshold dressed up
+as a rule, and it was confidently wrong on the sites that mattered. If nobody
+has done the review, `beach_type` is empty, the coverage rule drops it, and D2
+says nothing about beach type. **That is the correct outcome, not a bug.**
+
+## Freezing the covariate list, and amending it honestly
+
+The covariate list is frozen in `wq_manifest.json` before fitting and hashed
+with everything else, so adding one afterwards fails the run:
+
+```
+wq/config.py has changed since the manifest was written.
+To ADD a covariate without disturbing the registered pass:
+    python -m wq.manifest --amend <covariate> --why "..." --by "your name"
+```
+
+Amending is allowed and **labelled**, not forbidden. `--amend` appends an
+entry with its own timestamp, marks it `exploratory: true`, records who added
+it and why, and leaves the registered entry untouched. An amendment with no
+reason and no author is refused — that is indistinguishable from the thing the
+file exists to prevent. Anything fitted with an amended covariate is an
+exploratory pass and the report says so; the pre-registered result is whatever
+entry 0 says it is.
+
+### Coverage: the ~70% rule
+
+Every covariate's populated share is reported and written into the manifest,
+and anything under **70% of stations** is dropped from the pre-registered list
+rather than fitted on a biased subset. One threshold for all of them, so it
+cannot be tuned per covariate after the fact.
+
+`wq/spatial.py --all` prints the coverage table; `--manifest` applies the rule
+and records the observed share that dropped each one.
+
+### Recorded but never stratified on
+
+`STRATIFY_ON` in `config.py` is a **subset** of the covariates. Three are
+recorded and deliberately excluded as groupings: `shore_normal_deg` (a
+direction — 359° and 1° are adjacent, so a median split is meaningless; it
+feeds the wind predictors instead), `datum_gauge_dist_km` (a data-quality
+figure — grouping on it would be grouping on measurement quality), and
+`fetch_km_min`/`max` (redundant with the mean). Each additional grouping is
+another chance for a split to look explanatory by luck, and D5 already has
+enough of those to account for.
 
 ## Hygiene: the counts are the point
 
@@ -210,21 +336,25 @@ stratification, which is what decides how much a hierarchical prior can borrow.
 
 ## Known limits
 
-- **The shore normal is not known nationally.** Wind onshore/alongshore needs
-  the direction each beach faces. It is taken from an override file, then CDIP
-  MOP (California only), then the bearing to the ocean cell the wave model
-  actually answered on, then a regional default — and `shore_normal_source` is
-  carried per site so wind results computed off a guess can be separated. The
-  rip pipeline computed Santa Cruz onshore components off a 26-degree error
-  until MOP published the real normal.
+- **The shore normal now comes from the coastline**, fitted over ±250 m, which
+  is a local measurement rather than a guess. The fallback chain is still
+  recorded per site in `shore_normal_source`: manual override, then CDIP MOP
+  (California only), then the coastline tangent, then the bearing to the ocean
+  cell the wave model answered on, then a regional default. The rip pipeline
+  computed Santa Cruz onshore components off a 26-degree error until MOP
+  published the real normal, which is why the source travels.
+- **Every spatial endpoint is unverified.** Outbound access to NLDI, EPA
+  WATERS, ECHO and Overpass was blocked when this was written, so every
+  endpoint and field name in `wq/layers.py` is transcribed from documentation
+  and flagged `verified: False` in the manifest. Each fetcher has a `--probe`
+  mode that prints what actually comes back; run them once, correct anything
+  that moved, and flip the flags.
 - **Sampling is not random.** Agencies sample in swim season, on a schedule, and
   sometimes after known spills. The per-month control handles the calendar, not
   the schedule.
 - **The month control cannot separate "season caused it" from "the cause only
   varies with season"** — a predictor with little within-month variation
   collapses either way. The same limit `analyze_drivers` documents.
-- **`freshwater_input` and `outfall_present` are proximity proxies**, not
-  surveys.
 - **Sample times are mixed.** WQP carries a time and the California CKAN feed
   does not, so the national distribution mixes hourly and daily joins.
   `join_resolution` says which per sample; "the tide at 09:30" and "the mean

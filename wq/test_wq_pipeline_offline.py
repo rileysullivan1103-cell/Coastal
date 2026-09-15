@@ -166,8 +166,7 @@ def test_end_to_end():
          "site_type": "Estuary", "lat": 33.6, "lon": -117.9, "state": "CA"},
         {"station_id": "WQP-B", "station_name": "Ocean Beach",
          "site_type": "Ocean", "lat": 34.4, "lon": -119.7, "state": "CA"}]),
-        neighbours=pd.DataFrame(), datums=pd.DataFrame(),
-        overrides=pd.DataFrame())
+        datums=pd.DataFrame(), reviewed=pd.DataFrame())
 
     samples, log = clean.clean(raw.drop(columns="_rain"), None, sites)
     check("the rejected record did not survive",
@@ -198,7 +197,8 @@ def test_end_to_end():
     shares = clean.nondetect_shares(joined)
     out_dir = tempfile.mkdtemp()
     manifest_path = os.path.join(out_dir, "wq_manifest.json")
-    payload = manifest.write(sites, manifest_path)
+    manifest.write(sites, manifest_path)
+    payload = manifest.require_manifest(manifest_path)
 
     coefficients, attrition = fit.run(joined, sites, shares, payload=payload)
     check("both sites were fitted",

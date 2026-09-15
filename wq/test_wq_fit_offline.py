@@ -98,16 +98,24 @@ def make_site_samples(station, n=120, rain_effect=0.0, level_effect=0.0,
 
 def make_sites(rows):
     frame = pd.DataFrame(rows)
-    return strata.assign(frame, neighbours=pd.DataFrame(),
-                         datums=pd.DataFrame(), overrides=pd.DataFrame())
+    # beach_type is hand-assigned, so the fixtures supply it the way a real
+    # run would: through the reviewed file, with an assigner and a date.
+    labels = pd.DataFrame([
+        {"station_id": row["station_id"],
+         "beach_type": row.get("beach_type", "open_coast"),
+         "assigned_by": "fixture", "assigned_on": "2026-09-14"}
+        for row in rows])
+    return strata.assign(frame.drop(columns=[c for c in ("beach_type",)
+                                             if c in frame.columns]),
+                         datums=pd.DataFrame(), reviewed=labels)
 
 
 def registered(sites):
     """A manifest on a temporary path, so the guard is satisfied honestly
     rather than bypassed."""
     path = tempfile.mktemp(suffix=".json")
-    payload = manifest.write(sites, path)
-    return payload, path
+    manifest.write(sites, path)
+    return manifest.require_manifest(path), path
 
 
 def nondetect_table(samples):
@@ -340,6 +348,7 @@ def test_stratification_detected_when_present_and_absent():
                       "station_name": ("Newport Harbor" if enclosed
                                        else "Ocean Beach"),
                       "site_type": "Estuary" if enclosed else "Ocean",
+                      "beach_type": "enclosed_bay" if enclosed else "open_coast",
                       "lat": 33.0 + index / 10, "lon": -117.3, "state": "CA"})
     samples = pd.concat(rows, ignore_index=True)
     frame = make_sites(sites)

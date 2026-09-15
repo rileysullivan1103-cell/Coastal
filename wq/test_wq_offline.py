@@ -234,52 +234,39 @@ def test_wqp_columns_match_the_existing_puller():
         check(f"{mine}", mine == theirs, f"theirs is {theirs}")
 
 
-def test_strata_are_metadata_only():
-    print("\nstrata assignment (A2)")
+def test_region_is_assigned_from_metadata_only():
+    print("\nregion and water class (A2)")
     sites = pd.DataFrame([
         {"station_id": "A", "station_name": "Storm Drain at 5th",
          "site_type": "Ocean", "lat": 33.0, "lon": -117.3, "state": "CA"},
-        {"station_id": "B", "station_name": "Newport Harbor",
-         "site_type": "Estuary", "lat": 33.6, "lon": -117.9, "state": "CA"},
         {"station_id": "C", "station_name": "Ocean Beach",
          "site_type": "Great Lake", "lat": 41.9, "lon": -87.6, "state": "IL"},
         {"station_id": "D", "station_name": "Gulf Shores",
          "site_type": "Ocean", "lat": 30.2, "lon": -87.7, "state": "AL"},
+        {"station_id": "E", "station_name": "Pensacola",
+         "site_type": "Ocean", "lat": 30.3, "lon": -87.2, "state": "FL"},
+        {"station_id": "F", "station_name": "Daytona",
+         "site_type": "Ocean", "lat": 29.2, "lon": -81.0, "state": "FL"},
     ])
-    neighbours = pd.DataFrame([
-        {"lat": 33.0005, "lon": -117.3, "site_type": "Stream"},
-        {"lat": 40.0, "lon": -80.0, "site_type": "Facility"},
-    ])
-    out = strata.assign(sites, neighbours=neighbours, datums=pd.DataFrame(),
-                        overrides=pd.DataFrame())
+    out = strata.assign(sites, datums=pd.DataFrame(), reviewed=pd.DataFrame())
     regions = dict(zip(out["station_id"], out["region"]))
     check("Pacific", regions["A"] == "Pacific", regions["A"])
     check("Great Lakes beats the state code", regions["C"] == "Great Lakes",
           regions["C"])
     check("Gulf", regions["D"] == "Gulf", regions["D"])
-    check("Great Lakes site is fresh water",
+    check("Florida splits on longitude: panhandle is Gulf",
+          regions["E"] == "Gulf", regions["E"])
+    check("and the Atlantic side is Atlantic", regions["F"] == "Atlantic",
+          regions["F"])
+    check("a Great Lakes site is fresh water",
           out.loc[out["station_id"] == "C", "water_class"].iloc[0] == "fresh")
+    check("a coastal site is marine",
+          out.loc[out["station_id"] == "A", "water_class"].iloc[0] == "marine")
 
-    kinds = dict(zip(out["station_id"], out["beach_type"]))
-    check("storm drain wins over the Ocean site type",
-          kinds["A"] == "storm_drain_adjacent", str(kinds["A"]))
-    check("harbour reads as enclosed", kinds["B"] == "enclosed_bay", str(kinds["B"]))
-
-    fresh = dict(zip(out["station_id"], out["freshwater_input"]))
-    check("a stream 55 m away is freshwater input", fresh["A"] == "yes")
-    check("no stream nearby is 'no', not missing", fresh["B"] == "no")
-
-    check("watershed_area has no source and stays empty",
-          out["watershed_area_km2"].isna().all())
-    check("impervious_frac has no source and stays empty",
-          out["impervious_frac"].isna().all())
-
-    # The unchecked case: nothing supplied at all is NaN, never 'no'.
-    bare = strata.assign(sites, neighbours=pd.DataFrame(),
-                         datums=pd.DataFrame(), overrides=pd.DataFrame())
-    check("unchecked freshwater is NaN, not 'no'",
-          bare["freshwater_input"].isna().all(),
-          str(bare["freshwater_input"].tolist()))
+    # The station NAME must no longer decide anything. "Storm Drain at 5th"
+    # was previously enough to assign a beach_type; now it is not.
+    check("no beach_type is assigned without a human",
+          out["beach_type"].isna().all(), str(out["beach_type"].tolist()))
 
 
 def test_tidal_range():
@@ -304,37 +291,38 @@ def test_coverage_rule_drops_before_fitting():
          "site_type": "Ocean", "lat": 33.0 + i / 100, "lon": -117.3,
          "state": "CA"} for i in range(10)
     ])
-    out = strata.assign(sites, neighbours=pd.DataFrame(), datums=pd.DataFrame(),
-                        overrides=pd.DataFrame())
+    out = strata.assign(sites, datums=pd.DataFrame(), reviewed=pd.DataFrame())
     table = strata.coverage(out)
     keeps = dict(zip(table["stratum"], table["keeps"]))
     check("region survives", keeps["region"])
-    check("beach_type survives", keeps["beach_type"])
-    check("watershed_area is dropped for coverage", not keeps["watershed_area_km2"])
-    check("tidal_range is dropped when no datums were pulled",
-          not keeps["tidal_range_m"])
+    check("beach_type is dropped when nobody has reviewed it",
+          not keeps["beach_type"])
 
     path = tempfile.mktemp(suffix=".json")
     payload = manifest.write(out, path)
+    entry = payload["entries"][0]
     check("manifest records what was dropped and why",
-          "watershed_area_km2" in payload["strata"]["dropped_for_coverage"])
-    check("manifest carries a timestamp", bool(payload["written_at"]))
+          "beach_type" in entry["strata"]["dropped_for_coverage"])
+    check("manifest carries a timestamp", bool(entry["written_at"]))
     check("manifest carries the spec hash",
-          payload["spec_hash"] == config.spec_hash())
-    check("active strata exclude the dropped ones",
-          "watershed_area_km2" not in manifest.active_strata(payload))
+          entry["spec_hash"] == config.spec_hash())
+    check("every site covariate is declared, even the empty ones",
+          set(entry["site_covariates"]["declared"])
+          == set(config.SITE_COVARIATES))
+    check("active groupings exclude the dropped ones",
+          "beach_type" not in manifest.active_strata(entry))
     os.remove(path)
 
 
 def test_manifest_guard_catches_a_moved_goalpost():
     print("\nthe pre-registration guard")
-    sites = pd.DataFrame([{"station_id": "A", "station_name": "Ocean Beach",
-                           "site_type": "Ocean", "lat": 33.0, "lon": -117.3,
-                           "state": "CA"}])
-    out = strata.assign(sites, neighbours=pd.DataFrame(), datums=pd.DataFrame(),
-                        overrides=pd.DataFrame())
+    sites = strata.assign(
+        pd.DataFrame([{"station_id": "A", "station_name": "Ocean Beach",
+                       "site_type": "Ocean", "lat": 33.0, "lon": -117.3,
+                       "state": "CA"}]),
+        datums=pd.DataFrame(), reviewed=pd.DataFrame())
     path = tempfile.mktemp(suffix=".json")
-    manifest.write(out, path)
+    manifest.write(sites, path)
     check("a matching manifest authorises the fit",
           manifest.require_manifest(path)["spec_hash"] == config.spec_hash())
 
@@ -352,6 +340,22 @@ def test_manifest_guard_catches_a_moved_goalpost():
     finally:
         config.MIN_SAMPLES_PER_SITE = original
 
+    # The same guard on the covariate list: adding the covariate that groups
+    # the coefficients nicely is the thing this exists to stop.
+    config.SITE_COVARIATES.append("invented_covariate")
+    try:
+        message = ""
+        try:
+            manifest.require_manifest(path)
+        except SystemExit as exc:
+            message = str(exc)
+        check("adding a covariate after registration fails the run too",
+              "config.py has changed" in message, message[:80])
+        check("and the message points at the amendment route instead",
+              "--amend" in message)
+    finally:
+        config.SITE_COVARIATES.remove("invented_covariate")
+
     # A manifest written with no station table cannot authorise a fit either.
     bare = tempfile.mktemp(suffix=".json")
     manifest.write(None, bare)
@@ -360,7 +364,7 @@ def test_manifest_guard_catches_a_moved_goalpost():
         manifest.require_manifest(bare)
     except SystemExit as exc:
         caught = "never evaluated" in str(exc)
-    check("a manifest with no strata coverage cannot authorise a fit", caught)
+    check("a manifest with no coverage evaluation cannot authorise a fit", caught)
     os.remove(path)
     os.remove(bare)
 
@@ -395,7 +399,7 @@ def main():
                  test_cross_source_dedup,
                  test_analyte_mapping,
                  test_wqp_columns_match_the_existing_puller,
-                 test_strata_are_metadata_only,
+                 test_region_is_assigned_from_metadata_only,
                  test_tidal_range,
                  test_coverage_rule_drops_before_fitting,
                  test_manifest_guard_catches_a_moved_goalpost,

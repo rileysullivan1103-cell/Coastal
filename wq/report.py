@@ -162,11 +162,25 @@ def report_distributions(coefficients, column="rho_ctrl"):
     return table
 
 
-def report_by_stratum(coefficients, sites, strata, column="rho_ctrl"):
-    """D2. The headline test: does knowing the stratum narrow the spread?"""
+def report_by_stratum(coefficients, sites, strata, column="rho_ctrl",
+                      exploratory=()):
+    """D2. The headline test: does knowing the stratum narrow the spread?
+
+    `exploratory` names groupings that were added AFTER the registered pass,
+    via manifest --amend. They are reported in the same table because hiding
+    them would be its own kind of dishonesty, but every row carries a flag and
+    the pre-registered summary is printed separately from them -- an
+    exploratory grouping that narrows the spread is a hypothesis for the next
+    pass, not a result of this one.
+    """
+    exploratory = set(exploratory or ())
     print("\n" + "=" * 78)
     print("D2  THE SAME DISTRIBUTION, BROKEN OUT BY STRATUM")
     print("=" * 78)
+    if exploratory:
+        print(f"  {len(exploratory)} grouping(s) here are EXPLORATORY — added "
+              "after the registered\n  pass and marked in the exploratory "
+              f"column: {', '.join(sorted(exploratory))}")
     print("If within-stratum IQR is much narrower than the overall IQR, the")
     print("stratification is doing work and that is the finding. If it is not,")
     print("the variation between beaches is not explained by what kind of")
@@ -197,7 +211,9 @@ def report_by_stratum(coefficients, sites, strata, column="rho_ctrl"):
                 if stats["n_sites"] < 3:
                     continue
                 rows.append({
-                    "stratum": stratum, "level": str(level), "analyte": analyte,
+                    "stratum": stratum,
+                    "exploratory": stratum in exploratory,
+                    "level": str(level), "analyte": analyte,
                     "predictor": predictor, "n_sites": stats["n_sites"],
                     "median": stats["median"], "iqr": stats["iqr"],
                     "overall_iqr": overall["iqr"],
@@ -220,6 +236,16 @@ def report_by_stratum(coefficients, sites, strata, column="rho_ctrl"):
     print("  p             share of shuffles at least as narrow as observed")
     summary = _stratum_significance(merged, table, column)
     print("\n" + summary.round(3).to_string(index=False))
+
+    summary["exploratory"] = summary["stratum"].isin(exploratory)
+    registered_only = summary[~summary["exploratory"]]
+    if exploratory and not registered_only.empty:
+        print("\n  PRE-REGISTERED groupings only (this is the result):")
+        print(registered_only.round(3).to_string(index=False))
+        print("\n  exploratory groupings (a hypothesis for the next pass, "
+              "not a result of this one):")
+        print(summary[summary["exploratory"]].round(3).to_string(index=False))
+        summary = registered_only
 
     real = summary[summary["p"].notna()]
     if real.empty:
@@ -488,10 +514,19 @@ def report_nondetects(coefficients, nondetects):
     return subset
 
 
-def run(coefficients, sites, attrition, nondetects, strata, out_dir=None):
+def run(coefficients, sites, attrition, nondetects, strata, out_dir=None,
+        exploratory=()):
     """Everything in Part D, in order, written to disk as it is printed."""
     out_dir = out_dir or config.OUT_DIR
     os.makedirs(out_dir, exist_ok=True)
+    if exploratory:
+        print("\n" + "!" * 78)
+        print("THIS RUN INCLUDES EXPLORATORY GROUPINGS")
+        print(f"  {', '.join(sorted(exploratory))}")
+        print("  They were added after the registered pass. Everything they")
+        print("  produce is exploratory and is labelled as such below; the")
+        print("  pre-registered result is what the registered groupings say.")
+        print("!" * 78)
 
     report_attrition(attrition)
     flagged = report_nondetects(coefficients, nondetects)
@@ -509,7 +544,8 @@ def run(coefficients, sites, attrition, nondetects, strata, out_dir=None):
                   f" coefficient rows from non-detect-flagged pairs")
 
     table = report_distributions(headline)
-    strata_table = report_by_stratum(headline, sites, strata)
+    strata_table = report_by_stratum(headline, sites, strata,
+                                     exploratory=exploratory)
     signs = report_sign_agreement(headline)
     report_multiple_testing(headline)
     report_no_usable_predictor(headline)

@@ -76,8 +76,10 @@ STATION_ORG = "OrganizationIdentifier"
 # location type underneath the "Lake, Reservoir, Impoundment" site type and
 # asking for it directly returns nothing.
 REQUEST_SITE_TYPES = ("Ocean", "Estuary", "Lake, Reservoir, Impoundment")
-# Auxiliary site types pulled for the A2 strata proxies only.
-NEIGHBOUR_SITE_TYPES = ("Stream", "Spring", "Facility")
+# Streams, springs and outfalls no longer come from WQP: NHDPlus and EPA
+# ECHO are the real layers for those, and wq/spatial.py pulls them. A WQP
+# Stream station meant "somebody monitors a creek here", which is not the
+# same claim as "there is a creek here".
 
 # FIPS codes for every state and territory with an ocean, Gulf or Great Lakes
 # shoreline. Inland states are absent by design: a coastal recreational
@@ -282,48 +284,6 @@ def pull_stations(states=None, refresh=False, probe=False):
     return out
 
 
-def pull_neighbour_stations(states=None, refresh=False):
-    """Streams, springs and facilities, for the A2 strata proxies only.
-
-    Metadata, one row per station, no results -- which is why pulling three
-    more site types nationally is affordable where pulling their samples
-    would not be.
-    """
-    states = states or sorted(COASTAL_STATES)
-    frames = []
-    os.makedirs(config.RAW_DIR, exist_ok=True)
-    for index, state in enumerate(states, 1):
-        path = _chunk_path("neighbours", state)
-        if os.path.exists(path) and not refresh:
-            frames.append(pd.read_csv(path, low_memory=False))
-            print(f"  [{index}/{len(states)}] {state}: cached")
-            continue
-        try:
-            raw = fetch_stations(state, NEIGHBOUR_SITE_TYPES)
-        except (PullFailed, SystemExit) as exc:
-            # A stratum proxy is not worth ending the run for. A state that
-            # fails here loses its freshwater/outfall flags, the coverage
-            # rule in wq/manifest.py sees the gap, and the manifest records it.
-            print(f"  [{index}/{len(states)}] {state}: FAILED ({exc}) — "
-                  "strata proxies unavailable for this state")
-            continue
-        raw.to_csv(path, index=False)
-        print(f"  [{index}/{len(states)}] {state}: {len(raw)} neighbour stations")
-        frames.append(raw)
-        time.sleep(config.REQUEST_PAUSE)
-    frames = [f for f in frames if not f.empty]
-    if not frames:
-        print("  no neighbour stations anywhere — freshwater_input and "
-              "outfall_present will be empty and get dropped from the manifest")
-        return pd.DataFrame(columns=["station_id", "lat", "lon", "site_type"])
-    every = pd.concat(frames, ignore_index=True, sort=False)
-    out = normalize_stations(every).drop_duplicates(subset="station_id")
-    path = os.path.join(config.DATA_DIR, "neighbour_stations.csv")
-    out.to_csv(path, index=False)
-    print(f"\n{len(out)} neighbour stations -> {path}")
-    return out
-
-
 def pull_results(states=None, years=None, refresh=False, probe=False):
     """Bacteria results, one cached CSV per (state, year).
 
@@ -436,7 +396,6 @@ def pull_ca_ckan(codes=None, start=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stations", action="store_true")
-    parser.add_argument("--neighbours", action="store_true")
     parser.add_argument("--results", action="store_true")
     parser.add_argument("--ckan", action="store_true")
     parser.add_argument("--states", help="comma-separated, e.g. CA,FL")
@@ -452,12 +411,10 @@ def main():
         if unknown:
             sys.exit(f"not coastal states in this study: {unknown}")
 
-    if not any((args.stations, args.neighbours, args.results, args.ckan)):
-        parser.error("give at least one of --stations --neighbours --results --ckan")
+    if not any((args.stations, args.results, args.ckan)):
+        parser.error("give at least one of --stations --results --ckan")
     if args.stations:
         pull_stations(states, refresh=args.refresh, probe=args.probe)
-    if args.neighbours:
-        pull_neighbour_stations(states, refresh=args.refresh)
     if args.results:
         pull_results(states, refresh=args.refresh, probe=args.probe)
     if args.ckan:

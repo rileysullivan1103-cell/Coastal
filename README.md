@@ -22,7 +22,20 @@ column names `pull_wqp_results.py` verified, `scan_cameras.get_with_retry`,
 wave model, and `analyze_drivers.spearman` / `demean_by` for the statistics —
 so the month control there and the month control here are the same code.
 
-Two things it adds that the rest of the pipeline does not have:
+Site covariates come from spatial layers, by coordinate: NHDPlus (stream
+mouths, order, upstream area), EPA ECHO (permitted discharges), NLCD
+accumulated to the upstream catchment, OSM coastline (shore normal, signed
+curvature, embayment ratio, land fraction, fetch by octant) and CO-OPS datums.
+Every layer's source and **vintage** is written into the manifest beside the
+count of stations it populated.
+
+`beach_type` is the exception: it is assigned BY HAND from imagery, with the
+assigner and date recorded (`python -m wq.review --worklist`). The continuous
+enclosure covariates sort that review list and never assign the label —
+enclosure is continuous, and any threshold on it misclassifies exactly the
+ambiguous sites that decide whether the stratification explains anything.
+
+Three things it adds that the rest of the pipeline does not have:
 
 **A pre-registration that fails the run.** `wq_manifest.json` is written before
 any model runs and hashes every pre-registered constant. Change the predictor
@@ -33,6 +46,14 @@ under a specification nobody wrote down.
 against the count of joined rows with both sides non-null, printed beside it,
 and a mismatch is fatal. That is the `n=730` bug, made impossible to repeat
 quietly.
+
+**Coastline geometry from linework alone.** `wq/geo.py` computes land and
+water from OSM's land-on-the-left convention — nearest segment, sign of the
+cross product — so shore normal, signed curvature, embayment ratio, land
+fraction and fetch all come from one request per site with no raster. It
+checks that convention before trusting it: ways meeting end-to-end instead of
+head-to-tail mean one was digitised backwards, and every coastline covariate
+at that site is withheld rather than returned inverted.
 
 `fetch_marine()` in `pull_site_observations.py` grew an optional `return_cell`
 argument for this: the cell it lands on after nudging is by construction water,

@@ -24,6 +24,7 @@ earlier artefact is missing.
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -31,12 +32,14 @@ import sys
 
 import pandas as pd
 
-from . import clean, config, covariates, fit, manifest, pull, report, strata
+from . import (clean, config, covariates, fit, layers, manifest, pull,
+               report, review, spatial, strata)
 
 CAFFEINATE_FLAG = "WQ_CAFFEINATED"
 
 STATIONS = "stations.csv"
-NEIGHBOURS = "neighbour_stations.csv"
+SPATIAL = "site_covariates.csv"
+LAYER_RECORD = "layer_record.json"
 STRATIFIED = "stations_stratified.csv"
 SAMPLES = "samples_clean.csv"
 NONDETECTS = "nondetect_shares.csv"
@@ -106,46 +109,91 @@ def stage_stations(args):
     pull.pull_stations(args.states, refresh=args.refresh, probe=args.probe)
 
 
-def stage_neighbours(args):
-    print("\n=== NEIGHBOUR STATIONS (for the A2 proxies) ===")
-    pull.pull_neighbour_stations(args.states, refresh=args.refresh)
+def stage_spatial(args):
+    print("\n=== SPATIAL COVARIATES (A2 addition) ===")
+    print("Derived from the station coordinate alone. Nothing here reads a")
+    print("sample value, and beach_type is NOT assigned here — it is assigned")
+    print("by hand from imagery, via python -m wq.review --worklist.")
+    sites = _read(STATIONS, "run --stations first")
+    record = layers.blank_record()
+    frame, record = spatial.build(sites, record)
+
+    datums = _coops_datums(sites, args)
+    if datums is not None and not datums.empty:
+        frame = spatial.add_tidal_datums(frame, sites, datums)
+        record["coops_datums"]["sites_attempted"] = len(sites)
+        record["coops_datums"]["sites_populated"] = int(
+            frame["tidal_range_m"].notna().sum())
+        layers.record_access(record, "coops_datums")
+        datums.to_csv(_path("coops_datums.csv"), index=False)
+
+    print("\ncoverage (the ~70% rule drops anything under it):")
+    print(spatial.coverage(frame).to_string(index=False))
+    _write(frame, SPATIAL)
+    with open(_path(LAYER_RECORD), "w") as handle:
+        json.dump(record, handle, indent=2)
+    print(f"wrote {_path(LAYER_RECORD)}")
+
+
+def _coops_datums(sites, args):
+    """MHHW/MLLW for every gauge that serves a site, fetched once per gauge."""
+    if getattr(args, "no_datums", False):
+        return None
+    try:
+        import scan_cameras as scan
+        gauges = scan.load_coops("waterlevels")
+        wanted = set()
+        for _, site in sites.iterrows():
+            station, _km = covariates.nearest_coops(site["lat"], site["lon"],
+                                                    gauges)
+            if station:
+                wanted.add(station)
+        print(f"  {len(wanted)} distinct CO-OPS gauges serve these sites")
+        datums = covariates.coops_datums(sorted(wanted))
+        if datums is not None and not datums.empty:
+            coords = gauges.set_index(gauges["station_id"].astype(str))
+            keys = datums["station_id"].astype(str)
+            datums["lat"] = keys.map(coords["lat"])
+            datums["lon"] = keys.map(coords["lon"])
+        return datums
+    except Exception as exc:  # noqa: BLE001
+        print(f"  CO-OPS datums unavailable ({exc}) — tidal_range_m will be "
+              "empty and the coverage rule will drop it")
+        return None
+
+
+def stage_review(args):
+    print("\n=== beach_type REVIEW LIST ===")
+    sites = _read(STATIONS, "run --stations first")
+    frame = (pd.read_csv(_path(SPATIAL), low_memory=False)
+             if os.path.exists(_path(SPATIAL)) else None)
+    if frame is None:
+        print("  no site_covariates.csv — the list will not be sorted by "
+              "ambiguity. Run --spatial first.")
+    table = review.worklist(sites, frame, getattr(args, "review_n", None))
+    table.to_csv(review.WORKLIST_PATH, index=False)
+    print(f"  {len(table)} station(s) -> {review.WORKLIST_PATH}")
+    print("  Assign beach_type from the imagery link, then:")
+    print(f'    python -m wq.review --ingest {review.WORKLIST_PATH} '
+          '--by "your name"')
+    review.status(sites)
 
 
 def stage_strata(args):
-    print("\n=== STRATA (metadata only — no sample value is read here) ===")
+    print("\n=== STRATA (metadata and map data only) ===")
     sites = _read(STATIONS, "run --stations first")
-    neighbours = None
-    if os.path.exists(_path(NEIGHBOURS)):
-        neighbours = pd.read_csv(_path(NEIGHBOURS), low_memory=False)
-    else:
-        print("  no neighbour stations on disk — freshwater_input and "
-              "outfall_present will be empty and the coverage rule will "
-              "drop them")
+    frame = (pd.read_csv(_path(SPATIAL), low_memory=False)
+             if os.path.exists(_path(SPATIAL)) else None)
+    if frame is None:
+        print("  no site_covariates.csv — every spatial covariate will be "
+              "empty and the coverage rule will drop all of them. Run "
+              "--spatial first.")
+    datums_path = _path("coops_datums.csv")
+    datums = (pd.read_csv(datums_path) if os.path.exists(datums_path)
+              else pd.DataFrame())
 
-    datums = pd.DataFrame()
-    if not args.no_datums:
-        try:
-            import scan_cameras as scan
-            gauges = scan.load_coops("waterlevels")
-            ids, coords = [], {}
-            for _, site in sites.iterrows():
-                station, _km = covariates.nearest_coops(site["lat"], site["lon"],
-                                                        gauges)
-                if station:
-                    ids.append(station)
-            ids = sorted(set(ids))
-            print(f"  {len(ids)} distinct CO-OPS gauges serve these sites")
-            datums = covariates.coops_datums(ids)
-            if not datums.empty:
-                coords = gauges.set_index(gauges["station_id"].astype(str))
-                datums["lat"] = datums["station_id"].astype(str).map(coords["lat"])
-                datums["lon"] = datums["station_id"].astype(str).map(coords["lon"])
-        except Exception as exc:  # noqa: BLE001
-            print(f"  CO-OPS datums unavailable ({exc}) — tidal_range_m will "
-                  "be empty and the coverage rule will drop it")
-
-    stratified = strata.assign(sites, neighbours=neighbours, datums=datums)
-    print("\ncoverage:")
+    stratified = strata.assign(sites, datums=datums, spatial=frame)
+    print("\nstrata coverage:")
     print(strata.coverage(stratified).round(3).to_string(index=False))
     _write(stratified, STRATIFIED)
 
@@ -153,7 +201,13 @@ def stage_strata(args):
 def stage_manifest(args):
     print("\n=== PRE-REGISTRATION ===")
     sites = _read(STRATIFIED, "run --strata first")
-    manifest.write(sites)
+    frame = (pd.read_csv(_path(SPATIAL), low_memory=False)
+             if os.path.exists(_path(SPATIAL)) else None)
+    record = None
+    if os.path.exists(_path(LAYER_RECORD)):
+        with open(_path(LAYER_RECORD)) as handle:
+            record = json.load(handle)
+    manifest.write(sites, spatial=frame, layer_record=record)
 
 
 def stage_results(args):
@@ -246,13 +300,20 @@ def stage_report(args):
         sites = sites.merge(meta[keep], on="station_id", how="left")
     if coefficients.empty:
         sys.exit("no coefficients to report — the fit produced nothing")
-    report.run(coefficients, sites, attrition, shares,
-               manifest.active_strata(payload))
+    groupings = manifest.active_strata(payload)
+    exploratory = [name for name in manifest.exploratory_covariates()
+                   if name in sites.columns and name not in groupings]
+    if exploratory:
+        print(f"  {len(exploratory)} exploratory grouping(s) from a manifest "
+              f"amendment: {', '.join(exploratory)}")
+    report.run(coefficients, sites, attrition, shares, groupings + exploratory,
+               exploratory=exploratory)
 
 
 STAGES = [
     ("stations", stage_stations),
-    ("neighbours", stage_neighbours),
+    ("spatial", stage_spatial),
+    ("review", stage_review),
     ("strata", stage_strata),
     ("manifest", stage_manifest),
     ("results", stage_results),
@@ -281,6 +342,8 @@ def main():
     parser.add_argument("--lenient", action="store_true",
                         help="warn instead of failing on an n mismatch. Do not "
                              "use this to get a run to finish.")
+    parser.add_argument("--review-n", type=int,
+                        help="limit the beach_type review list")
     parser.add_argument("--no-datums", action="store_true",
                         help="skip the CO-OPS datums pull (tidal_range_m is "
                              "then dropped by the coverage rule)")

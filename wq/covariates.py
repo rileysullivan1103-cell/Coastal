@@ -19,12 +19,16 @@ THE SHORE NORMAL. Wind is pre-registered as onshore/alongshore components,
 which need the direction the beach faces. Nationally that is not known, so it
 is taken from the best available source per site and the source is RECORDED:
 
-  manual        wq/strata_overrides.csv, a beach somebody looked at
-  mop           CDIP MOP's published metaShoreNormal (California only)
-  marine_nudge  the bearing to the ocean cell Open-Meteo actually returned,
-                when the site's own cell was land
-  region        a coastal default. Crude. Every wind result computed off one
-                is reported separately, never mixed into the distribution.
+  manual            wq/strata_overrides.csv, a beach somebody looked at
+  mop               CDIP MOP's published metaShoreNormal (California only)
+  coastline_tangent the outward normal of the coastline tangent fitted over
+                    +/-250 m by wq/spatial.py, which is a local measurement
+                    of which way the beach faces
+  marine_nudge      the bearing to the ocean cell Open-Meteo returned, when
+                    the site's own cell was land. A fallback for a site with
+                    no coastline linework.
+  region            a coastal default. Crude. Every wind result computed off
+                    one is reported separately, never mixed in.
 
 The rip pipeline was computing onshore components at Santa Cruz off a
 26-degree error until the MOP file supplied the real normal. The lesson taken
@@ -216,6 +220,13 @@ def shore_normal_for(site, marine_bearing=None, overrides=None):
     mop = site.get("mop_shore_normal")
     if pd.notna(mop):
         return float(mop), "mop"
+    # From the coastline tangent fitted over +/-250 m by wq/spatial.py, which
+    # is a real local measurement of which way the beach faces rather than an
+    # inference from where the wave model happened to find water.
+    fitted = site.get("shore_normal_deg")
+    if fitted is not None and pd.notna(fitted):
+        return float(fitted), str(site.get("shore_normal_source")
+                                  or "coastline_tangent")
     if marine_bearing is not None and np.isfinite(marine_bearing):
         return float(marine_bearing), "marine_nudge"
     default = REGION_SHORE_NORMAL.get(site.get("region"))

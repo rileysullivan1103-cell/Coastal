@@ -62,6 +62,64 @@ PREDICTORS = [name for family in PREDICTOR_FAMILIES.values() for name in family]
 CONTROL = "per-month demeaning of both sides"
 CONTROL_KEY = "month"
 
+# A2 (addition): site covariates derived automatically from the station
+# coordinate. FROZEN HERE, BEFORE FITTING. A covariate added after seeing
+# which grouping tidies up the coefficient distribution is not this list --
+# it goes into a separate, later, clearly-labelled exploratory manifest entry
+# (wq/manifest.py --amend), and its results are reported as exploratory.
+#
+# Source and vintage for every one of these is in wq/layers.py and is copied
+# into wq_manifest.json at registration.
+SITE_COVARIATES = [
+    # NHD / NHDPlus
+    "dist_to_stream_m", "stream_order", "upstream_area_km2",
+    "n_streams_within_2km",
+    # EPA ECHO / FRS
+    "dist_to_outfall_m", "outfall_type", "n_outfalls_within_2km",
+    # NLCD, accumulated over the upstream catchment
+    "impervious_frac", "developed_frac",
+    # Coastline vector
+    "shore_normal_deg", "curvature_1_per_km", "embayment_ratio",
+    "land_fraction_5km", "fetch_km_mean", "fetch_km_min", "fetch_km_max",
+    # CO-OPS datums
+    "tidal_range_m", "datum_gauge_dist_km",
+]
+
+# The eight octant fetches are carried per site but are not stratified on
+# individually -- eight more groupings over the same sites is eight more
+# chances to find a split that flatters the distribution. fetch_km_min/mean/max
+# above are the pre-registered summaries.
+FETCH_OCTANT_COLUMNS = [f"fetch_km_{o}" for o in
+                        ("N", "NE", "E", "SE", "S", "SW", "W", "NW")]
+
+# Which of the covariates D2 actually BREAKS THE DISTRIBUTION OUT BY. Every
+# covariate above is recorded and coverage-checked; only these are groupings,
+# because each additional grouping is another chance for a split to look
+# explanatory by luck and D5 already has enough of those to account for.
+#
+# Deliberately absent:
+#   shore_normal_deg     a direction. 359 and 1 degrees are adjacent, so a
+#                        median split is meaningless. It feeds the onshore
+#                        and alongshore wind predictors instead.
+#   datum_gauge_dist_km  a data-quality figure: how far away the gauge that
+#                        supplied tidal_range_m is. Grouping on it would be
+#                        grouping on measurement quality.
+#   fetch_km_min/max     redundant with fetch_km_mean, and they move together.
+STRATIFY_ON = [
+    "beach_type", "region",
+    "dist_to_stream_m", "stream_order", "upstream_area_km2",
+    "n_streams_within_2km",
+    "dist_to_outfall_m", "outfall_type", "n_outfalls_within_2km",
+    "impervious_frac", "developed_frac",
+    "curvature_1_per_km", "embayment_ratio", "land_fraction_5km",
+    "fetch_km_mean", "tidal_range_m",
+]
+
+# A covariate populated for fewer stations than this is dropped from the
+# pre-registered list rather than fitted on a biased subset. One threshold for
+# all of them, so it cannot be tuned per covariate after the fact.
+COVARIATE_MIN_COVERAGE = 0.70
+
 # A1/A2: the site strata. `required_coverage` is the share of qualifying sites
 # a variable must be populated for to survive into the fit. A variable below
 # its threshold is DROPPED by wq/manifest.py before any model runs, and the
@@ -72,42 +130,28 @@ STRATA = {
     "beach_type": {
         "values": ["open_coast", "enclosed_bay", "storm_drain_adjacent"],
         "required_coverage": 0.70,
-        "source": "WQP MonitoringLocationTypeName, station-name keywords, "
-                  "and wq/strata_overrides.csv",
-    },
-    "freshwater_input": {
-        "values": ["yes", "no"],
-        "required_coverage": 0.70,
-        "source": "WQP Stream/Spring station within 500 m",
-    },
-    "outfall_present": {
-        "values": ["yes", "no"],
-        "required_coverage": 0.70,
-        "source": "WQP Facility/outfall station within 1 km",
-    },
-    "tidal_range_m": {
-        "values": "continuous",
-        "required_coverage": 0.50,
-        "source": "CO-OPS datums MHHW - MLLW at the nearest gauge",
-    },
-    "watershed_area_km2": {
-        "values": "continuous",
-        "required_coverage": 0.50,
-        "source": "upstream drainage area — no offline source wired in; "
-                  "expected to be dropped for coverage",
-    },
-    "impervious_frac": {
-        "values": "continuous",
-        "required_coverage": 0.50,
-        "source": "upstream impervious fraction — no offline source wired in; "
-                  "expected to be dropped for coverage",
+        "source": "ASSIGNED BY HAND from satellite imagery — see wq/review.py",
+        "automated": False,
+        "why_manual": "enclosure is continuous, not categorical, and any "
+                      "threshold on land_fraction_5km or embayment_ratio "
+                      "misclassifies exactly the ambiguous sites that decide "
+                      "whether the stratification works. Those two sort the "
+                      "review list; they never assign the label.",
     },
     "region": {
         "values": ["Pacific", "Atlantic", "Gulf", "Great Lakes"],
         "required_coverage": 0.95,
         "source": "state code and coordinate box",
+        "automated": True,
     },
 }
+
+# Strata that are continuous covariates rather than categories. The report
+# splits these at their median, so they read the same way as a category.
+CONTINUOUS_STRATA = ["dist_to_stream_m", "upstream_area_km2",
+                     "dist_to_outfall_m", "impervious_frac", "developed_frac",
+                     "curvature_1_per_km", "embayment_ratio",
+                     "land_fraction_5km", "fetch_km_mean", "tidal_range_m"]
 
 # A1: the minimum sample threshold per site. Below this a site is excluded
 # from the distribution entirely rather than contributing a noisy coefficient.
@@ -158,7 +202,8 @@ MAX_TIDE_GAUGE_KM = 50
 
 SPEC_KEYS = (
     "ANALYTES", "PREDICTOR_FAMILIES", "PREDICTORS", "CONTROL", "CONTROL_KEY",
-    "STRATA", "MIN_SAMPLES_PER_SITE", "NONDETECT_SUBSTITUTION",
+    "STRATA", "SITE_COVARIATES", "CONTINUOUS_STRATA", "STRATIFY_ON",
+    "COVARIATE_MIN_COVERAGE", "FETCH_OCTANT_COLUMNS", "MIN_SAMPLES_PER_SITE", "NONDETECT_SUBSTITUTION",
     "NONDETECT_FLAG_FRACTION", "MIN_PAIRED_N", "MIN_EXCEEDANCE_DAYS", "ALPHA",
     "USABLE_RHO_FLOOR", "USABLE_RHO_FLOOR_LENIENT",
     "STRATUM_PERMUTATIONS", "YEARS_BACK",
