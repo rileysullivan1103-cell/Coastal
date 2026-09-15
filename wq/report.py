@@ -229,11 +229,20 @@ def report_by_stratum(coefficients, sites, strata, column="rho_ctrl",
         print("\n" + table.round(3).to_string(index=False))
 
     print("\nhow much each stratum narrows the spread:")
-    print("  iqr_ratio     observed within-stratum IQR / overall IQR")
-    print("  chance_ratio  the same thing when the labels are SHUFFLED —")
-    print("                splitting any group into subgroups narrows an IQR,")
-    print("                so this is the number iqr_ratio has to beat")
-    print("  p             share of shuffles at least as narrow as observed")
+    print("  iqr_ratio      observed within-stratum IQR / overall IQR")
+    print("  chance_ratio   the same thing when the labels are SHUFFLED —")
+    print("                 splitting any group into subgroups narrows an IQR,")
+    print("                 so this is the number iqr_ratio has to beat")
+    print("  p              share of shuffles at least as narrow as observed")
+    print("  sites          stations carrying a label for this stratum")
+    print("  smallest_level stations in its smallest level — read every row")
+    print("                 with this number in hand, because the shuffle")
+    print("                 controls for the SIZE of a small level but not")
+    print("                 for what else its members have in common")
+    print("  The shuffle is drawn once per SITE and reused across every")
+    print("  analyte/predictor cell, since the label is a property of the")
+    print("  site. A per-cell shuffle would redraw the small level in every")
+    print("  cell and call one coincidence eleven separate findings.")
     summary = _stratum_significance(merged, table, column)
     print("\n" + summary.round(3).to_string(index=False))
 
@@ -257,9 +266,17 @@ def report_by_stratum(coefficients, sites, strata, column="rho_ctrl",
         print(f"\n  {leader['stratum']} narrows the IQR to "
               f"{leader['iqr_ratio']:.2f} of the overall spread, against "
               f"{leader['chance_ratio']:.2f} for a shuffle of the same group "
-              f"sizes (p={leader['p']:.3f}). That is the headline: the "
-              "coefficient varies by site type, and site type is knowable in "
-              "advance.")
+              f"sizes drawn once per site (p={leader['p']:.3f}). That is the "
+              "headline: the coefficient varies by site type, and site type "
+              "is knowable in advance.")
+        smallest = leader.get("smallest_level")
+        if smallest is not None and smallest < 10:
+            print(f"  READ IT WITH THIS: the smallest level of "
+                  f"{leader['stratum']} holds {int(smallest)} station(s) of "
+                  f"{int(leader['sites'])}. The shuffle controls for that "
+                  "SIZE; it cannot control for anything else those stations "
+                  "share. Treat this as a hypothesis for a pass with more "
+                  "sites in that level, not a settled result.")
     else:
         print(f"\n  No stratum narrows the spread by more than an arbitrary "
               f"split of the same sizes would. Best was {leader['stratum']} "
@@ -273,7 +290,7 @@ def _median_iqr_ratio(cells):
     """Median within-level IQR / overall IQR across every analyte/predictor
     cell, which is the one number a stratum is judged on."""
     ratios = []
-    for values, labels, overall_iqr in cells:
+    for values, labels, _sites, overall_iqr in cells:
         if not overall_iqr:
             continue
         for level in pd.unique(labels):
@@ -286,34 +303,67 @@ def _median_iqr_ratio(cells):
 
 
 def _stratum_significance(merged, table, column, permutations=None):
-    """Permutation test per stratum. See the printed legend for why."""
+    """Permutation test per stratum. See the printed legend for why.
+
+    The label is shuffled ONCE PER SITE and that one shuffle is applied to
+    every analyte/predictor cell, because a stratum is a property of the site,
+    not of the cell. Shuffling each cell independently -- which is what this
+    function used to do -- builds a null in which the small level is a
+    different handful of sites in every cell, while the observed statistic
+    reads the SAME handful eleven times over. Anything those particular sites
+    have in common other than their label (one sampling program, one estuary,
+    short records whose rho all shrink toward the same band) then shows up
+    once in the data and eleven times in the statistic, and is compared
+    against a null that redraws it away. That produced p=0.000 on strata whose
+    smallest level held three stations. The site-level shuffle carries the
+    same repetition into the null, so the test answers the question actually
+    being asked: does the LABEL narrow the spread, or do these few sites
+    merely resemble each other?
+    """
     permutations = permutations or config.STRATUM_PERMUTATIONS
     rng = np.random.default_rng(0)
     rows = []
     for stratum in table["stratum"].unique():
         cells = []
         for (_analyte, _predictor), group in merged.groupby(["analyte", "predictor"]):
-            frame = group[[column, stratum]].dropna()
+            frame = group[["station_id", column, stratum]].dropna()
             values = pd.to_numeric(frame[column], errors="coerce").to_numpy()
             labels = frame[stratum].astype(str).to_numpy()
+            stations = frame["station_id"].astype(str).to_numpy()
             if len(values) < 6 or len(pd.unique(labels)) < 2:
                 continue
             q25, q75 = np.quantile(values, 0.25), np.quantile(values, 0.75)
-            cells.append((values, labels, float(q75 - q25)))
+            cells.append((values, labels, stations, float(q75 - q25)))
         if not cells:
             rows.append({"stratum": stratum, "cells": 0, "iqr_ratio": np.nan,
-                         "chance_ratio": np.nan, "p": np.nan})
+                         "chance_ratio": np.nan, "p": np.nan, "sites": 0,
+                         "smallest_level": 0})
             continue
         observed = _median_iqr_ratio(cells)
+        site_labels = {}
+        for _values, labels, stations, _overall in cells:
+            for station, label in zip(stations, labels):
+                site_labels.setdefault(station, label)
+        roster = np.array(sorted(site_labels))
+        assigned = np.array([site_labels[s] for s in roster])
+        position = {station: index for index, station in enumerate(roster)}
+        # Each cell's stations, as indices into the single site roster, so one
+        # permutation of `assigned` relabels every cell consistently.
+        indexed = [(values, np.array([position[s] for s in stations]), overall)
+                   for values, _labels, stations, overall in cells]
         null = []
         for _ in range(permutations):
-            shuffled = [(values, rng.permutation(labels), overall)
-                        for values, labels, overall in cells]
-            null.append(_median_iqr_ratio(shuffled))
+            permuted = rng.permutation(assigned)
+            null.append(_median_iqr_ratio(
+                [(values, permuted[index], None, overall)
+                 for values, index, overall in indexed]))
         null = np.array([v for v in null if np.isfinite(v)])
+        counts = pd.Series(assigned).value_counts()
         rows.append({
             "stratum": stratum,
             "cells": len(cells),
+            "sites": len(roster),
+            "smallest_level": int(counts.min()),
             "iqr_ratio": observed,
             "chance_ratio": float(np.median(null)) if len(null) else np.nan,
             "p": (float((null <= observed).mean()) if len(null)

@@ -24,6 +24,11 @@ exactly like a finding.
   explain the spread, one where they do not -- because a report that can only
   say "it worked" is not a test.
 
+  the stratum shuffle is drawn once per SITE. A fixture with a randomly
+  assigned label and a per-site scale, where the old per-cell shuffle reports
+  p=0.013 on nothing at all. The old null is kept in this file so the test can
+  show the difference instead of asserting it.
+
     python wq/test_wq_fit_offline.py
 """
 
@@ -390,6 +395,94 @@ def test_stratification_detected_when_present_and_absent():
           "number alone would call it a finding")
 
 
+def _cells_with_correlated_sites(seed, n_sites=40, n_predictors=11, n_rare=3):
+    """Coefficients with NO stratum effect, built so the trap can be seen.
+
+    Every site has its own scale: some sites produce large coefficients for
+    every predictor, some produce small ones. That is true of real stations —
+    a short record, a quiet estuary, one sampling program — and it has nothing
+    to do with the label. The label here is assigned at random, so any stratum
+    test that fires on this data is wrong.
+    """
+    rng = np.random.default_rng(seed)
+    stations = [f"S{index:02d}" for index in range(n_sites)]
+    scale = np.exp(rng.normal(0, 0.8, n_sites))
+    rare = set(rng.choice(stations, n_rare, replace=False))
+    rows = []
+    for index, station in enumerate(stations):
+        for predictor in range(n_predictors):
+            rows.append({"station_id": station, "analyte": "ENT",
+                         "predictor": f"x{predictor}",
+                         "rho_ctrl": float(scale[index] * rng.normal()),
+                         "grp": "rare" if station in rare else "common"})
+    return pd.DataFrame(rows)
+
+
+def _per_cell_p(merged, permutations, column="rho_ctrl", stratum="grp"):
+    """The null this module used to use: shuffle the labels independently
+    inside every analyte/predictor cell. Kept here, and only here, so the test
+    can show what it did rather than assert that it was bad."""
+    rng = np.random.default_rng(0)
+    cells = []
+    for _key, group in merged.groupby(["analyte", "predictor"]):
+        frame = group[[column, stratum]].dropna()
+        values = pd.to_numeric(frame[column]).to_numpy()
+        labels = frame[stratum].astype(str).to_numpy()
+        q25, q75 = np.quantile(values, 0.25), np.quantile(values, 0.75)
+        cells.append((values, labels, None, float(q75 - q25)))
+    observed = report._median_iqr_ratio(cells)
+    null = np.array([
+        report._median_iqr_ratio([(values, rng.permutation(labels), None, overall)
+                                  for values, labels, _sites, overall in cells])
+        for _ in range(permutations)])
+    return float((null <= observed).mean())
+
+
+def test_the_shuffle_is_drawn_once_per_site():
+    print("\nthe stratum shuffle is a site-level shuffle (D2)")
+    # A stratum is a property of the SITE. The same three stations carry the
+    # rare label in all eleven predictor cells, so whatever those three have
+    # in common other than the label is read eleven times by the observed
+    # statistic. A per-cell shuffle redraws the rare level in every cell, so
+    # the null never contains that repetition and the p-value collapses. This
+    # is the bug that put p=0.000 on a level holding three stations.
+    table = pd.DataFrame([{"stratum": "grp"}])
+    merged = _cells_with_correlated_sites(seed=0)
+    per_cell = _per_cell_p(merged, permutations=400)
+    site_level = report._stratum_significance(merged, table, "rho_ctrl").iloc[0]
+    check("the per-cell shuffle calls a RANDOM label significant",
+          per_cell <= 0.05, f"p={per_cell:.3f} on labels assigned by coin flip")
+    check("the site-level shuffle does not",
+          site_level["p"] > 0.05, f"p={site_level['p']:.3f}")
+    check("and both read the same observed ratio — only the null changed",
+          site_level["iqr_ratio"] < 1.0, f"{site_level['iqr_ratio']:.2f}")
+    check("the row says how few stations the smallest level holds",
+          int(site_level["smallest_level"]) == 3 and int(site_level["sites"]) == 40,
+          f"smallest_level={site_level['smallest_level']}, "
+          f"sites={site_level['sites']}")
+
+    # Not one lucky seed: across replicates with no effect to find, the old
+    # null fires more often, and never reports a SMALLER p than the new one
+    # on the cases where it fires.
+    fired_per_cell = fired_site = 0
+    never_smaller = True
+    for seed in range(16):
+        merged = _cells_with_correlated_sites(seed)
+        per_cell = _per_cell_p(merged, permutations=150)
+        site = report._stratum_significance(merged, table, "rho_ctrl",
+                                            permutations=150).iloc[0]["p"]
+        fired_per_cell += per_cell <= 0.05
+        fired_site += site <= 0.05
+        if per_cell <= 0.05 and site < per_cell:
+            never_smaller = False
+    check("the old null fires more often than the new one on null data",
+          fired_per_cell > fired_site,
+          f"per-cell fired {fired_per_cell}/16, site-level {fired_site}/16 "
+          "— 5% of 16 is under 1")
+    check("and the new p is never the smaller of the two where it matters",
+          never_smaller)
+
+
 def test_no_usable_predictor_is_counted():
     print("\nsites with no usable predictor (D6)")
     samples = pd.concat([
@@ -485,6 +578,7 @@ def main():
                  test_exceedance_separation,
                  test_attrition_is_an_output,
                  test_stratification_detected_when_present_and_absent,
+                 test_the_shuffle_is_drawn_once_per_site,
                  test_no_usable_predictor_is_counted,
                  test_multiple_testing_expectation,
                  test_per_site_table_has_what_was_asked_for):

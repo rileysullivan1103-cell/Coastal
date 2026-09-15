@@ -486,6 +486,29 @@ stratum labels and asks whether the observed narrowing beats an arbitrary split
 of the same group sizes. Planted structure scores p=0.000 with a ratio of 0.12
 against 0.94 for the shuffle; random labels score p≈0.10.
 
+The shuffle is drawn **once per site** and reused across every
+analyte/predictor cell, and that detail is the whole test. A stratum is a
+property of the station, so the same handful of stations carries the small
+label in all eleven predictor cells; anything those stations share other than
+the label — one sampling program, one estuary, short records whose rho all
+shrink toward the same band — is one fact in the data that the observed
+statistic reads eleven times. Shuffling each cell independently, which this
+module did until 2026-09-15, puts a *different* random handful in the small
+level of every cell, so the null averages that repetition away and the
+p-value collapses onto it. On synthetic coefficients with a randomly assigned
+label and no effect to find, the per-cell null fires at α=0.05 about 12% of
+the time and at α=0.01 about 8% — eight times its nominal rate — while the
+site-level null lands at 5.0% and 1.7%. The observed ratio is identical under
+both; only the null changed. `test_the_shuffle_is_drawn_once_per_site` pins
+it, and keeps a copy of the old null so the test can demonstrate the
+difference rather than assert it.
+
+The summary table therefore carries `sites` and `smallest_level`, and the
+headline sentence refuses to stand alone when the smallest level holds fewer
+than ten stations. The permutation controls for the **size** of a small level.
+It cannot control for anything else its members have in common, and with three
+stations in a level there is no amount of arithmetic that can.
+
 **D3** is sign agreement, reported and not led with. A predictor can agree in
 sign at 95% of sites and be useless at all of them.
 
