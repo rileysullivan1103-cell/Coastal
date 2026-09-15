@@ -92,6 +92,13 @@ ROI_SIZE = 128
 # frame the coarse pass resolves +/- 640 px, which is any camera move short of
 # a repoint.
 COARSE_DOWNSAMPLE = 2
+# Grey-level standard deviation below which a frame carries no scene at all:
+# a black frame, a whiteout, a dropped feed. See phase_shift.
+BLANK_STD = 1.0
+# Confidence reported for two identical arrays, which happens at least once per
+# run when the reference is compared with itself. Finite, so it cannot poison a
+# median or a comparison downstream.
+PERFECT_MATCH = 1e6
 # How many candidates to propose and track before the agreement test picks the
 # keepers. More candidates is cheap -- the frames are already loaded, and a
 # 128x128 FFT is nothing next to decoding a 2560x1920 JPEG -- and it is the
@@ -352,6 +359,18 @@ def phase_shift(reference, image):
     """
     if reference.shape != image.shape:
         return None
+    # A BLANK FRAME HAS NO ALIGNMENT TO FIND, and must not be allowed to claim
+    # one. Walton's record contains several fully black frames -- outages, or
+    # night where the sampled hour drifted -- and a constant array flattens to
+    # zero once its mean is removed, so the cross-power surface is identically
+    # zero: argmax picks index 0, the shift reads (0, 0), and the sidelobe
+    # spread is zero, which the perfect-match branch below scores as INFINITE
+    # confidence. A black frame therefore beat every real frame in the
+    # reference selection, and the whole archive then registered against it at
+    # exactly 0.00 px with perfect confidence -- a flawless-looking result that
+    # was measuring nothing at all.
+    if float(reference.std()) < BLANK_STD or float(image.std()) < BLANK_STD:
+        return None
     window = np.outer(np.hanning(reference.shape[0]),
                       np.hanning(reference.shape[1]))
     first = np.fft.fft2((reference - reference.mean()) * window)
@@ -373,11 +392,16 @@ def phase_shift(reference, image):
     spread = float(sidelobes.std())
     if spread <= 1e-12:
         # A surface with no sidelobe variation at all is a perfect delta: the
-        # two arrays are identical. That is the most confident result possible
-        # and the first version scored it ZERO, by dividing by the spread it
-        # had just found to be nothing -- which dropped every reference frame
-        # as if it were fog.
-        confidence = float("inf")
+        # two arrays are identical, which happens at least once per run when
+        # the reference is measured against itself. The first version scored it
+        # ZERO, by dividing by the spread it had just found to be nothing,
+        # which dropped every reference frame as if it were fog.
+        #
+        # Reported as a large FINITE number rather than infinity: an infinity
+        # in the confidence column propagates through every median, mean and
+        # comparison downstream, and "perfect" does not need to be unbounded to
+        # beat every real measurement.
+        confidence = PERFECT_MATCH
     else:
         confidence = float(surface[peak] - sidelobes.mean()) / spread
 
@@ -852,7 +876,13 @@ def best_reference(paths, probes=8, downsample=8):
     JPEGs.
     """
     images = [load_gray(path, downsample=downsample) for path in paths]
-    usable = [index for index, image in enumerate(images) if image is not None]
+    usable = [index for index, image in enumerate(images)
+              if image is not None and float(image.std()) >= BLANK_STD]
+    blank = sum(1 for image in images
+                if image is not None and float(image.std()) < BLANK_STD)
+    if blank:
+        print(f"  {blank} frames carry no scene (black, whiteout or dropped "
+              "feed) and cannot be\n  a reference or be registered")
     if len(usable) < 3:
         return 0
     shape = min((images[i].shape for i in usable), key=lambda s: (s[0], s[1]))

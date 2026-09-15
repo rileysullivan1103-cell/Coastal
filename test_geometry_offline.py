@@ -92,14 +92,19 @@ def test_phase_shift_recovers_a_known_offset():
     check("mismatched shapes are refused, not broadcast",
           g.phase_shift(base, base[:100, :100]) is None)
 
-    # Fog: no structure to align. The peak should be far weaker than a real
-    # match, which is what MIN_CONFIDENCE exists to catch.
+    # Fog: some signal, but no structure to align on. The peak should be far
+    # weaker than a real match, which is what MIN_CONFIDENCE exists to catch.
+    # The deviation stays above BLANK_STD on purpose -- below it the frame
+    # carries no scene at all and is refused outright rather than scored, which
+    # is a different rule tested separately.
     rng = np.random.default_rng(7)
-    fog = rng.normal(128, 1.0, base.shape)
+    fog = rng.normal(128, 4.0, base.shape)
     sharp = g.phase_shift(base, shifted(base, 2, 2))[2]
-    flat = g.phase_shift(fog, rng.normal(128, 1.0, base.shape))[2]
+    flat = g.phase_shift(fog, rng.normal(128, 4.0, base.shape))[2]
     check("a structural match scores above a featureless one",
           sharp > flat, (sharp, flat))
+    check("and the featureless one is below the threshold",
+          flat < g.MIN_CONFIDENCE, flat)
 
 
 def test_features_are_chosen_on_land():
@@ -478,6 +483,67 @@ def test_the_reference_is_the_one_the_record_matches():
         check("and registers against it", reference == dates[3], reference)
         check("every frame is still measured",
               set(frame["feature"]) == {"a", "b"}, set(frame["feature"]))
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_a_blank_frame_cannot_register_or_anchor():
+    """The worst bug in this module's history, and the most convincing one.
+
+    Walton's record holds several fully black frames -- outages, or night where
+    the sampled hour drifted. A constant array flattens to zero once its mean
+    is removed, so the cross-power surface is identically zero: the shift reads
+    (0, 0) and the sidelobe spread is zero, which the perfect-match branch
+    scored as INFINITE confidence. A black frame therefore beat every real
+    frame in the reference selection, and the whole archive registered against
+    it at exactly 0.00 px with perfect confidence.
+
+    That is the shape of a wrong answer worth fearing: not a warning, not a
+    crash, but a flawless-looking result that measures nothing.
+    """
+    print("\na blank frame must not register or anchor")
+    real = np.random.default_rng(0).normal(128, 30, (256, 256))
+    blank = np.zeros((256, 256))
+    white = np.full((256, 256), 255.0)
+
+    got = g.phase_shift(real, shifted(real, 5, -7))
+    check("a real pair still registers",
+          got is not None and abs(got[0] - 5) < 0.1 and abs(got[1] + 7) < 0.1,
+          got)
+    check("black against a scene is refused",
+          g.phase_shift(blank, real) is None)
+    check("a scene against black is refused",
+          g.phase_shift(real, blank) is None)
+    check("black against black is refused too",
+          g.phase_shift(blank, blank) is None)
+    check("a whiteout is refused", g.phase_shift(white, real) is None)
+
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene(width=512, height=384)
+        paths = []
+        for index in range(8):
+            frame = (np.zeros((384, 512)) if index in (2, 6)
+                     else water(base, seed=index))
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+        pick = g.best_reference(paths, downsample=2)
+        check("a black frame is never the reference", pick not in (2, 6), pick)
+
+        dates = list(pd.date_range("2024-01-07", periods=8, freq="7D",
+                                   tz="UTC"))
+        coarse = g.coarse_shifts(paths, dates, pick, downsample=2)
+        check("the black frames are not registered",
+              len(coarse) <= 6, len(coarse))
+        check("and the real ones are", len(coarse) >= 5, len(coarse))
+        check("nothing claims infinite confidence",
+              bool(np.isfinite(coarse["confidence"]).all()),
+              list(coarse["confidence"].round(1)))
+        check("the reference's own perfect match is finite and top",
+              coarse["confidence"].max() == g.PERFECT_MATCH,
+              coarse["confidence"].max())
     finally:
         shutil.rmtree(tmp)
 
@@ -1145,6 +1211,7 @@ def main():
                  test_the_margin_excludes_the_whole_patch,
                  test_the_reference_is_the_one_the_record_matches,
                  test_noise_never_becomes_the_reference,
+                 test_a_blank_frame_cannot_register_or_anchor,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_disagreement_is_measured_as_a_vector,
