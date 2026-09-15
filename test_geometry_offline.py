@@ -187,6 +187,49 @@ def test_the_picker_avoids_sky():
         shutil.rmtree(tmp)
 
 
+def test_patches_are_spread_vertically():
+    """All four patches at y=0 is four samples of one band.
+
+    Greedy selection with local suppression walks along a single row when the
+    strongest structure lies in one horizontal strip -- which is what a coastal
+    camera looks like, with the far shore near the top and water below. Those
+    four patches agree with each other beautifully and say nothing about
+    whether the camera moved, because nothing distinguishes a camera shift
+    from a shift of that one strip.
+    """
+    print("\nfeatures are spread down the frame, not along one row")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        # Structure strongest in a strip near the top, weaker but present
+        # further down -- the greedy picker takes the strip four times.
+        base = np.full((400, 600), 60.0)
+        rng = np.random.default_rng(5)
+        base += rng.normal(0, 2, base.shape)
+        base[20:70, :] = 230                       # the bright strip
+        base[30:60, ::40] = 30                     # with hard vertical edges
+        for row in (150, 230):                     # weaker structure lower down
+            base[row:row + 24, :] = 150
+            base[row + 6:row + 18, ::60] = 40
+
+        paths = []
+        for index in range(12):
+            frame = water(base, seed=index)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        rois = g.propose_rois(paths, size=64, count=3, land_fraction=0.7)
+        check("it proposes features", len(rois) == 3, len(rois))
+        spread = max(r["y"] for r in rois) - min(r["y"] for r in rois)
+        check("they do not all share one row", spread > 64, 
+              [(r["name"], r["y"]) for r in rois])
+        check("and they still sit inside the searchable region",
+              all(0 <= r["y"] and r["y"] + r["h"] <= 400 for r in rois), rois)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_the_picker_rejects_a_burned_in_overlay():
     """The failure that survived the sky fix: a composited banner.
 
@@ -366,6 +409,7 @@ def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
                  test_the_picker_avoids_sky,
+                 test_patches_are_spread_vertically,
                  test_the_picker_rejects_a_burned_in_overlay,
                  test_roi_preview_is_written,
                  test_a_planted_step_is_found_on_the_right_date,

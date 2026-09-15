@@ -349,12 +349,28 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
         print("  nothing is both calm and alive; dropping the calm test")
         score = np.where(usable & alive, patch_structure, 0.0)
 
+    # Take the best patch from each horizontal band rather than the best four
+    # overall. Greedy selection with local suppression walks along one row: at
+    # Walton it put all four patches at y=0, spanning the full width but
+    # sampling a single band, and four samples of one band agree with each
+    # other whatever the camera did. Bands force the patches apart vertically,
+    # which is what makes their agreement mean something.
+    rows = np.flatnonzero(usable.any(axis=1))
+    edges = np.linspace(rows[0], rows[-1] + 1, count + 1).astype(int)
+    bands = [(edges[i], edges[i + 1]) for i in range(count)]
+
     rois = []
     working = score.copy()
-    for _ in range(count):
-        if not working.any():
+    for band_top, band_bottom in bands:
+        banded = np.zeros_like(working)
+        banded[band_top:band_bottom, :] = working[band_top:band_bottom, :]
+        # A band with nothing usable in it -- all water, or all overlay --
+        # falls back to the best patch left anywhere, so a frame whose
+        # structure really is all in one place still gets its features.
+        source = banded if banded.any() else working
+        if not source.any():
             break
-        cy, cx = np.unravel_index(int(np.argmax(working)), working.shape)
+        cy, cx = np.unravel_index(int(np.argmax(source)), source.shape)
         rois.append({"name": f"feature{len(rois) + 1}",
                      "x": int(cx * 2 - size // 2), "y": int(cy * 2 - size // 2),
                      "w": size, "h": size,
