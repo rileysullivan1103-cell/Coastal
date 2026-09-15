@@ -43,6 +43,7 @@ import glob
 import html
 import json
 import os
+import re
 import sys
 import time
 
@@ -194,50 +195,123 @@ def audit(samples, model_side):
               f"{int(np.median(heights))} (median of {len(widths)} read)")
 
     verdicts = []
-    if xs.max() <= 1.0 and ys.max() <= 1.0:
-        verdicts.append("coordinates are all <= 1.0: they are NORMALIZED "
-                        "fractions. Use the 'normalized' transform.")
-    if xs.max() <= model_side + 1 and ys.max() <= model_side + 1:
-        if widths and np.median(widths) > model_side * 1.2:
-            verdicts.append(
-                f"nothing exceeds {model_side} while the stills are "
-                f"{int(np.median(widths))} wide: the boxes are in MODEL space. "
-                "'letterbox' is the likely transform; 'scale' if the model was "
-                "fed a stretched resize.")
-        else:
-            verdicts.append(f"nothing exceeds {model_side}, but the stills are "
-                            "not much bigger either, so this is not decisive.")
-    if widths and xs.max() > np.median(widths) * 1.02:
-        verdicts.append("some x exceeds the still width: the coordinates "
-                        "cannot be raw source pixels.")
+    width = float(np.median(widths)) if widths else None
+    height = float(np.median(heights)) if heights else None
 
-    # Letterbox leaves a dead band: with centred padding on a 16:9 image in a
-    # square canvas, no y should fall in the top or bottom pad. Seeing the band
-    # empty is positive evidence rather than absence of evidence.
-    if widths and heights:
-        width, height = float(np.median(widths)), float(np.median(heights))
+    # Decide model-space vs source-pixel space FIRST, and say so plainly. The
+    # earlier version ran a letterbox check regardless and, on coordinates that
+    # obviously exceeded the model canvas, printed a verdict about padding --
+    # advice about a hypothesis the very first number had already ruled out.
+    in_model_space = xs.max() <= model_side + 1 and ys.max() <= model_side + 1
+
+    if xs.max() <= 1.0 and ys.max() <= 1.0:
+        verdicts.append("every coordinate is <= 1.0: these are NORMALIZED "
+                        "fractions. Use the 'normalized' transform.")
+    elif in_model_space and width and width > model_side * 1.2:
+        verdicts.append(
+            f"nothing exceeds {model_side} while the stills are {int(width)} "
+            "wide: the boxes are in MODEL space and must be un-letterboxed.")
+    elif width and height:
+        fills_x = xs.max() / width
+        fills_y = ys.max() / height
+        verdicts.append(
+            f"coordinates reach {xs.max():.0f} x {ys.max():.0f} against a still "
+            f"of {int(width)} x {int(height)} -- {fills_x:.0%} and {fills_y:.0%} "
+            "of it. They are SOURCE PIXELS already.")
+        verdicts.append(
+            f"that rules out the {model_side}x{model_side} letterbox entirely: "
+            "model-space coordinates cannot exceed the canvas. No un-letterbox "
+            "transform applies, and 'raw' is the right reading of the numbers.")
+        verdicts.append(
+            "so if the boxes still land in the wrong place, the coordinates "
+            "are not the problem -- the IMAGE underneath them is. Check the "
+            "still-vs-detection offset below.")
+
+    if width and xs.max() > width * 1.02:
+        verdicts.append("some x exceeds the still width, so the still being "
+                        "drawn on is not the image the detector saw.")
+
+    # Only meaningful if the coordinates could be in the canvas at all.
+    if in_model_space and width and height:
         ratio = min(model_side / width, model_side / height)
         pad_y = (model_side - height * ratio) / 2
         if pad_y > 2:
-            inside = ((ys >= pad_y - 1) & (ys <= model_side - pad_y + 1)).mean()
+            inside = float(((ys >= pad_y - 1)
+                            & (ys <= model_side - pad_y + 1)).mean())
             print(f"    letterbox check: centred padding would be {pad_y:.1f}px "
                   f"top and bottom;\n      {inside:.1%} of y values fall inside "
                   "that band")
             if inside > 0.98:
-                verdicts.append(
-                    "every y sits inside the band a centred letterbox would "
-                    "leave free. That is what model-space coordinates look "
-                    "like; 'letterbox' is the leading candidate.")
+                verdicts.append("every y sits inside the band a centred "
+                                "letterbox would leave free: 'letterbox' is "
+                                "the leading candidate.")
             elif inside < 0.8:
                 verdicts.append(
-                    "a fifth of y values fall in what would be the padding, so "
-                    "a CENTRED letterbox does not fit. Try 'letterbox_tl'.")
+                    f"{1 - inside:.0%} of y values fall in what would be the "
+                    "padding, so a CENTRED letterbox does not fit. Try "
+                    "'letterbox_tl'.")
 
     print("\n  what the numbers say:")
     for line in verdicts or ["nothing conclusive; the sheet will have to "
                              "settle it by eye."]:
         print(f"    - {line}")
     return {"x_max": float(xs.max()), "y_max": float(ys.max())}
+
+
+STAMP_PATTERN = re.compile(r"(20\d{2})[-_]?(\d{2})[-_]?(\d{2})"
+                           r"[T_-]?(\d{2})[-:_]?(\d{2})[-:_]?(\d{2})")
+
+
+def stamp_from_name(name):
+    """The capture time encoded in a WebCOOS still's filename, or None."""
+    match = STAMP_PATTERN.search(os.path.basename(str(name or "")))
+    if not match:
+        return None
+    try:
+        return pd.Timestamp("{}-{}-{}T{}:{}:{}Z".format(*match.groups()))
+    except ValueError:
+        return None
+
+
+def audit_image_timing(samples):
+    """How far each labelled still is from the detection it carries boxes for.
+
+    This is the check that would have ended the investigation on the first run.
+    Coordinates can be perfectly correct and the overlay still land in the
+    trees, if the photograph under them was taken half an hour later. The still
+    filename carries its own capture time, so the comparison needs nothing but
+    what is already on disk.
+    """
+    offsets, unparsed = [], 0
+    for sample in samples:
+        shot = stamp_from_name(sample.get("still"))
+        if shot is None:
+            unparsed += 1
+            continue
+        detected = pd.Timestamp(sample["timestamp"])
+        offsets.append(abs((shot - detected).total_seconds()))
+
+    print(f"\n  still-vs-detection timing over {len(samples)} frames")
+    if unparsed:
+        print(f"    {unparsed} filename(s) carry no readable timestamp")
+    if not offsets:
+        print("    no still filename could be timed; cannot check this here")
+        return None
+    series = pd.Series(offsets)
+    print(f"    median {series.median():>8.0f}s   90th pct "
+          f"{series.quantile(0.9):>8.0f}s   worst {series.max():>8.0f}s")
+    if series.median() > 120:
+        print("    THIS IS THE BUG. The stills carrying these boxes were taken "
+              "minutes\n    away from the detections that produced them. On a "
+              "moving sea the water\n    under a box is simply not the water "
+              "the detector saw. Rebuild the sample.")
+    elif series.median() > 5:
+        print("    stills are close but not exact; a second or two of swell "
+              "moves a rip.")
+    else:
+        print("    stills match their detections; the image is not the "
+              "problem.")
+    return float(series.median())
 
 
 def image_size(path):
@@ -492,6 +566,7 @@ def main():
     print(f"  {len(samples)} frames with boxes "
           f"({sum(1 for s in samples if s['still'])} have a local still)")
     audit(samples, args.model_side)
+    audit_image_timing(samples)
 
     if not args.no_annotated:
         print(f"\n  fetching WebCOOS annotated frames "

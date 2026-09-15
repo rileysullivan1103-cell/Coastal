@@ -193,6 +193,75 @@ def check_the_sheet_embeds_computed_rectangles():
               f"{rect['x']:.2f},{rect['y']:.2f}")
 
 
+def check_the_audit_calls_source_pixels_source_pixels():
+    """Walton's real numbers: 2560x1920 stills, coordinates reaching 2490x1919.
+
+    The first version ran its letterbox check regardless of scale and, on these
+    numbers, advised trying 'letterbox_tl' -- padding advice about a canvas the
+    very first number had already ruled out. An audit that recommends a
+    hypothesis its own data excludes is worse than one that says nothing.
+    """
+    import io
+    import contextlib
+
+    samples = [{"boxes": [[(38.0, 432.0), (2490.0, 1919.0)]],
+                "image_width": 2560, "image_height": 1920}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        dx.audit(samples, 640)
+    text = buffer.getvalue()
+
+    check("the audit says the coordinates are source pixels",
+          "SOURCE PIXELS" in text, text.strip()[-200:])
+    check("it rules the letterbox out rather than recommending one",
+          "rules that out" in text or "rules out" in text)
+    check("it does not advise a letterbox transform on these numbers",
+          "letterbox_tl" not in text and "must be un-letterboxed" not in text)
+    check("it points at the image instead of the coordinates",
+          "IMAGE underneath" in text)
+
+    # And the opposite case still reports model space.
+    model = [{"boxes": [[(100.0, 200.0), (300.0, 400.0)]],
+              "image_width": 2560, "image_height": 1920}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        dx.audit(model, 640)
+    text = buffer.getvalue()
+    check("coordinates inside the canvas are still called model space",
+          "MODEL space" in text, text.strip()[-160:])
+
+
+def check_the_timing_audit_finds_a_stale_still():
+    """A still half an hour from its detection must be named as the bug."""
+    import io
+    import contextlib
+
+    stale = [{"timestamp": "2026-03-01T12:03:00+00:00",
+              "still": "/tmp/walton-2026-03-01T12-30-00Z.jpg"}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        median = dx.audit_image_timing(stale)
+    check("a 27-minute offset is measured", abs(median - 1620) < 1,
+          f"{median}s")
+    check("and called out as the bug", "THIS IS THE BUG" in buffer.getvalue())
+
+    exact = [{"timestamp": "2026-03-01T12:03:00+00:00",
+              "still": "/tmp/walton-2026-03-01T12-03-00Z.jpg"}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        median = dx.audit_image_timing(exact)
+    check("a matching still reports zero offset", median == 0.0, str(median))
+    check("and clears the image of blame",
+          "image is not the problem" in buffer.getvalue())
+
+    check("a filename with no timestamp returns None rather than guessing",
+          dx.stamp_from_name("frame.jpg") is None)
+    check("several filename spellings all parse",
+          all(dx.stamp_from_name(n) is not None for n in
+              ("walton-2026-03-01T12-03-00Z.jpg", "20260301T120300Z.jpg",
+               "cam_2026_03_01_12_03_00.jpg")))
+
+
 def main():
     print("box coordinate diagnosis offline checks\n")
     check_the_letterbox_inverse_returns_the_box()
@@ -201,6 +270,8 @@ def main():
     check_off_image_catches_what_it_should()
     check_payload_parsing_keeps_the_numbers_untouched()
     check_the_sheet_embeds_computed_rectangles()
+    check_the_audit_calls_source_pixels_source_pixels()
+    check_the_timing_audit_finds_a_stale_still()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0

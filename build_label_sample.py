@@ -362,31 +362,44 @@ def boxes_for(row, index):
 
 
 def still_url(row, service, cache):
-    """The URL of the still this row should be labelled against.
+    """The URL of the still this row should be labelled against, and its time.
 
-    A detected frame names its own source image, which is exact. An hour with
-    no detection names nothing, so the stills service is asked for that hour and
-    the frame nearest the middle is taken -- one call per hour, cached, because
-    several sampled rows can land in the same hour.
+    Returns (url, how, element_timestamp).
+
+    The bug this replaces put boxes in the trees. The old version asked the
+    service for the row's HOUR and took the element nearest the middle of it,
+    then cached that one URL per hour. On a one-minute stills feed a detection
+    at 12:03 was therefore labelled against the still from 12:30 -- a different
+    photograph of a moving sea, up to half an hour away -- and every detection
+    sharing an hour got the SAME image. The detector's coordinates were right
+    all along; the picture underneath them was not.
+
+    Now the element nearest THIS ROW'S timestamp is taken, and the cache holds
+    the hour's element list rather than a single chosen url, so each row still
+    costs at most one request per hour but gets its own frame.
     """
     direct = row.get("original_image")
     if isinstance(direct, str) and direct.startswith("http"):
-        return direct, "detector's own source reference"
+        return direct, "detector's own source reference", row.get("timestamp")
 
     hour = pd.Timestamp(row["hour"])
-    if hour in cache:
-        return cache[hour], "stills service"
-    elements = prd.fetch_elements(service, hour.to_pydatetime(),
-                                  (hour + pd.Timedelta(hours=1)).to_pydatetime(),
-                                  quiet=True)
-    time.sleep(0.2)
+    if hour not in cache:
+        elements = prd.fetch_elements(service, hour.to_pydatetime(),
+                                      (hour + pd.Timedelta(hours=1)).to_pydatetime(),
+                                      quiet=True)
+        time.sleep(0.2)
+        cache[hour] = elements or []
+    elements = cache[hour]
     if not elements:
-        cache[hour] = None
-        return None, "stills service"
-    middle = hour + pd.Timedelta(minutes=30)
-    best = min(elements, key=lambda e: abs(pd.Timestamp(e["timestamp"]) - middle))
-    cache[hour] = best["url"]
-    return best["url"], "stills service"
+        return None, "stills service", None
+
+    # A detected row knows the moment the detector ran. A blank hour does not,
+    # so it keeps the old behaviour and takes the middle of the hour -- there
+    # is no frame to match, only an hour to sample from.
+    stamp = pd.Timestamp(row["timestamp"]) if pd.notna(row.get("timestamp")) \
+        else hour + pd.Timedelta(minutes=30)
+    best = min(elements, key=lambda e: abs(pd.Timestamp(e["timestamp"]) - stamp))
+    return best["url"], "stills service", pd.Timestamp(best["timestamp"])
 
 
 def report_boxes(table):
@@ -565,16 +578,34 @@ def main():
 
     print(f"\n  resolving image urls for {len(sample)} rows")
     cache, rows, sources = {}, [], set()
+    offsets = []
     for _, row in sample.iterrows():
-        url, how = (still_url(row, service, cache) if service or
-                    isinstance(row.get("original_image"), str) else (None, "unavailable"))
+        url, how, shot_at = (
+            still_url(row, service, cache) if service
+            or isinstance(row.get("original_image"), str)
+            else (None, "unavailable", None))
         if not url:
             continue
         sources.add(how)
+        offset = None
+        if shot_at is not None and pd.notna(row.get("timestamp")):
+            offset = (pd.Timestamp(shot_at)
+                      - pd.Timestamp(row["timestamp"])).total_seconds()
+            offsets.append(abs(offset))
         rows.append({"timestamp": row["timestamp"], "url": url,
                      "filename": os.path.basename(url.split("?")[0]),
+                     "shot_at": shot_at, "offset": offset,
                      "_row": row})
-    print(f"  {len(rows)} of {len(sample)} rows have an image url ({', '.join(sorted(sources)) or 'none'})")
+    print(f"  {len(rows)} of {len(sample)} rows have an image url "
+          f"({', '.join(sorted(sources)) or 'none'})")
+    if offsets:
+        series = pd.Series(offsets)
+        print(f"  still-vs-detection offset: median {series.median():.0f}s, "
+              f"90th pct {series.quantile(0.9):.0f}s, worst {series.max():.0f}s")
+        if series.median() > 120:
+            print("  WARNING: the stills being labelled are minutes away from "
+                  "the detections.\n           Boxes will not line up with the "
+                  "water in front of you.")
     if not rows:
         sys.exit("  No image urls resolved; nothing to download.")
 
@@ -604,6 +635,10 @@ def main():
             "cloud_cover": row.get("cloud_cover"),
             "solar_elevation": row.get("solar_elevation"),
             "image": os.path.basename(local),
+            "image_timestamp": (pd.Timestamp(entry["shot_at"]).isoformat()
+                                if entry.get("shot_at") is not None else ""),
+            "image_offset_s": ("" if entry.get("offset") is None
+                               else round(float(entry["offset"]), 1)),
             "boxes": json.dumps(boxes_for(row, box_index)),
             "rip_present": "",
             "notes": "",
