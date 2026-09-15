@@ -486,6 +486,21 @@ state, three of them carrying the level that produced the effect.
 **D1** is the distribution: median, IQR, 10th/90th, min, max, n sites, and a
 histogram, per analyte/predictor. The spread is the result.
 
+Beneath it, D1 now prints the denominator its `n_sites` column leaves out. Those
+`n_sites` disagree across predictors at the same analyte — on the Rhode Island
+run `wave_height` read 54 where `rain_24h_mm` read 120 — and 54 on its own
+cannot say whether the other 66 stations had a wave record that failed to
+correlate or never had one at all. Those are opposite facts about the coast and
+D1 reported them identically. The fit already knew: it emits a row for every
+station/analyte/predictor whatever happens, carrying the true paired count, so
+the coverage table splits the missing stations into `too_few` (measured here,
+under `MIN_PAIRED_N` paired samples — attempted and refused), `never` (zero
+paired samples, never attempted) and `no_variation` (enough samples, one side
+flat), and those four always sum to the fitted-station count. Any predictor
+under 95% coverage gets a line saying so, because its D1 row describes a subset
+of the beaches in the report and a median over a different set of beaches is a
+different quantity, not a comparable one.
+
 **D2** is the headline test, and it does **not** simply compare within-stratum
 IQR against overall IQR. Splitting any group into subgroups narrows an IQR
 mechanically, so that comparison finds structure in noise: in the test fixture,

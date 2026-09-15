@@ -151,6 +151,8 @@ def report_distributions(coefficients, column="rho_ctrl"):
                            "display.max_rows", 400):
         print("\n" + table.round(3).to_string(index=False))
 
+    report_predictor_coverage(coefficients, column=column)
+
     print("\nhistograms (one site = one count):")
     for (analyte, predictor), group in coefficients.groupby(["analyte", "predictor"]):
         values = pd.to_numeric(group[column], errors="coerce").dropna()
@@ -159,6 +161,96 @@ def report_distributions(coefficients, column="rho_ctrl"):
         print(f"\n  {analyte} vs {predictor}  ({len(values)} sites)")
         for line in histogram(values):
             print(line)
+    return table
+
+
+def predictor_coverage(coefficients, column="rho_ctrl"):
+    """Why one predictor's n_sites is smaller than another's, in the same D1 row block.
+
+    D1 prints n_sites beside every coefficient, and across eleven predictors at
+    one analyte that number is not the same: wave_height read 54 where
+    rain_24h_mm read 120. Read on its own, 54 says "54 sites" and nothing more.
+    It cannot say whether the other 66 stations HAD a wave record that failed to
+    correlate, or never had one at all. Those are opposite facts about the coast
+    and D1 reported them identically -- the same shape of defect as every other
+    one this module has had to fix.
+
+    The fit already knows. It emits a row for every station/analyte/predictor
+    whatever happens, and that row carries the true paired count, so the reasons
+    separate cleanly:
+
+      fitted        a coefficient was produced; this is the n_sites D1 prints
+      too_few       measured here, but fewer than MIN_PAIRED_N samples had both
+                    sides non-null -- attempted, and refused by the floor
+      never         zero paired samples: no record of this predictor at this
+                    station at all -- never attempted
+      no_variation  enough samples, but one side never changed, so a rank
+                    correlation is undefined
+
+    fitted + too_few + never + no_variation is every fitted station, which is
+    what `of` counts. A predictor whose `covered` is well under 1.00 describes a
+    SUBSET of the beaches in this report, and its D1 row is not comparable with a
+    predictor that covers all of them.
+    """
+    if coefficients is None or coefficients.empty:
+        return pd.DataFrame(columns=["analyte", "predictor", "of", "fitted",
+                                     "too_few", "never", "no_variation",
+                                     "covered"])
+    frame = coefficients.copy()
+    n_column = "n_ctrl" if column == "rho_ctrl" else "n"
+    if n_column not in frame.columns:
+        n_column = "n" if "n" in frame.columns else None
+    rows = []
+    for (analyte, predictor), group in frame.groupby(["analyte", "predictor"]):
+        values = pd.to_numeric(group[column], errors="coerce")
+        fitted = int(values.notna().sum())
+        missing = group[values.isna()]
+        if n_column is None:
+            never = too_few = no_variation = np.nan
+        else:
+            paired = pd.to_numeric(missing[n_column], errors="coerce").fillna(0)
+            never = int((paired <= 0).sum())
+            too_few = int(((paired > 0) & (paired < config.MIN_PAIRED_N)).sum())
+            no_variation = int((paired >= config.MIN_PAIRED_N).sum())
+        total = int(group["station_id"].nunique())
+        rows.append({"analyte": analyte, "predictor": predictor, "of": total,
+                     "fitted": fitted, "too_few": too_few, "never": never,
+                     "no_variation": no_variation,
+                     "covered": (fitted / total) if total else np.nan})
+    table = pd.DataFrame(rows)
+    return table.sort_values(["analyte", "covered", "predictor"])
+
+
+def report_predictor_coverage(coefficients, column="rho_ctrl"):
+    """Print the denominator D1 leaves out, and say when the rows disagree on it."""
+    table = predictor_coverage(coefficients, column=column)
+    if table.empty:
+        return table
+    print("\nwhich stations each predictor actually covers:")
+    print("  of            fitted stations for this analyte — the denominator")
+    print("                D1's n_sites is missing")
+    print("  fitted        produced a coefficient; this IS D1's n_sites")
+    print(f"  too_few       measured here, but under {config.MIN_PAIRED_N} paired samples —")
+    print("                attempted and refused, not absent")
+    print("  never         zero paired samples: no record of this predictor at")
+    print("                that station at all — never attempted")
+    print("  no_variation  enough samples, but one side never moved")
+    with pd.option_context("display.width", 200, "display.max_columns", 20,
+                           "display.max_rows", 400):
+        print("\n" + table.round(3).to_string(index=False))
+
+    thin = table[table["covered"] < 0.95]
+    if not thin.empty:
+        worst = thin.iloc[0]
+        print(f"\n  READ D1 WITH THIS: {worst['predictor']} was fitted at "
+              f"{int(worst['fitted'])} of {int(worst['of'])} station(s) "
+              f"({worst['covered']:.0%}).")
+        print("  Its D1 row describes those stations and no others, so it is NOT")
+        print("  comparable with a predictor covering all of them — a median over")
+        print("  a different set of beaches is a different quantity. "
+              f"{len(thin)} predictor(s)")
+        print("  fall below 95% coverage; the table above says, for each one,")
+        print("  whether the rest were refused or never measured.")
     return table
 
 

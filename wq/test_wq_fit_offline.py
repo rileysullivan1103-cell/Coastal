@@ -609,6 +609,84 @@ def test_per_site_table_has_what_was_asked_for():
           str(set(table["region"])))
 
 
+def test_d1_says_which_stations_a_predictor_covers():
+    print("\nD1 names its denominator (D1)")
+    # D1 prints n_sites and no denominator. Across eleven predictors at one
+    # analyte those n_sites disagree -- 54 against 120 on the Rhode Island run
+    # -- and the smaller number cannot say whether the missing stations had the
+    # predictor and failed to correlate, or never had it at all. Build all three
+    # reasons deliberately and check they stay apart.
+    import contextlib
+    import io as _io
+
+    rows = []
+    for index in range(10):
+        station = f"S{index}"
+        # rain: fitted everywhere.
+        rows.append({"station_id": station, "analyte": "ENT",
+                     "predictor": "rain_24h_mm", "family": "rain",
+                     "n_ctrl": 80, "rho_ctrl": 0.2 + 0.01 * index})
+        # wave: fitted at 4, NEVER MEASURED at 4, measured-but-short at 2.
+        if index < 4:
+            wave = {"n_ctrl": 60, "rho_ctrl": 0.1}
+        elif index < 8:
+            wave = {"n_ctrl": 0, "rho_ctrl": np.nan}       # never attempted
+        else:
+            wave = {"n_ctrl": 12, "rho_ctrl": np.nan}      # attempted, refused
+        rows.append({"station_id": station, "analyte": "ENT",
+                     "predictor": "wave_height", "family": "wave", **wave})
+        # level: measured everywhere but flat at 3 of them.
+        flat = index < 3
+        rows.append({"station_id": station, "analyte": "ENT",
+                     "predictor": "level_m", "family": "tide",
+                     "n_ctrl": 90,
+                     "rho_ctrl": np.nan if flat else -0.05})
+    coefficients = pd.DataFrame(rows)
+
+    table = report.predictor_coverage(coefficients).set_index("predictor")
+    wave = table.loc["wave_height"]
+    check("a predictor never recorded at a station is counted as 'never'",
+          int(wave["never"]) == 4, f"never={int(wave['never'])}")
+    check("and one recorded but under the paired floor is counted separately",
+          int(wave["too_few"]) == 2, f"too_few={int(wave['too_few'])}")
+    check("the two are not collapsed into one number",
+          int(wave["never"]) != int(wave["too_few"]))
+    check("a flat series is 'no_variation', not 'never'",
+          int(table.loc["level_m", "no_variation"]) == 3
+          and int(table.loc["level_m", "never"]) == 0,
+          f"no_variation={int(table.loc['level_m', 'no_variation'])}, "
+          f"never={int(table.loc['level_m', 'never'])}")
+    for predictor, row in table.iterrows():
+        total = row["fitted"] + row["too_few"] + row["never"] + row["no_variation"]
+        check(f"{predictor}: the reasons account for every fitted station",
+              int(total) == int(row["of"]), f"{int(total)} of {int(row['of'])}")
+
+    # fitted has to BE the number D1 prints, or the table explains a different
+    # figure from the one on the page.
+    buffer = _io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        d1 = report.report_distributions(coefficients)
+    printed = d1.set_index("predictor")["n_sites"]
+    check("fitted equals the n_sites D1 prints, predictor by predictor",
+          all(int(table.loc[name, "fitted"]) == int(printed[name])
+              for name in printed.index),
+          f"wave_height {int(table.loc['wave_height', 'fitted'])} "
+          f"vs D1 {int(printed['wave_height'])}")
+
+    text = buffer.getvalue()
+    check("the warning names the thin predictor and its real denominator",
+          "READ D1 WITH THIS: wave_height was fitted at 4 of 10" in text)
+    check("and says the row is not comparable with a fully covered one",
+          "comparable" in text)
+
+    full = coefficients[coefficients["predictor"] == "rain_24h_mm"]
+    quiet = _io.StringIO()
+    with contextlib.redirect_stdout(quiet):
+        report.report_distributions(full)
+    check("a predictor covering every station raises no warning",
+          "READ D1 WITH THIS" not in quiet.getvalue())
+
+
 def main():
     for test in (test_distribution_is_recovered_not_averaged,
                  test_every_coefficient_carries_its_n,
@@ -620,6 +698,7 @@ def main():
                  test_stratification_detected_when_present_and_absent,
                  test_the_shuffle_is_drawn_once_per_site,
                  test_the_report_says_where_its_stations_are,
+                 test_d1_says_which_stations_a_predictor_covers,
                  test_no_usable_predictor_is_counted,
                  test_multiple_testing_expectation,
                  test_per_site_table_has_what_was_asked_for):
