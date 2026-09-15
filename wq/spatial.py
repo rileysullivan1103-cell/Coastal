@@ -1483,6 +1483,13 @@ def probe_outfalls(lat, lon):
     own column list, and tries the geometry endpoints that would make column
     names irrelevant.
 
+    The coordinates are now solved: get_qid carries the attributes and
+    get_map carries LAT and LON, joined on the permit id, and 120 of 120
+    stations get a real distance. outfall_type is the one that stays empty,
+    so this also dumps EVERY field of a real facility record rather than the
+    first twenty, because a truncated record is how a missing field looks
+    exactly like a field nobody read.
+
     Prints raw status and body. It interprets nothing.
     """
     def show(label, url, params=None, head=400):
@@ -1518,6 +1525,15 @@ def probe_outfalls(lat, lon):
             hits = [n for n in names if n and
                     any(k in n.upper() for k in ("LAT", "LON", "GEO", "COORD"))]
             print(f"    anything positional: {hits}")
+            # outfall_type is the one ECHO covariate still empty at every
+            # site, and it is empty because the two fields it reads came
+            # back absent. Rather than guess a third pair of names, ask the
+            # column list what ECHO calls a major/minor flag and a facility
+            # type, and print every candidate.
+            kinds = [n for n in names if n and
+                     any(k in n.upper() for k in
+                         ("MAJOR", "MINOR", "TYPE", "CLASS", "CATEG"))]
+            print(f"    anything about kind or size: {kinds}")
         except (ValueError, AttributeError) as exc:
             print(f"    could not read the column list: {exc}")
 
@@ -1546,6 +1562,46 @@ def probe_outfalls(lat, lon):
         show(f"the {name} endpoint, which would carry coordinates itself",
              f"https://echodata.epa.gov/echo/cwa_rest_services.{name}",
              {"qid": qid, "output": "JSON"}, head=500)
+
+    # 4. Every field of a real facility record, in full. The body above is
+    #    truncated, and a truncated record is exactly how outfall_type came
+    #    to read empty at 120 sites while the distance beside it was right:
+    #    the two fields it wanted were never in the part anyone looked at.
+    #    This prints the whole key list and the whole first record, so the
+    #    names are read rather than guessed.
+    try:
+        payload = _get(ECHO_RECORDS,
+                       params={"qid": qid, "output": "JSON", "pageno": 1,
+                               "responseset": "1000"},
+                       probe=False, count_failures=False).json()
+    except LayerFailed as exc:
+        print(f"\n--- get_qid fields\n    FAILED {exc}")
+        return
+    batch = (payload.get("Results") or {}).get("Facilities") or []
+    print(f"\n--- every field on a get_qid facility record\n"
+          f"    {len(batch)} record(s) on page 1")
+    if not batch:
+        return
+    record = batch[0]
+    print(f"    {len(record)} field(s): {sorted(record)}")
+    kinds = [n for n in record if
+             any(k in n.upper() for k in
+                 ("MAJOR", "MINOR", "TYPE", "CLASS", "CATEG", "FLAG"))]
+    print(f"    fields about kind or size: {kinds}")
+    for name in kinds:
+        print(f"      {name} = {record.get(name)!r}")
+    # Present-but-empty is a different finding from absent, and only the
+    # whole record can tell them apart. Show what is actually populated.
+    filled = {k: v for k, v in record.items() if v not in (None, "")}
+    print(f"    {len(filled)} of {len(record)} field(s) populated on this "
+          f"record")
+    print(f"    populated: {sorted(filled)}")
+    # And across the page, not just one record -- a single facility can be
+    # sparse where the rest are not.
+    for name in ("CWPMajorMinorStatusFlag", "CWPFacilityTypeIndicator",
+                 "CWPPermitTypeDesc", "CWPPermitStatusDesc"):
+        present = sum(1 for r in batch if r.get(name) not in (None, ""))
+        print(f"    {name}: populated on {present} of {len(batch)} record(s)")
 
 
 def main():
