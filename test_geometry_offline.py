@@ -487,6 +487,60 @@ def test_the_reference_is_the_one_the_record_matches():
         shutil.rmtree(tmp)
 
 
+def test_fog_is_measured_and_excluded():
+    """Walton's contact sheet: every frame that failed to register is a whiteout.
+
+    Fog removes the structure a correlator needs WITHOUT removing the frame, so
+    a foggy still is not a wrong measurement, it is an empty one -- and it is
+    still handed to the correlator, which still returns a number. Clarity has
+    to separate those frames from clear ones, and it has to do it on EDGE
+    content rather than brightness or variance: a whiteout can be bright, and
+    a flat grey wall of fog can have a perfectly ordinary spread of grey levels
+    while carrying no edge at all.
+    """
+    print("\nfog, measured")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene(width=512, height=384)
+        dates = list(pd.date_range("2024-01-07", periods=10, freq="7D",
+                                   tz="UTC"))
+        paths = []
+        for index in range(10):
+            frame = water(base, seed=index)
+            if index in (3, 4, 7):
+                # Fog: contrast collapses toward a bright mean. Brightness goes
+                # UP, so a brightness test would miss it entirely.
+                frame = frame * 0.12 + 205
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        clarity = g.frame_clarity(paths, dates, downsample=1)
+        check("every frame is measured", len(clarity) == 10, len(clarity))
+        foggy = [clarity.loc[dates[i]] for i in (3, 4, 7)]
+        clear = [clarity.loc[dates[i]] for i in (0, 1, 2, 5, 6, 8, 9)]
+        check("fog scores far below clear", max(foggy) < min(clear) / 2,
+              (round(max(foggy), 2), round(min(clear), 2)))
+        floor = g.MIN_CLARITY * float(clarity.median())
+        caught = set(clarity.index[clarity < floor])
+        check("the default floor catches exactly the fog",
+              caught == {dates[3], dates[4], dates[7]},
+              sorted(str(d.date()) for d in caught))
+
+        # The trap this replaces: the foggy frames here are BRIGHTER than the
+        # clear ones, so anything keyed on mean level picks the wrong set.
+        levels = {}
+        for index, path in enumerate(paths):
+            levels[index] = float(g.load_gray(path).mean())
+        check("fog is brighter, so brightness would have chosen backwards",
+              min(levels[i] for i in (3, 4, 7))
+              > max(levels[i] for i in (0, 1, 2, 5, 6, 8, 9)),
+              {k: round(v) for k, v in levels.items()})
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_the_search_window_is_a_prior_that_reports_itself():
     """A camera bolted to a building does not move a quarter of its frame.
 
@@ -1257,6 +1311,7 @@ def main():
                  test_noise_never_becomes_the_reference,
                  test_a_blank_frame_cannot_register_or_anchor,
                  test_the_search_window_is_a_prior_that_reports_itself,
+                 test_fog_is_measured_and_excluded,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_disagreement_is_measured_as_a_vector,

@@ -110,6 +110,18 @@ PERFECT_MATCH = 1e6
 # reports how often the best peak anywhere was outside this window, so the
 # prior can be checked rather than trusted.
 MAX_SHIFT_PX = 150
+# A frame registers on the structure it contains, and fog removes structure
+# without removing the frame. Walton's contact sheet settles this: every frame
+# that failed to register against its neighbour is a whiteout, and the clear
+# ones are not. Those frames are not WRONG, they are EMPTY -- and a correlator
+# handed an empty frame still returns a number, with a peak that clears the
+# confidence floor often enough to poison the record.
+#
+# Clarity is the RMS gradient of the frame, in grey levels per pixel: how much
+# edge there is to align on. The threshold is a fraction of the RECORD'S OWN
+# median rather than an absolute, because it has to travel to cameras with
+# different optics, exposure and scenes.
+MIN_CLARITY = 0.45
 # How many candidates to propose and track before the agreement test picks the
 # keepers. More candidates is cheap -- the frames are already loaded, and a
 # 128x128 FFT is nothing next to decoding a 2560x1920 JPEG -- and it is the
@@ -286,6 +298,26 @@ def require_imaging():
     except ImportError:
         print("  matplotlib is not installed; the run will write the CSV and "
               "the text report\n  but no plot.  pip install matplotlib")
+
+
+def frame_clarity(paths, dates, downsample=4):
+    """RMS gradient per frame: how much structure there is to register on.
+
+    Not brightness and not variance. A whiteout can be bright and a foggy frame
+    can have a perfectly ordinary spread of grey levels while carrying no EDGE
+    at all, and edges are the only thing phase correlation can use.
+    """
+    rows = []
+    for path, date in zip(paths, dates):
+        image = load_gray(path, downsample=downsample)
+        if image is None:
+            continue
+        gy, gx = np.gradient(image)
+        rows.append({"date": date,
+                     "clarity": float(np.sqrt(np.mean(gy ** 2 + gx ** 2)))})
+    if not rows:
+        return pd.Series(dtype=float)
+    return pd.DataFrame(rows).set_index("date")["clarity"].sort_index()
 
 
 def frame_sizes(paths, dates):
@@ -1582,6 +1614,12 @@ def main():
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--min-clarity", type=float, default=MIN_CLARITY,
+                    help=f"drop frames whose RMS gradient is below this "
+                         f"fraction of the record's median (default "
+                         f"{MIN_CLARITY}). Fog removes the structure a "
+                         "correlator needs without removing the frame. 0 keeps "
+                         "everything.")
     ap.add_argument("--max-shift", type=float, default=MAX_SHIFT_PX,
                     help=f"how far the camera is allowed to have moved, in "
                          f"pixels (default {MAX_SHIFT_PX}). A PRIOR, not a "
@@ -1656,6 +1694,35 @@ def main():
     print(f"\n{len(paths)} frames on disk, "
           f"{dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}")
     frame_sizes(paths, dates)
+
+    # Fog is the obstacle, not geometry. Walton's contact sheet showed every
+    # frame that failed to register against its neighbour is a whiteout, and
+    # the quarters that fail are the foggy ones. A frame with no edges in it
+    # cannot be registered, but it is still handed to the correlator, which
+    # still returns a number -- so it has to be excluded before it votes.
+    all_paths, all_dates, foggy = paths, dates, set()
+    clarity = frame_clarity(paths, dates)
+    if args.min_clarity and not clarity.empty:
+        floor = args.min_clarity * float(clarity.median())
+        foggy = set(clarity.index[clarity < floor])
+        print(f"\nCLARITY  (RMS gradient; fog has no edges to align on)")
+        print(f"  median {clarity.median():.2f}, "
+              f"quartiles {clarity.quantile(0.25):.2f}-"
+              f"{clarity.quantile(0.75):.2f}, "
+              f"floor {floor:.2f} = {args.min_clarity:.0%} of the median")
+        if foggy:
+            keep = [i for i, date in enumerate(dates) if date not in foggy]
+            print(f"  {len(foggy)}/{len(clarity)} frames are below it and are "
+                  "NOT registered.")
+            print("  They are not evidence of stability or of a move; they "
+                  "are unmeasured.")
+            paths = [paths[i] for i in keep]
+            dates = [dates[i] for i in keep]
+            if len(paths) < 5:
+                sys.exit("fewer than 5 frames survive the clarity floor; "
+                         "lower --min-clarity or sample a different hour")
+        else:
+            print("  every frame clears it")
 
     rois = [parse_roi(text) for text in args.roi]
     if rois:
@@ -1839,14 +1906,14 @@ def main():
                     weak = list(sequential.index[
                         sequential["confidence"] < MIN_CONFIDENCE])
                 sheet = wrote(contact_sheet(
-                    paths, dates,
+                    all_paths, all_dates,
                     os.path.join(OUT_DIR, f"frames_{slug}.jpg"),
-                    flagged=weak))
+                    flagged=set(weak) | foggy))
                 if sheet:
                     print(f"\n  every sampled frame, labelled: {sheet}")
-                    print("  Frames boxed in orange did not register against "
-                          "their neighbour.")
-                    print("  What they have in common is the thing to fix.")
+                    print("  Boxed in orange: too little contrast to register, "
+                          "or failed against\n  their neighbour. At Walton "
+                          "these are the whiteouts.")
 
             print("\nDISPLACEMENT FROM THE REFERENCE, by date")
             for line in spark(coarse["offset"],
