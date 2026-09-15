@@ -686,6 +686,35 @@ def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
     return frame
 
 
+def still_threshold(values, bins=64):
+    """Otsu's split of `values` into a still group and a moving one.
+
+    Returns the cut that maximises the between-group variance. On a single
+    cluster that is near the middle; on two clusters it lands in the gap.
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size < 4:
+        return float(values.max()) if values.size else 0.0
+    counts, edges = np.histogram(values, bins=bins)
+    weight = np.cumsum(counts)
+    total = weight[-1]
+    if total == 0 or weight[-1] == counts[0]:
+        return float(np.median(values))
+    centres = (edges[:-1] + edges[1:]) / 2.0
+    running = np.cumsum(counts * centres)
+    below, above = weight, total - weight
+    usable = (below > 0) & (above > 0)
+    if not usable.any():
+        return float(np.median(values))
+    mean_below = np.where(below > 0, running / np.maximum(below, 1), 0.0)
+    mean_above = np.where(above > 0,
+                          (running[-1] - running) / np.maximum(above, 1), 0.0)
+    between = below * above * (mean_below - mean_above) ** 2
+    between = np.where(usable, between, -np.inf)
+    return float(edges[int(np.argmax(between)) + 1])
+
+
 def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
                  land_fraction=LAND_FRACTION, sample=16,
                  top_margin=0, bottom_margin=0):
@@ -784,10 +813,26 @@ def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
     print(f"  row variation, top edge inward: {head}  "
           f"(frame typical {typical:.1f})")
 
-    # Stability as a constraint: keep the calmer half of the candidates, then
-    # maximise sharpness among them. Sky passes the stability test and then
-    # loses on sharpness, which is the behaviour that was missing.
-    calm = patch_spread <= np.percentile(patch_spread[usable], 50)
+    # Stability as a constraint, then maximise sharpness among what passes.
+    # Sky passes the stability test and then loses on sharpness, which is the
+    # behaviour that was missing.
+    #
+    # THE THRESHOLD CANNOT BE "THE CALMER HALF". A median split asserts that
+    # half the searchable frame is still, and at Walton it is not: the water
+    # reaches most of the way up the usable rows, so the calmer half still
+    # contained surf, and surf has the sharpest edges in the frame -- every
+    # whitecap is an edge -- so it won the sharpness contest and four patches
+    # landed on the sea. The levelling made land and water separable; it was
+    # this fixed 50% that let the water back in.
+    #
+    # Let the frame say where the split is. Otsu's threshold maximises the
+    # variance BETWEEN the two groups, so when the patches really do fall into
+    # a still class and a moving class it lands in the gap between them,
+    # wherever that gap sits -- and on a frame with no water, where the values
+    # are one cluster, it cuts near the middle, which is what the old rule did.
+    # So it is never worse than the median split and is much better when it
+    # matters.
+    calm = patch_spread <= still_threshold(patch_spread[usable])
 
     # ...but not TOO still. See OVERLAY_SPREAD. The test has to be the SHARE OF
     # DEAD PIXELS inside the patch, not the patch's mean variation: a patch
@@ -1680,6 +1725,11 @@ def main():
                     help="re-use the frames a previous --sample downloaded and "
                          "make no network calls. Use this for every re-run "
                          "that only changes --roi, --candidates or margins.")
+    ap.add_argument("--since", help="ignore frames before this date "
+                                    "(YYYY-MM-DD), to ask the question of one "
+                                    "window rather than the whole archive")
+    ap.add_argument("--until", help="ignore frames after this date "
+                                    "(YYYY-MM-DD)")
     ap.add_argument("--roi", action="append", default=[],
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
@@ -1763,6 +1813,34 @@ def main():
     dates = [dates[i] for i in order]
     print(f"\n{len(paths)} frames on disk, "
           f"{dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}")
+
+    # A DATE WINDOW IS NOT CHERRY-PICKING WHEN IT IS THE WINDOW THE ANSWER IS
+    # FOR. Every measurement here carries the record's own noise, and that
+    # noise is set by the WHOLE record: a stretch the correlator cannot follow
+    # raises the floor for the part it can, so a question about one year gets
+    # answered at three years' precision. Walton's rip detections span
+    # 2025-08-31 to 2026-08-25 and nothing pooled across them depends on 2023.
+    # Asking about that window alone is a narrower question, honestly answered,
+    # rather than the same question answered badly.
+    if args.since or args.until:
+        window = [i for i, date in enumerate(dates)
+                  if (not args.since
+                      or date >= pd.Timestamp(args.since, tz="UTC"))
+                  and (not args.until
+                       or date <= pd.Timestamp(args.until, tz="UTC"))]
+        if len(window) < 5:
+            sys.exit(f"only {len(window)} frames fall inside "
+                     f"{args.since or 'the start'} to {args.until or 'the end'}"
+                     "; widen the window or sample more densely")
+        paths = [paths[i] for i in window]
+        dates = [dates[i] for i in window]
+        print(f"  restricted to {len(paths)} frames, "
+              f"{dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}")
+        print("  every figure below describes THIS window and says nothing "
+              "about the rest")
+        print("  of the archive, including its noise floor, which the dropped "
+              "frames no")
+        print("  longer raise")
     frame_sizes(paths, dates)
 
     # Fog is the obstacle, not geometry. Walton's contact sheet showed every

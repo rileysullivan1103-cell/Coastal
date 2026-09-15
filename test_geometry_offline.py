@@ -539,6 +539,72 @@ def test_water_is_rejected_under_changing_light():
         shutil.rmtree(tmp)
 
 
+def test_water_wins_a_median_split_when_it_covers_most_of_the_frame():
+    """Walton's actual failure, which the levelling alone did not fix.
+
+    The picker kept "the calmer half" of the searchable patches. That is an
+    assertion about the frame -- that half of it is still -- and at Walton it
+    is false: water reaches most of the way up the usable rows, so the calmer
+    half still contained surf. Surf then WINS the sharpness contest, because
+    every whitecap is an edge, and patches land on the sea. Levelling made the
+    two separable; the fixed 50% is what let the water back in.
+
+    Otsu's threshold puts the cut in the gap between the two groups wherever
+    that gap sits, so the split follows the frame instead of being asserted.
+    """
+    print("\nwater covering most of the searchable frame")
+
+    # The mechanism, in isolation: 70% water, 30% land, well separated.
+    land = np.full(30, 1.0)
+    sea = np.full(70, 9.0)
+    both = np.concatenate([land, sea])
+    median_split = float(np.percentile(both, 50))
+    otsu = g.still_threshold(both)
+    check("a median split admits the water", median_split >= 9.0, median_split)
+    check("Otsu puts the cut in the gap", 1.0 < otsu < 9.0, round(otsu, 2))
+    check("so only the land passes",
+          int((both <= otsu).sum()) == 30, int((both <= otsu).sum()))
+
+    one_cluster = np.random.default_rng(5).normal(4.0, 0.5, 200)
+    cut = g.still_threshold(one_cluster)
+    check("with no second group it still cuts near the middle",
+          abs(float((one_cluster <= cut).mean()) - 0.5) < 0.25,
+          round(float((one_cluster <= cut).mean()), 2))
+
+    # And end to end, on a frame shaped like Walton's: a narrow built-up
+    # strip over a lot of moving water, under changing light.
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        rng = np.random.default_rng(11)
+        paths = []
+        for index in range(16):
+            gain, lift = rng.uniform(0.55, 1.0), rng.uniform(0, 80)
+            frame = np.empty((256, 384))
+            frame[:80] = 60.0                       # buildings, top 31%
+            for x in range(15, 370, 63):
+                frame[30:74, x:x + 34] = 205
+                frame[14:30, x + 6:x + 28] = 238
+            frame[:80] += rng.normal(0, 2, (80, 384))
+            # Water below, with whitecaps: SHARPER than the rooflines, and
+            # different in every frame. This is the trap.
+            sea = rng.normal(120, 18, (176, 384))
+            caps = rng.random((176, 384)) < 0.04
+            sea[caps] = 250
+            frame[80:] = sea
+            path = os.path.join(tmp, f"w{index:02d}.jpg")
+            Image.fromarray((frame * gain + lift).clip(0, 255).astype(np.uint8)
+                            ).save(path)
+            paths.append(path)
+
+        rois = g.propose_rois(paths, size=64, count=8, land_fraction=1.0)
+        check("it proposes patches", len(rois) >= 3, len(rois))
+        wet = [(r["name"], r["y"]) for r in rois if r["y"] + 32 > 80]
+        check("and none of them sit on the water", not wet, wet)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_fog_is_measured_and_excluded():
     """Walton's contact sheet: every frame that failed to register is a whiteout.
 
@@ -1495,6 +1561,7 @@ def main():
                  test_the_search_window_is_a_prior_that_reports_itself,
                  test_fog_is_measured_and_excluded,
                  test_water_is_rejected_under_changing_light,
+                 test_water_wins_a_median_split_when_it_covers_most_of_the_frame,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_disagreement_is_measured_as_a_vector,
