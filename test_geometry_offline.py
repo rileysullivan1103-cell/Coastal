@@ -668,6 +668,112 @@ def test_features_with_no_overlapping_dates_are_not_linked():
           "c" not in kept, kept)
 
 
+def test_the_survey_tiles_the_whole_frame():
+    """The survey asks nothing about appearance, so it must cover everything.
+
+    Every failure so far came from a picker deciding where to look. The survey
+    exists to stop deciding, so a grid that quietly skipped the bottom third --
+    the one part of Walton's frame the land fraction never searched -- would
+    reproduce the bug it is meant to end.
+    """
+    print("\nthe whole-frame survey grid")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        path = os.path.join(tmp, "f00.jpg")
+        Image.fromarray(np.zeros((512, 768), dtype=np.uint8)).save(path)
+        cells = g.survey_rois([path], size=128)
+        check("the grid reaches the right edge",
+              max(c["x"] for c in cells) + 128 > 768 - 128,
+              max(c["x"] for c in cells))
+        check("and the bottom edge",
+              max(c["y"] for c in cells) + 128 > 512 - 128,
+              max(c["y"] for c in cells))
+        check("it starts at the top-left", (cells[0]["x"], cells[0]["y"]) == (0, 0),
+              (cells[0]["x"], cells[0]["y"]))
+        check("no cell runs off the frame",
+              all(c["x"] + c["w"] <= 768 and c["y"] + c["h"] <= 512
+                  for c in cells))
+        check("names are unique",
+              len({c["name"] for c in cells}) == len(cells))
+
+        margined = g.survey_rois([path], size=128, top_margin=200)
+        check("a top margin is respected",
+              min(c["y"] for c in margined) >= 200,
+              min(c["y"] for c in margined))
+
+        # Thinning must still span the frame, not stop part way down it.
+        thinned = g.survey_rois([path], size=64, limit=10)
+        check("thinning keeps the span, it does not truncate",
+              max(c["y"] for c in thinned) > 512 // 2,
+              max(c["y"] for c in thinned))
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_a_large_survey_still_finds_the_rigid_block():
+    """Greedy grouping, on more patches than Bron-Kerbosch should be given.
+
+    A survey hands the agreement test hundreds of cells. The exact search is
+    exponential in the worst case, so past a threshold it switches to growing
+    the group greedily -- which has to find the same answer on the shape that
+    actually occurs: one dense block of agreeing cells in a sea of noise.
+    """
+    print("\na survey-sized candidate set")
+    rng = np.random.default_rng(23)
+    truth = [(0.0, 0.0)] * 15 + [(4.0, -7.0)] * 15
+    series = {}
+    for index in range(40):                     # the rigid block
+        series[f"r{index}"] = [(dy + rng.normal(0, 0.2),
+                                dx + rng.normal(0, 0.2)) for dy, dx in truth]
+    for index in range(60):                     # water, sky, glare
+        series[f"n{index}"] = [(rng.normal(0, 20), rng.normal(0, 20))
+                               for _ in truth]
+    kept, rejected, _ = g.agreeing_features(tracked(series), tolerance=3.0)
+    check("the rigid block is recovered", len(kept) >= 35, len(kept))
+    check("and holds no noise cell",
+          all(name.startswith("r") for name in kept),
+          [n for n in kept if not n.startswith("r")][:5])
+    check("the noise cells are rejected", len(rejected) >= 60, len(rejected))
+
+    signal = g.agreeing_signal(tracked(series)[
+        tracked(series)["feature"].isin(kept)])
+    steps = g.find_steps(signal["offset"], threshold=3.0, persist=3)
+    check("the planted step survives a survey-sized selection",
+          len(steps) == 1, steps)
+
+
+def test_a_changed_frame_size_is_reported():
+    """A resolution change is an epoch boundary, and the cheapest one to find.
+
+    Nothing downstream means anything across it: the same pixel is different
+    ground on either side, so every patch disagrees with every other and the
+    disagreement IS the answer rather than an obstacle to it.
+    """
+    print("\nframe sizes across the record")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        dates = list(pd.date_range("2024-01-07", periods=6, freq="7D", tz="UTC"))
+        paths = []
+        for index in range(6):
+            shape = (256, 384) if index < 3 else (512, 768)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(np.zeros(shape, dtype=np.uint8)).save(path)
+            paths.append(path)
+        groups = g.frame_sizes(paths, dates)
+        check("both sizes are found", len(groups) == 2, sorted(groups))
+        check("and each carries its frames",
+              sorted(len(v) for v in groups.values()) == [3, 3],
+              {k: len(v) for k, v in groups.items()})
+
+        same = g.frame_sizes(paths[:3], dates[:3])
+        check("a single-resolution record reports one size", len(same) == 1,
+              sorted(same))
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_epochs_count_stills_not_just_samples():
     print("\nepoch sizes in stills")
     dates = list(pd.date_range("2024-01-07", periods=10, freq="7D", tz="UTC"))
@@ -704,6 +810,9 @@ def main():
                  test_the_agreeing_group_is_recovered_from_noise,
                  test_a_frame_with_nothing_rigid_in_it_returns_nothing,
                  test_features_with_no_overlapping_dates_are_not_linked,
+                 test_the_survey_tiles_the_whole_frame,
+                 test_a_large_survey_still_finds_the_rigid_block,
+                 test_a_changed_frame_size_is_reported,
                  test_epochs_count_stills_not_just_samples):
         test()
     print("\n" + ("ALL PASS" if not FAILURES

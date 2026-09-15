@@ -249,6 +249,44 @@ def require_imaging():
               "the text report\n  but no plot.  pip install matplotlib")
 
 
+def frame_sizes(paths, dates):
+    """Distinct pixel dimensions in the sampled record, with dates.
+
+    This should have been the first thing checked and was not. If the camera
+    was replaced or reconfigured, the stills change size, and then NOTHING in
+    this module means what it says: a patch at (1160, 276) is looking at
+    different ground in the two halves of the record, every feature disagrees
+    with every other, and the disagreement is the answer rather than an
+    obstacle to it. The header carries the size, so this costs no decoding.
+
+    Returns a dict of (width, height) -> list of indices.
+    """
+    from PIL import Image
+    groups = {}
+    for index, path in enumerate(paths):
+        try:
+            with Image.open(path) as img:
+                size = img.size
+        except Exception:
+            size = None
+        groups.setdefault(size, []).append(index)
+    if len(groups) > 1:
+        print("\n" + "!" * 74)
+        print(f"THE RECORD HOLDS {len(groups)} DIFFERENT FRAME SIZES.")
+        print("That is a hard epoch boundary on its own: the same pixel is")
+        print("different ground on either side of it, so no patch can track")
+        print("across it and no pixel metric pools across it.")
+    for size, indices in sorted(groups.items(),
+                                key=lambda kv: -len(kv[1])):
+        name = f"{size[0]}x{size[1]}" if size else "unreadable"
+        span = (f"{dates[indices[0]]:%Y-%m-%d} to "
+                f"{dates[indices[-1]]:%Y-%m-%d}")
+        print(f"  {name:>12}  {len(indices):>4} frames  {span}")
+    if len(groups) > 1:
+        print("!" * 74)
+    return groups
+
+
 def load_gray(path, downsample=1):
     """Greyscale float array, or None if the file is not a readable image."""
     from PIL import Image
@@ -478,6 +516,45 @@ def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
     return rois
 
 
+def survey_rois(paths, size=ROI_SIZE, top_margin=0, bottom_margin=0,
+                limit=400):
+    """Tile the WHOLE frame, and let the agreement test say where land is.
+
+    propose_rois answers "where does this frame look sharp and still", which at
+    Walton has now picked sky, a translucent banner and fog in turn. The survey
+    asks nothing about appearance at all: it lays a grid over every row the
+    margins allow, tracks every cell, and reports which cells agree with each
+    other. Whatever is bolted down shows up as the region whose cells move
+    together, wherever it turns out to be -- including below the land fraction,
+    which is a guess about framing that Walton may simply not obey.
+
+    It is the expensive mode and the honest one. The frames are decoded once
+    for all cells, so the cost over --candidates is one small FFT per cell per
+    frame, not one more pass over the JPEGs.
+    """
+    first = load_gray(paths[0])
+    if first is None:
+        return []
+    height, width = first.shape
+    top = top_margin
+    bottom = height - bottom_margin
+    rois = []
+    for y in range(top, bottom - size + 1, size):
+        for x in range(0, width - size + 1, size):
+            rois.append({"name": f"c{len(rois) + 1}", "x": x, "y": y,
+                         "w": size, "h": size})
+    if len(rois) > limit:
+        # Thin evenly rather than truncating, so the survey still spans the
+        # whole frame instead of stopping part way down it.
+        step = int(np.ceil(len(rois) / limit))
+        rois = rois[::step]
+        for index, roi in enumerate(rois, 1):
+            roi["name"] = f"c{index}"
+    print(f"  {len(rois)} grid cells of {size}px over rows "
+          f"{top}-{bottom} of {height}")
+    return rois
+
+
 def draw_rois(path, rois, out_path, rejected=()):
     """Write the reference frame with the chosen patches boxed and labelled.
 
@@ -599,11 +676,17 @@ def agreeing_signal(frame):
     rows = []
     for date, group in frame.groupby("date"):
         dx, dy = float(group["dx"].median()), float(group["dy"].median())
+        apart = np.hypot(group["dx"] - dx, group["dy"] - dy)
         rows.append({
             "date": date, "dx": dx, "dy": dy,
             "offset": float(np.hypot(dx, dy)),
-            "spread": float(np.hypot(group["dx"] - dx,
-                                     group["dy"] - dy).max()),
+            # TYPICAL disagreement, which is what the gate is named after and
+            # what it should test. The maximum is reported beside it but does
+            # not gate: over a survey's worth of cells the worst cell on one
+            # foggy date is always several pixels out, and gating on it throws
+            # away a record that eleven cells agree about.
+            "spread": float(np.median(apart)),
+            "spread_max": float(apart.max()),
             "features": int(group["feature"].nunique())})
     return pd.DataFrame(rows).set_index("date").sort_index()
 
@@ -625,6 +708,28 @@ def _cliques(nodes, adjacency):
 
     expand([], set(nodes), set())
     return found
+
+
+def _greedy_group(names, adjacency, seeds=40):
+    """Largest mutually-agreeing set, found greedily.
+
+    Bron-Kerbosch is exact and fine for a dozen candidates; on a few hundred
+    survey cells its worst case is not. Growing a group from each of the
+    best-connected nodes, always adding the node that keeps the most options
+    open, finds the rigid region in practice -- and the rigid region is a
+    dense block, which is the easy case for greedy.
+    """
+    order = sorted(names, key=lambda n: -len(adjacency[n]))[:seeds]
+    best = []
+    for seed in order:
+        group, pool = [seed], set(adjacency[seed])
+        while pool:
+            node = max(pool, key=lambda n: len(adjacency[n] & pool))
+            group.append(node)
+            pool &= adjacency[node]
+        if len(group) > len(best):
+            best = group
+    return [best]
 
 
 def agreeing_features(frame, tolerance=STEP_PX, minimum=MIN_CLUSTER):
@@ -678,8 +783,9 @@ def agreeing_features(frame, tolerance=STEP_PX, minimum=MIN_CLUSTER):
 
     # Biggest clique wins; ties go to the tightest, so a spurious pair of
     # patches that happen to be 2.9 px apart never beats a real group.
-    best = max(_cliques(names, adjacency),
-               key=lambda c: (len(c), -tightness(c)), default=[])
+    groups = (_cliques(names, adjacency) if len(names) <= 20
+              else _greedy_group(names, adjacency))
+    best = max(groups, key=lambda c: (len(c), -tightness(c)), default=[])
     best = sorted(best)
 
     def distance_to(group):
@@ -944,6 +1050,16 @@ def main():
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--survey", action="store_true",
+                    help="ignore the feature picker: tile the WHOLE frame and "
+                         "report which cells agree with each other. Use this "
+                         "when the candidates all disagree — it finds the "
+                         "rigid region from the record instead of from how "
+                         "the frame looks.")
+    ap.add_argument("--roi-size", type=int, default=ROI_SIZE,
+                    help=f"patch edge in pixels (default {ROI_SIZE}). A bigger "
+                         "patch holds more structure and registers a soft "
+                         "scene better.")
     ap.add_argument("--candidates", type=int, default=CANDIDATES,
                     help=f"patches to propose and track before the agreement "
                          f"test keeps the rigid ones (default {CANDIDATES})")
@@ -984,25 +1100,38 @@ def main():
     dates = [dates[i] for i in order]
     print(f"\n{len(paths)} frames on disk, "
           f"{dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}")
+    frame_sizes(paths, dates)
 
     rois = [parse_roi(text) for text in args.roi]
-    if not rois:
+    if rois:
+        pass
+    elif args.survey:
+        print("\nSURVEY: tiling the whole frame. Nothing is being judged on "
+              "how it looks;\nthe agreement test alone decides which cells "
+              "are on rigid ground.")
+        rois = survey_rois(paths, size=args.roi_size,
+                           top_margin=args.top_margin,
+                           bottom_margin=args.bottom_margin)
+        if not rois:
+            sys.exit("could not read the first frame to lay out a grid")
+    else:
         print(f"\nproposing {args.candidates} candidate patches (sharp in "
               f"space, still in time,\ntop {args.land_fraction:.0%} of frame); "
               "the agreement test picks the keepers")
-        rois = propose_rois(paths, count=args.candidates,
+        rois = propose_rois(paths, size=args.roi_size, count=args.candidates,
                             land_fraction=args.land_fraction,
                             top_margin=args.top_margin,
                             bottom_margin=args.bottom_margin)
         if not rois:
             sys.exit("could not choose features; pass --roi name:x,y,w,h")
-    for roi in rois:
-        extra = ""
-        if "spread" in roi:
-            extra = (f"  structure={roi['structure']:.2f} "
-                     f"variation={roi['spread']:.2f}")
-        print(f"  {roi['name']:<6} x={roi['x']:>5} y={roi['y']:>5} "
-              f"{roi['w']}x{roi['h']}{extra}")
+    if len(rois) <= 20:
+        for roi in rois:
+            extra = ""
+            if "spread" in roi:
+                extra = (f"  structure={roi['structure']:.2f} "
+                         f"variation={roi['spread']:.2f}")
+            print(f"  {roi['name']:<6} x={roi['x']:>5} y={roi['y']:>5} "
+                  f"{roi['w']}x{roi['h']}{extra}")
 
     pick = sharpest(paths, rois)
     print(f"\n  reference frame: {dates[pick]:%Y-%m-%d} "
@@ -1021,28 +1150,55 @@ def main():
     # step that used to be my guess about the frame contents and is now the
     # record's own answer.
     kept, rejected, distance = agreeing_features(frame, tolerance=args.step_px)
-    if len(rois) > 1:
+    if 1 < len(rois) <= 20:
         print(f"\nagreement between candidates (median px apart over the "
               f"record, threshold {args.step_px:.0f})")
         for roi in rois:
             name = roi["name"]
             apart = distance.get(name)
             mark = "keep  " if name in kept else "drop  "
-            reading = f"{apart:6.2f} px from the group" if apart is not None \
-                else "     no overlapping dates"
+            if apart is None or not np.isfinite(apart):
+                reading = "   too few dates in common to compare"
+            else:
+                reading = f"{apart:6.2f} px from the group"
             print(f"  {mark}{name:<4} {reading}")
     if not kept:
-        sys.exit(
-            f"\nNo {MIN_CLUSTER} candidates agree with each other to within "
-            f"{args.step_px:.0f} px.\n"
+        finite = [v for v in distance.values() if np.isfinite(v)]
+        closest = (f"{min(finite):.1f} px" if finite else
+                   "— no two patches even share enough readable dates to "
+                   "compare")
+        message = [
+            f"\nNo {MIN_CLUSTER} of {len(rois)} patches agree with each other "
+            f"to within {args.step_px:.0f} px.",
+            f"The closest any patch comes to the rest is {closest}.",
             "Nothing in the searched part of the frame is behaving like rigid "
-            "structure, so\nthere is no answer to give -- a verdict from these "
-            "patches would be noise.\n"
-            "Open the candidate preview above and pass the buildings by hand:\n"
-            "  --roi roof:X,Y,128,128 --roi pier:X,Y,128,128 "
-            "--roi wall:X,Y,128,128\n"
-            "or widen the search with --land-fraction 0.8 so the built-up rows "
-            "are included.")
+            "structure, so",
+            "there is no answer to give -- a verdict from these patches would "
+            "be noise."]
+        if args.survey:
+            # The survey already looked everywhere, so the next move is not a
+            # different place to look.
+            message += [
+                "",
+                "The survey covered the whole frame, so this is not a patch "
+                "placement problem.",
+                "Either nothing in this camera's view is rigid at this patch "
+                "size -- try",
+                f"--roi-size {args.roi_size * 2}, which holds four times the "
+                "structure -- or the record",
+                "really does not register, which is itself the answer to the "
+                "question asked:",
+                "the archive would not be one geometric record."]
+        else:
+            message += [
+                "",
+                "Let the record find the rigid region instead of the picker:",
+                "  --survey        tiles the whole frame and reports which "
+                "cells agree",
+                "or pass the structure by hand from the preview above:",
+                f"  --roi roof:X,Y,{args.roi_size},{args.roi_size} "
+                f"--roi pier:X,Y,{args.roi_size},{args.roi_size}"]
+        sys.exit("\n".join(message))
     if rejected:
         print(f"\n  {len(rejected)} of {len(rois)} candidates did not track "
               f"with the others and were dropped.")
@@ -1052,9 +1208,18 @@ def main():
     frame = frame[frame["feature"].isin(kept)]
     kept_rois = [r for r in rois if r["name"] in kept]
     dropped_rois = [r for r in rois if r["name"] not in kept]
+    if len(kept_rois) > 1:
+        # Where the rigid region turned out to be, in numbers, so the finding
+        # survives without the picture.
+        xs = [r["x"] for r in kept_rois]
+        ys = [r["y"] for r in kept_rois]
+        print(f"  the agreeing patches span x {min(xs)}-{max(xs) + args.roi_size}"
+              f", y {min(ys)}-{max(ys) + args.roi_size}")
     final = draw_rois(paths[pick], kept_rois,
                       os.path.join(OUT_DIR, f"rois_{slug}.jpg"),
-                      rejected=dropped_rois)
+                      # Hundreds of grey survey cells make the picture
+                      # unreadable; the kept ones are the finding.
+                      rejected=dropped_rois if len(dropped_rois) <= 30 else ())
     if final:
         # Absolute, because data/ is often a symlink into another checkout and
         # a relative path pasted into a browser is a 404 rather than a file.
@@ -1093,7 +1258,8 @@ def main():
     print(f"largest single-date offset:      {signal['offset'].max():.2f} px "
           f"on {signal['offset'].idxmax():%Y-%m-%d}")
     disagreement = float(signal["spread"].median())
-    print(f"typical disagreement between features: {disagreement:.2f} px")
+    print(f"typical disagreement between features: {disagreement:.2f} px "
+          f"(worst {signal['spread_max'].median():.2f} px)")
 
     # The whole method rests on the patches tracking one rigid scene. When
     # they disagree by more than the size of the step being looked for, they
