@@ -118,6 +118,35 @@ def test_features_are_chosen_on_land():
         shutil.rmtree(tmp)
 
 
+def test_roi_preview_is_written():
+    print("\nthe ROI preview image")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        path = os.path.join(tmp, "frame.jpg")
+        Image.fromarray(scene().clip(0, 255).astype(np.uint8)).save(path)
+        rois = [{"name": "roof", "x": 40, "y": 40, "w": 128, "h": 64},
+                {"name": "tower", "x": 224, "y": 16, "w": 96, "h": 112}]
+        out = os.path.join(tmp, "rois.jpg")
+        got = g.draw_rois(path, rois, out)
+        check("it writes a file", got == out and os.path.exists(out))
+        with Image.open(out) as drawn:
+            check("the preview keeps the frame's size",
+                  drawn.size == (384, 256), drawn.size)
+            check("and is RGB, so the boxes can be coloured",
+                  drawn.mode == "RGB", drawn.mode)
+
+        # A frame that is not an image must not take the run down: the preview
+        # is a convenience and the registration is the job.
+        broken = os.path.join(tmp, "broken.jpg")
+        with open(broken, "w") as fh:
+            fh.write("not an image")
+        check("an unreadable frame returns None rather than raising",
+              g.draw_rois(broken, rois, out) is None)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_a_planted_step_is_found_on_the_right_date():
     print("\nstep detection on a planted remount")
     tmp = tempfile.mkdtemp()
@@ -213,6 +242,7 @@ def test_epochs_count_stills_not_just_samples():
 def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
+                 test_roi_preview_is_written,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_epochs_count_stills_not_just_samples):

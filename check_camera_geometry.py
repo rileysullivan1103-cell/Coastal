@@ -310,6 +310,32 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
     return rois
 
 
+def draw_rois(path, rois, out_path):
+    """Write the reference frame with the chosen patches boxed and labelled.
+
+    "Eyeball these before trusting the result" is not actionable when the
+    result is four x/y triples and the frame is 2560 px wide. A picture is.
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    try:
+        with Image.open(path) as source:
+            image = source.convert("RGB")
+    except Exception:
+        return None
+    draw = ImageDraw.Draw(image)
+    width = max(2, image.width // 500)
+    for roi in rois:
+        box = [roi["x"], roi["y"], roi["x"] + roi["w"], roi["y"] + roi["h"]]
+        draw.rectangle(box, outline=(228, 87, 46), width=width)
+        draw.text((roi["x"] + 4, max(0, roi["y"] - 14 * width)), roi["name"],
+                  fill=(228, 87, 46))
+    image.save(out_path, quality=88)
+    return out_path
+
+
 def crop(image, roi):
     patch = image[roi["y"]: roi["y"] + roi["h"], roi["x"]: roi["x"] + roi["w"]]
     return patch if patch.shape == (roi["h"], roi["w"]) else None
@@ -612,8 +638,13 @@ def main():
     for roi in rois:
         print(f"  {roi['name']:<10} x={roi['x']} y={roi['y']} "
               f"{roi['w']}x{roi['h']}")
-    print("  eyeball these against a frame before trusting the result — an")
-    print("  auto-picked patch on a moored boat tracks the boat.")
+    preview = draw_rois(paths[0], rois,
+                        os.path.join(OUT_DIR, f"rois_{slug}.jpg"))
+    if preview:
+        print(f"\n  OPEN THIS BEFORE TRUSTING THE RESULT: {preview}")
+        print("  Each box must sit on something bolted down — the lighthouse,")
+        print("  a roofline, a railing. A box on a moored boat or a parked car")
+        print("  tracks the boat. Re-run with --roi name:x,y,w,h to override.")
 
     print("\nregistering")
     frame, reference_date = track(paths, dates, rois)
