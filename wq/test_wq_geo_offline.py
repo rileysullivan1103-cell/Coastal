@@ -681,12 +681,19 @@ def test_no_data_is_not_a_refusal():
 
 def test_coverage_rule_on_covariates():
     print("\nthe ~70% coverage rule")
+    vary = [0.1 * i for i in range(10)]
     frame = pd.DataFrame({
         "station_id": [str(i) for i in range(10)],
-        "land_fraction_5km": [0.5] * 10,               # 100%
-        "embayment_ratio": [0.9] * 8 + [None] * 2,     # 80%
-        "impervious_frac": [0.2] * 6 + [None] * 4,     # 60%
+        "land_fraction_5km": vary,                     # 100%
+        "embayment_ratio": vary[:8] + [None] * 2,      # 80%
+        "impervious_frac": vary[:6] + [None] * 4,      # 60%
         "stream_order": [None] * 10,                   # 0%
+        # 100% populated, and the same number at every station. ECHO
+        # answered for all seven Rhode Island tiles with an empty box, so
+        # this column came back 0 at all 120 sites and the coverage table
+        # read 120/120, 100%, KEEPS -- a covariate one step from being
+        # pre-registered on the strength of a fetch that found nothing.
+        "n_outfalls_within_2km": [0] * 10,
     })
     table = spatial.coverage(frame)
     keeps = dict(zip(table["covariate"], table["keeps"]))
@@ -694,6 +701,14 @@ def test_coverage_rule_on_covariates():
     check("80% is kept", keeps["embayment_ratio"])
     check("60% is dropped", not keeps["impervious_frac"])
     check("0% is dropped", not keeps["stream_order"])
+    check("a covariate with the SAME value everywhere is dropped however "
+          "well populated it is", not keeps["n_outfalls_within_2km"])
+    counts = dict(zip(table["covariate"], table["distinct"]))
+    check("and the table says why, by counting the distinct values",
+          counts["n_outfalls_within_2km"] == 1, str(counts))
+    shares = dict(zip(table["covariate"], table["coverage"]))
+    check("its coverage is still reported honestly as 100%",
+          shares["n_outfalls_within_2km"] == 1.0)
     check("the layer is named beside each covariate",
           dict(zip(table["covariate"], table["layer"]))["impervious_frac"]
           == "nlcd")
@@ -705,10 +720,14 @@ def test_manifest_records_layers_and_amendments():
         pd.DataFrame([{"station_id": str(i), "station_name": "Beach",
                        "lat": 33.0 + i / 100, "lon": -117.3, "state": "CA"}
                       for i in range(10)]), datums=pd.DataFrame())
+    # Real values vary from beach to beach; a fixture of repeated constants
+    # would pass the coverage half of the rule and fail the variation half
+    # for reasons that have nothing to do with what this test is checking.
+    spread = [0.1 * i for i in range(10)]
     frame = pd.DataFrame({"station_id": [str(i) for i in range(10)],
-                          "land_fraction_5km": [0.5] * 10,
-                          "embayment_ratio": [0.9] * 10,
-                          "impervious_frac": [0.2] * 3 + [None] * 7})
+                          "land_fraction_5km": spread,
+                          "embayment_ratio": [0.9 - 0.02 * i for i in range(10)],
+                          "impervious_frac": spread[:3] + [None] * 7})
     record = layers.blank_record()
     layers.record_access(record, "coastline", "2026-09-01T00:00:00Z")
     record["coastline"]["sites_attempted"] = 10

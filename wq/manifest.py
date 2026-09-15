@@ -50,17 +50,24 @@ def _covariate_coverage(spatial, sites):
     frame = spatial
     if frame is None or frame.empty:
         if sites is None or sites.empty:
-            return {}, list(config.SITE_COVARIATES)
+            return {}, {}, list(config.SITE_COVARIATES)
         frame = sites
-    observed, dropped = {}, []
+    observed, distinct, dropped = {}, {}, []
     total = len(frame)
     for name in config.SITE_COVARIATES:
-        share = (float(frame[name].notna().mean())
-                 if name in frame.columns and total else 0.0)
+        present = name in frame.columns and total
+        share = float(frame[name].notna().mean()) if present else 0.0
+        # A covariate has to vary to be one. A column holding one value at
+        # every station clears any coverage threshold and still cannot
+        # correlate with anything -- see spatial.coverage() for the empty
+        # ECHO box that made this concrete. The count is recorded either
+        # way, so the manifest says WHICH half of the rule dropped it.
+        values = int(frame[name].nunique(dropna=True)) if present else 0
         observed[name] = round(share, 4)
-        if share < config.COVARIATE_MIN_COVERAGE:
+        distinct[name] = values
+        if share < config.COVARIATE_MIN_COVERAGE or values < 2:
             dropped.append(name)
-    return observed, dropped
+    return observed, distinct, dropped
 
 
 def build(sites=None, spatial=None, layer_record=None):
@@ -74,7 +81,8 @@ def build(sites=None, spatial=None, layer_record=None):
     else:
         kept_strata = list(config.STRATA)
 
-    covariate_coverage, dropped_covariates = _covariate_coverage(spatial, sites)
+    covariate_coverage, covariate_distinct, dropped_covariates = \
+        _covariate_coverage(spatial, sites)
     kept_covariates = [c for c in config.SITE_COVARIATES
                        if c not in dropped_covariates]
 
@@ -105,8 +113,12 @@ def build(sites=None, spatial=None, layer_record=None):
             "kept": kept_covariates,
             "dropped_for_coverage": dropped_covariates,
             "observed_coverage": covariate_coverage,
+            "observed_distinct_values": covariate_distinct,
             "evaluated": spatial is not None and not spatial.empty,
             "minimum_coverage": config.COVARIATE_MIN_COVERAGE,
+            "distinct_rule": ("a covariate taking fewer than 2 distinct "
+                              "values is dropped however well populated it "
+                              "is: it carries no information"),
             "rule": ("a covariate populated for under "
                      f"{config.COVARIATE_MIN_COVERAGE:.0%} of stations is "
                      "dropped rather than fitted on a biased subset"),
@@ -186,7 +198,16 @@ def _describe(entry):
               f"{config.COVARIATE_MIN_COVERAGE:.0%} coverage")
         for name in covariates["dropped_for_coverage"]:
             share = covariates["observed_coverage"].get(name, 0.0)
-            print(f"  DROPPED      {name}: {share:.0%}")
+            values = covariates.get("observed_distinct_values", {}).get(name)
+            if values is not None and values < 2 and share > 0:
+                # This one is worth spelling out. It is NOT a missing-data
+                # drop: the fetch succeeded everywhere and returned the same
+                # answer everywhere, which usually means it found nothing.
+                print(f"  DROPPED      {name}: populated for {share:.0%} of "
+                      f"sites but takes only {values} distinct value(s) — "
+                      "no variation, so nothing to correlate")
+            else:
+                print(f"  DROPPED      {name}: {share:.0%}")
     else:
         print("  covariates   NOT EVALUATED — run --spatial before --manifest, "
               "or the coverage rule has nothing to apply")

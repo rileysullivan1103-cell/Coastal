@@ -359,6 +359,19 @@ cannot be tuned per covariate after the fact.
 `wq/spatial.py --all` prints the coverage table; `--manifest` applies the rule
 and records the observed share that dropped each one.
 
+**A covariate also has to vary.** The rule has a second half, applied in the
+same place: a column taking fewer than two distinct values is dropped however
+well populated it is. Counting non-nulls cannot tell a measurement from an
+absence, and ECHO proved it — the service answered for all seven Rhode Island
+tiles with an empty box, so `n_outfalls_within_2km` came back `0` at all 120
+sites and the coverage table read **120/120, 100%, KEEPS**. A constant column
+cannot correlate with an outcome, cannot separate one beach from another, and
+a Spearman against it is undefined; pre-registering it on the strength of a
+fetch that found nothing would have put a guaranteed-null predictor into the
+specification with a passing grade beside it. The manifest records the
+distinct-value count next to the coverage share, so it says which half of the
+rule did the dropping.
+
 ### Recorded but never stratified on
 
 `STRATIFY_ON` in `config.py` is a **subset** of the covariates. Three are

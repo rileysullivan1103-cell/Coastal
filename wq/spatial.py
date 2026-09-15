@@ -941,9 +941,20 @@ def for_site(site, record=None, probe=False, want=None):
                 f"echo_{_tile_slug(lat, lon)}",
                 lambda: {"records": fetch_outfalls(lat, lon, probe=probe)},
                 expects=("records",))
-            values = outfall_covariates(lat, lon, payload.get("records"))
+            records = payload.get("records") or []
+            values = outfall_covariates(lat, lon, records)
             out.update(values)
-            layers.record_access(record, "echo")
+            # An empty box is an answer, but it is not a MEASUREMENT, and
+            # n_outfalls_within_2km = 0 looks exactly like one. Say which it
+            # was, or the coverage table reports a constant zero as a fully
+            # populated covariate -- which it did, at 120 of 120 sites.
+            empty = None
+            if not records:
+                empty = ("the service answered with no permitted facilities "
+                         "anywhere in this tile, so every outfall covariate "
+                         "here is an absence rather than a distance")
+                out["echo_note"] = empty
+            layers.record_access(record, "echo", note=empty)
             if values.get("dist_to_outfall_m") is not None:
                 record["echo"]["sites_populated"] += 1
         except LayerFailed as exc:
@@ -1071,20 +1082,33 @@ def add_tidal_datums(frame, sites, datums):
 
 
 def coverage(frame, covariates=None):
-    """How many stations each covariate could be populated for. This is what
-    the ~70% rule in wq/manifest.py decides on."""
+    """How many stations each covariate could be populated for, and whether
+    it varies. This is what the ~70% rule in wq/manifest.py decides on.
+
+    `distinct` is the second half of the rule, and it is not decoration. A
+    column holding the SAME value at every station is 100% populated and
+    carries no information whatsoever: it cannot correlate with an outcome,
+    it cannot separate one beach from another, and a Spearman against it is
+    undefined. ECHO answered for all seven Rhode Island tiles with an empty
+    box, so n_outfalls_within_2km came back 0 at all 120 sites and read
+    120/120, 100%, KEEPS -- a covariate about to be pre-registered on the
+    strength of a fetch that found nothing. Counting non-nulls cannot tell
+    that apart from a real measurement; counting distinct values can.
+    """
     covariates = covariates or config.SITE_COVARIATES
     rows = []
     for name in covariates:
         if name not in frame.columns or frame.empty:
-            share, populated = 0.0, 0
+            share, populated, distinct = 0.0, 0, 0
         else:
             populated = int(frame[name].notna().sum())
             share = populated / len(frame)
+            distinct = int(frame[name].nunique(dropna=True))
         rows.append({"covariate": name, "layer": layers.COVARIATE_LAYER.get(name),
                      "populated": populated, "of": len(frame),
-                     "coverage": round(share, 4),
-                     "keeps": share >= config.COVARIATE_MIN_COVERAGE})
+                     "coverage": round(share, 4), "distinct": distinct,
+                     "keeps": (share >= config.COVARIATE_MIN_COVERAGE
+                               and distinct >= 2)})
     return pd.DataFrame(rows)
 
 
