@@ -1092,6 +1092,25 @@ maps the frame back onto the reference, which is the **negative** of the
 displacement. It is negated before returning, so a feature that slid 5 px right
 reads `dx = +5`.
 
+### The banner at the top of the frame
+
+Walton's stills carry a composited strip across the top — "Walton Lighthouse
+Cam by UCSC" on the left, a running timestamp on the right. It is drawn after
+capture, so it **cannot move when the camera does**, and it is the single most
+attractive thing in the frame to a picker that rewards sharpness and stillness:
+letter edges are the hardest edges anywhere in the image. All four patches
+landed on it and reported 0.03 px of agreement, which is a measurement of
+nothing.
+
+An absolute floor on temporal variation does not catch it. The timestamp digits
+genuinely change every frame, and JPEG ringing around the static letters moves
+by several grey levels, so the strip measured 4.6–9.1 and read as live scene.
+The test that works is **relative and anchored to the frame edges**: a banner is
+a contiguous strip touching the top or bottom that varies far less than the
+scene rows around it. Flooding inward from an edge lets the ratio be generous
+without risk — the flood stops at the first row that behaves like scene — and
+`MAX_EDGE_FLOOD` caps how far it can eat.
+
 ### Agreement between features is the actual test
 
 One patch moving is a sign that blew over. Every patch moving by the same

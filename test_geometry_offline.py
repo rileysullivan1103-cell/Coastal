@@ -284,6 +284,62 @@ def test_the_picker_rejects_a_burned_in_overlay():
         shutil.rmtree(tmp)
 
 
+def test_a_banner_with_a_live_timestamp_is_still_rejected():
+    """Walton's real banner, which the absolute threshold let through.
+
+    "Walton Lighthouse Cam by UCSC" on the left, "2023-07-02 12:59:35" on the
+    right, on a strip about 70 px tall across a 1920 px frame. Two things beat
+    OVERLAY_SPREAD: the timestamp digits genuinely change every frame, and JPEG
+    ringing around the static letters moves by a few grey levels. So the strip
+    measured 4.6-9.1 variation and passed as scene -- while being welded to the
+    sensor, which is the one thing that makes it useless here. All four patches
+    landed on it and reported 0.03 px of agreement between them.
+
+    The strip is caught on RELATIVE variation instead: it changes far less than
+    the scene rows around it, whatever its absolute numbers.
+    """
+    print("\nfeature proposal against a banner with a live timestamp")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene(width=640, height=480)
+        rng = np.random.default_rng(11)
+        paths = []
+        for index in range(12):
+            frame = water(base, seed=index)
+            strip = np.full((18, 640), 70.0)
+            # Static title text on the left...
+            for start in range(8, 300, 22):
+                strip[4:14, start:start + 12] = 240
+            # ...and a timestamp on the right that really does change.
+            for start in range(420, 620, 18):
+                if rng.random() > 0.4:
+                    strip[4:14, start:start + 10] = 240
+            # JPEG ringing around the letters, which is what cleared the floor.
+            strip += rng.normal(0, 3.0, strip.shape)
+            frame[:18, :] = strip
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        # The trap only exists if the strip looks alive by the absolute test.
+        stack = np.stack([g.load_gray(p) for p in paths])
+        strip_spread = float(np.median(np.abs(stack[:, :18] -
+                                              np.median(stack[:, :18], axis=0))))
+        check("the fixture's banner does clear the absolute floor",
+              strip_spread > g.OVERLAY_SPREAD, strip_spread)
+
+        rois = g.propose_rois(paths, size=64, count=3, land_fraction=0.6)
+        check("it still proposes features", len(rois) == 3, len(rois))
+        on_banner = [r for r in rois if r["y"] < 18]
+        check("and none of them lands on the banner", not on_banner,
+              [(r["name"], r["y"]) for r in rois])
+        check("nor straddles it",
+              all(r["y"] >= 18 for r in rois), [r["y"] for r in rois])
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_roi_preview_is_written():
     print("\nthe ROI preview image")
     tmp = tempfile.mkdtemp()
@@ -411,6 +467,7 @@ def main():
                  test_the_picker_avoids_sky,
                  test_patches_are_spread_vertically,
                  test_the_picker_rejects_a_burned_in_overlay,
+                 test_a_banner_with_a_live_timestamp_is_still_rejected,
                  test_roi_preview_is_written,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,

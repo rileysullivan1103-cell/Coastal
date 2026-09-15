@@ -89,6 +89,22 @@ MIN_CONFIDENCE = 0.05  # phase-correlation peak sharpness below this is fog
 # the camera did. It is the most dangerous thing in the frame for this test
 # and the most attractive to a picker that rewards stillness.
 OVERLAY_SPREAD = 0.5
+# An absolute floor is not enough on its own. Walton's banner is a solid strip
+# with white text, and JPEG ringing around those letter edges varies by a few
+# grey levels between frames -- comfortably above any fixed floor, while the
+# strip itself is still welded to the sensor. So the real test is RELATIVE: a
+# row of composited pixels varies far less than the scene rows around it,
+# whatever the absolute numbers are. A row under this share of the frame's
+# typical row-to-row variation is not scene.
+# The test is also ANCHORED TO THE EDGES and flooded inward. A banner is a
+# contiguous strip touching the top or the bottom of the frame, never a stripe
+# through the middle of the scene, so flooding from the edge lets the ratio be
+# generous without any risk of eating real content: the flood stops at the
+# first row that behaves like scene.
+COMPOSITED_ROW_RATIO = 0.6
+# ...and never more than this share of the frame from either edge, so a
+# pathological record cannot exclude everything.
+MAX_EDGE_FLOOD = 0.25
 # And how much of a patch may be composited before the patch is unusable.
 # Essentially none: an overlay's edges are the sharpest content in the frame,
 # so even a sliver of banner inside a patch dominates its correlation peak and
@@ -337,8 +353,29 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
     # live scene below and passes comfortably, while half its body still cannot
     # move. That is exactly the patch the picker reaches for, because the
     # banner's edge is the sharpest thing in the frame.
-    dead = spread <= OVERLAY_SPREAD
+    # Rows that barely change compared with the rest of the frame. A banner
+    # spans the full width, so this is a per-ROW question: a scene row somewhere
+    # in the frame always has weather, shadow or surf moving through it.
+    row_spread = np.median(spread, axis=1)
+    typical = float(np.median(row_spread))
+    quiet = row_spread < COMPOSITED_ROW_RATIO * typical
+    limit = int(len(row_spread) * MAX_EDGE_FLOOD)
+    composited = np.zeros(len(row_spread), dtype=bool)
+    for row in range(min(limit, len(quiet))):          # flood down from the top
+        if not quiet[row]:
+            break
+        composited[row] = True
+    for row in range(min(limit, len(quiet))):          # and up from the bottom
+        if not quiet[-1 - row]:
+            break
+        composited[-1 - row] = True
+    dead = (spread <= OVERLAY_SPREAD) | composited[:, None]
     dead_fraction = uniform_filter(dead.astype(float), window)
+    if composited.any():
+        hit = np.flatnonzero(composited)
+        print(f"  rows {hit[0] * 2}-{hit[-1] * 2 + 1} at the frame edge vary "
+              f"{row_spread[composited].max() / max(typical, 1e-9):.0%} as much "
+              "as the scene — composited banner, excluded")
     alive = dead_fraction < MAX_DEAD_FRACTION
     dead_share = float((usable & ~alive).sum()) / max(int(usable.sum()), 1)
     if dead_share > 0.005:
@@ -367,7 +404,13 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
         # A band with nothing usable in it -- all water, or all overlay --
         # falls back to the best patch left anywhere, so a frame whose
         # structure really is all in one place still gets its features.
-        source = banded if banded.any() else working
+        # Bands express a preference for vertical spread, not a mandate to
+        # accept rubbish: a band of nothing but fog has a best patch, and it is
+        # still fog. Below a quarter of the best score anywhere, take the best
+        # remaining patch instead of the best patch in this band.
+        floor = 0.25 * float(working.max()) if working.any() else 0.0
+        source = banded if banded.max(initial=0.0) >= floor and banded.any() \
+            else working
         if not source.any():
             break
         cy, cx = np.unravel_index(int(np.argmax(source)), source.shape)
