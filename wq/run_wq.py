@@ -117,7 +117,22 @@ def stage_spatial(args):
     every = _read(STATIONS, "run --stations first")
     sites = _analysable(every, args)
     record = layers.blank_record()
-    frame, record = spatial.build(sites, record)
+
+    want = set(layers.LAYERS)
+    if getattr(args, "skip_layers", None):
+        skipped = {s.strip() for s in args.skip_layers.split(",") if s.strip()}
+        unknown = skipped - want
+        if unknown:
+            sys.exit(f"not layers: {sorted(unknown)}. "
+                     f"Known: {sorted(want)}")
+        want -= skipped
+        print(f"  skipping {', '.join(sorted(skipped))} at your request — "
+              "their covariates will be empty and the coverage rule will "
+              "drop them, exactly as if the service had refused")
+        for key in sorted(skipped):
+            layers.record_access(record, key,
+                                 note="skipped by --skip-layers on this run")
+    frame, record = spatial.build(sites, record, want=want)
 
     datums = _coops_datums(sites, args)
     if datums is not None and not datums.empty:
@@ -385,6 +400,10 @@ def main():
     parser.add_argument("--lenient", action="store_true",
                         help="warn instead of failing on an n mismatch. Do not "
                              "use this to get a run to finish.")
+    parser.add_argument("--skip-layers",
+                        help="comma-separated layer keys not to fetch, e.g. "
+                             "echo. Their covariates come out empty and are "
+                             "dropped by the coverage rule.")
     parser.add_argument("--review-n", type=int,
                         help="limit the beach_type review list")
     parser.add_argument("--no-datums", action="store_true",

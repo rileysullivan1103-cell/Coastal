@@ -97,7 +97,14 @@ _LAST_CALL = {}
 # them, and the manifest records that the layer was unavailable -- which is
 # the honest outcome and takes seconds rather than hours.
 CIRCUIT_THRESHOLD = 3
+# A host that has NEVER answered this run gets one short retry, not the full
+# ladder. 429 on a first contact is a refusal, not a busy moment: ECHO said so
+# on its first request and the full 15/60/180 ladder then spent four minutes
+# per tile finding that out again. A host that HAS answered gets the patient
+# ladder, because there the 429 really is back-pressure worth waiting out.
+COLD_BACKOFF = (15,)
 _FAILURES = {}
+_SUCCESSES = {}
 _TRIPPED = set()
 
 
@@ -110,15 +117,29 @@ def _circuit_check(host):
 
 
 def _circuit_record(host, ok):
+    """Counts REFUSALS, not calls.
+
+    An earlier version recorded one failure per completed call, so a host
+    refusing everything still climbed its whole backoff ladder three times --
+    thirteen minutes to conclude what its first response had already said.
+    Every refusing response counts, and the ladder is abandoned the moment
+    the circuit trips.
+    """
     if ok:
+        _SUCCESSES[host] = _SUCCESSES.get(host, 0) + 1
         _FAILURES[host] = 0
         return
     _FAILURES[host] = _FAILURES.get(host, 0) + 1
     if _FAILURES[host] >= CIRCUIT_THRESHOLD and host not in _TRIPPED:
         _TRIPPED.add(host)
+        served = _SUCCESSES.get(host, 0)
         print(f"      GIVING UP on {host} after {_FAILURES[host]} consecutive "
-              "failures. Its covariates will be empty and the coverage rule "
-              "will drop them.")
+              f"refusals ({served} successful response(s) this run). Its "
+              "covariates will be empty and the coverage rule will drop them.")
+
+
+def _ladder(host):
+    return RATE_LIMIT_BACKOFF if _SUCCESSES.get(host) else COLD_BACKOFF
 
 
 def circuit_report():
@@ -219,10 +240,12 @@ def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
     # cost four minutes per attempt to learn nothing. Nested retry ladders
     # multiply; they do not compose.
     response = None
-    for attempt, pause in enumerate((0,) + RATE_LIMIT_BACKOFF):
+    ladder = _ladder(host)
+    for attempt, pause in enumerate((0,) + ladder):
+        _circuit_check(host)
         if pause:
             print(f"      {host} rate-limited; waiting {pause}s "
-                  f"(attempt {attempt}/{len(RATE_LIMIT_BACKOFF)})")
+                  f"(attempt {attempt}/{len(ladder)})")
             time.sleep(pause)
         _throttle(host)
         try:
@@ -237,6 +260,9 @@ def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
             raise LayerFailed(f"{host}: {type(exc).__name__}") from exc
         if response.status_code not in (429, 502, 503, 504):
             break
+        # Every refusal counts toward the circuit, so a host that is simply
+        # saying no stops being asked within seconds rather than minutes.
+        _circuit_record(host, ok=False)
         stated = response.headers.get("Retry-After")
         if stated and str(stated).isdigit():
             wait = min(int(stated), 300)
