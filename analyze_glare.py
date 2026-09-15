@@ -122,6 +122,36 @@ def ladder(observed, target, base, extras):
     return rows
 
 
+def build_rungs(have_cloud):
+    """The model ladder, and which rung the bearing-term F-test measures from.
+
+    The F-test compares two rungs, so they must differ by the bearing terms
+    ALONE. "+ elevation" carries no cloud and "+ glare geometry" does, so once
+    cloud_cover exists on disk that pair differs by THREE terms, and the test
+    silently credits sun_in_view and sun_glare with cloud's contribution (and
+    divides the gain by 2 added terms instead of 3). That is not hypothetical:
+    it inflated three of eight ratios the first time a cloud file was present.
+    "+ elev/cloud" is the comparator that holds cloud fixed.
+
+    The cloud rungs are omitted entirely when there is no cloud column, rather
+    than emitting rows that the column filter quietly collapses into copies of
+    their neighbours. Printing "+ cloud" as a verbatim duplicate of "base" is
+    what made every pre-cloud run look like cloud had been tested when it had
+    not been fetched.
+    """
+    rungs = [("base", [])]
+    if have_cloud:
+        rungs.append(("+ cloud", [CLOUD_COLUMN]))
+    rungs.append(("+ elevation", ["solar_elevation"]))
+    if have_cloud:
+        rungs.append(("+ elev/cloud", ["solar_elevation", CLOUD_COLUMN]))
+    rungs += [("+ elev/azim/cloud", ["solar_elevation", "solar_azimuth",
+                                     CLOUD_COLUMN]),
+              ("+ glare geometry", ["solar_elevation", "sun_in_view",
+                                    "sun_glare", CLOUD_COLUMN])]
+    return rungs, ("+ elev/cloud" if have_cloud else "+ elevation")
+
+
 def added_term_test(small, big, added):
     """(delta R2, F, p) for the terms `big` adds over `small`.
 
@@ -290,13 +320,7 @@ def analyse(sites, want):
     # (b) What the light terms do to temperature and wave height.
     # ------------------------------------------------------------------
     tracked = TRACKED + [height]
-    rungs = [("base", []),
-             ("+ cloud", [CLOUD_COLUMN]),
-             ("+ elevation", ["solar_elevation"]),
-             ("+ elev/azim/cloud", ["solar_elevation", "solar_azimuth",
-                                    CLOUD_COLUMN]),
-             ("+ glare geometry", ["solar_elevation", "sun_in_view",
-                                   "sun_glare", CLOUD_COLUMN])]
+    rungs, bearing_base = build_rungs(have_cloud)
     print(f"\n{'-' * 78}")
     print("(b) WHAT HAPPENS TO temperature_2m AND " + height.upper())
     print("-" * 78)
@@ -333,7 +357,7 @@ def analyse(sites, want):
                          if c in observed.columns]
         if len(bearing_terms) == 2:
             gain, f_stat, p_value = added_term_test(
-                by_model.get("+ elevation"), by_model.get("+ glare geometry"),
+                by_model.get(bearing_base), by_model.get("+ glare geometry"),
                 len(bearing_terms))
             if pd.notna(gain):
                 # Significant and negligible are different statements. At
@@ -347,8 +371,8 @@ def analyse(sites, want):
                 else:
                     verdict = "significant but negligible (dR2 < 0.005)"
                 detail = f"F={f_stat:.2f}, p={p_value:.2g}" if pd.notna(p_value) else ""
-                print(f"  bearing terms over elevation alone: dR2={gain:+.4f}"
-                      f"  {detail}  -> {verdict}")
+                print(f"  bearing terms over {bearing_base.lstrip('+ ')}: "
+                      f"dR2={gain:+.4f}  {detail}  -> {verdict}")
         verdicts[target] = rows
     return verdicts, name, height, observed
 
@@ -369,7 +393,11 @@ def glare_verdict(verdicts, name, height, observed):
                   f"{base_t:+.4f}, too small to read a ratio from; skipped.")
             continue
         asked = beta_of(by_model["+ elev/azim/cloud"]["fit"], "temperature_2m")
-        cloud_only = beta_of(by_model["+ cloud"]["fit"], "temperature_2m")
+        # Falls back to base when there is no cloud rung: with no cloud column
+        # the "+ cloud" model WOULD be the base model, so reporting the base
+        # value states what was fitted rather than implying a column exists.
+        cloud_row = by_model.get("+ cloud") or by_model["base"]
+        cloud_only = beta_of(cloud_row["fit"], "temperature_2m")
         elev_only = beta_of(by_model["+ elevation"]["fit"], "temperature_2m")
         geometry = beta_of(by_model["+ glare geometry"]["fit"], "temperature_2m")
         kept = abs(asked) / abs(base_t)

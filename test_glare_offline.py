@@ -30,12 +30,10 @@ LAT, LON, BEARING = 36.8529, -75.9780, 90.0    # Virginia Beach, faces east
 
 BASE = ["wave_height", "wave_period", "wind_onshore", "wind_speed_10m",
         "level_m", "temperature_2m", "precipitation", "rain_48h_mm"]
-RUNGS = [("base", []),
-         ("+ cloud", ["cloud_cover"]),
-         ("+ elevation", ["solar_elevation"]),
-         ("+ elev/azim/cloud", ["solar_elevation", "solar_azimuth", "cloud_cover"]),
-         ("+ glare geometry", ["solar_elevation", "sun_in_view", "sun_glare",
-                               "cloud_cover"])]
+# The real ladder, not a copy of it. A hardcoded duplicate here is what let
+# the bearing-term F-test regress unnoticed: the fixtures kept passing against
+# a rung list that no longer matched the one analyze_glare.py was fitting.
+RUNGS, BEARING_BASE = ag.build_rungs(have_cloud=True)
 
 FAILURES = []
 
@@ -88,6 +86,13 @@ def build(kind, seed=5):
         # nothing in the earlier fixtures produced it.
         frame["temperature_2m"] = 18 + 0.15 * elevation + rng.normal(0, 1.5, n)
         suppressor = None
+    elif kind == "cloudy":
+        # Cloud drives the target; the sun's BEARING does nothing at all. The
+        # F-test must attribute the gain to cloud, not to sun_in_view and
+        # sun_glare. It did not before build_rungs existed, because the rung
+        # it measured from carried no cloud.
+        frame["temperature_2m"] = independent
+        suppressor = None
     elif kind == "genuine":
         # Temperature is unrelated to the sun and really does move the target.
         frame["temperature_2m"] = independent
@@ -95,7 +100,10 @@ def build(kind, seed=5):
     else:
         raise ValueError(kind)
 
-    if kind == "suppressed":
+    if kind == "cloudy":
+        signal = (0.45 * frame["wave_height"] + 0.05 * frame["cloud_cover"]
+                  + rng.normal(0, 0.5, n))
+    elif kind == "suppressed":
         # elevation helps the detector, temperature hurts it, independently.
         signal = (0.45 * frame["wave_height"] + 0.06 * elevation
                   - 0.35 * frame["temperature_2m"] + rng.normal(0, 0.5, n))
@@ -182,6 +190,59 @@ def check_beta_of_handles_a_withheld_fit():
           and np.isnan(ag.beta_of({"names": [], "beta": None}, "temperature_2m")))
 
 
+def check_cloud_is_not_credited_to_the_bearing_terms():
+    """The bearing F-test must compare rungs differing ONLY by bearing.
+
+    When a cloud file is on disk, "+ elevation" carries no cloud and
+    "+ glare geometry" does, so measuring between them hands cloud's entire
+    contribution to sun_in_view and sun_glare -- and divides it by 2 added
+    terms rather than 3. On real data that inflated three of eight ratios
+    into a "the bearing terms do real work" verdict they had not earned.
+    """
+    frame = build("cloudy")
+    rows = ag.ladder(frame, "detection_rate", BASE, RUNGS)
+    by_model = {r["model"]: r for r in rows}
+    fits = {r["model"]: r["fit"] for r in rows}
+
+    check("the cloud comparator rung exists when cloud is on disk",
+          BEARING_BASE == "+ elev/cloud" and BEARING_BASE in fits)
+
+    honest, _, _ = ag.added_term_test(
+        fits.get(BEARING_BASE), fits.get("+ glare geometry"), 2)
+    naive, _, _ = ag.added_term_test(
+        fits.get("+ elevation"), fits.get("+ glare geometry"), 2)
+    cloud_alone = by_model["+ cloud"]["R2"] - by_model["base"]["R2"]
+
+    check("cloud really does carry signal in this fixture",
+          cloud_alone > 0.02, f"cloud alone gains dR2={cloud_alone:+.4f}")
+    check("the bearing terms are correctly found to add nothing",
+          honest < 0.005, f"dR2={honest:+.4f} over {BEARING_BASE}")
+    check("and the old comparator would have overstated them",
+          naive > honest + 0.01,
+          f"naive {naive:+.4f} vs honest {honest:+.4f}"
+          f" (cloud alone {cloud_alone:+.4f})")
+
+
+def check_no_rung_is_a_silent_duplicate():
+    """Without cloud, no rung may repeat its neighbour's predictor set.
+
+    Every pre-cloud run printed "+ cloud" as a verbatim copy of "base",
+    because the column filter dropped a name that was never fetched. That
+    reads as "cloud was tested and did nothing" when cloud was never on disk.
+    """
+    for have_cloud in (False, True):
+        rungs, _ = ag.build_rungs(have_cloud)
+        present = {"solar_elevation", "solar_azimuth", "sun_in_view",
+                   "sun_glare"} | ({"cloud_cover"} if have_cloud else set())
+        seen = []
+        for label, cols in rungs:
+            seen.append((label, tuple(c for c in cols if c in present)))
+        sets = [cols for _, cols in seen]
+        check(f"no duplicate rung with have_cloud={have_cloud}",
+              len(sets) == len(set(sets)),
+              ", ".join(f"{label}->{len(cols)}" for label, cols in seen))
+
+
 def main():
     print("analyze_glare offline checks\n")
     check_daylight_proxy_is_absorbed()
@@ -190,6 +251,8 @@ def main():
     check_suppression_is_not_read_as_absorption()
     check_wave_height_is_not_collaterally_diluted()
     check_beta_of_handles_a_withheld_fit()
+    check_cloud_is_not_credited_to_the_bearing_terms()
+    check_no_rung_is_a_silent_duplicate()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
