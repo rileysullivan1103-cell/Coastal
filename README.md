@@ -526,6 +526,40 @@ alongside ordinary exceptions, because the single-camera helpers exit rather
 than raise, and an uncaught one would abandon the sweep with no record of what
 had already succeeded.
 
+### The denominator is camera uptime, not detector uptime
+
+`--coverage` answers "was the camera looking". It does not answer "was the
+detector running", and the rip feed cannot: it publishes an element on a
+detection, so silence means *no rip* or *no detector* and nothing separates
+them. Two different mistakes follow, and the national sweep surfaced both.
+
+**Outside the rip record, the hours are not zeros.** `--coverage` defaults to
+the last year of the **stills** inventory, which is longer than the rip record
+at every camera checked — Virginia Beach publishes stills from 2026-02-03 and
+rips from 2026-04-25. Counting that gap would manufacture about 1,200 quiet
+hours from eleven weeks when nothing was watching for rips, all of them in one
+season, so the invented zeros land on the month control too. `apply_coverage()`
+now clips to the rip record and says how many hours it dropped.
+
+The clip is by **day**, not by hour. The feed fires on a detection, so the last
+detection is not the end of the detector's shift; an hour-level clip would
+discard the genuinely quiet hours after the final firing of the last day, which
+are exactly the observed zeros the coverage file exists to supply.
+
+**Inside the record, a silent day is ambiguous and stays ambiguous.** At
+Corolla the rip feed has data on **89 days of 906** while the camera was up for
+4,627 hours, so nearly the whole denominator is days that published nothing.
+Resolving that silently either way is wrong: keeping them makes
+`detection_rate` mostly a measure of detector uptime, and dropping them biases
+the rate up by deleting calm days. The run reports the share, warns when it is
+over half, and `--detector-days-only` drops them if you decide that is the
+question you want:
+
+    python analyze_drivers.py --target rip --site <slug> --detector-days-only
+
+Walton is the one camera where this barely matters — 713 populated rip bins
+against 1,093 stills bins. It is the reason the problem went unnoticed.
+
 ### Making a new camera analysable
 
 The rip feed on its own correlates against nothing. For a camera outside the

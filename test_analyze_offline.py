@@ -341,13 +341,106 @@ def test_degenerate_target_is_named():
           math.isnan(rho), rho)
 
 
+def _coverage_case(tmp, stem, det_hours, cov_hours, detections_per_hour=2):
+    pd.DataFrame({"hour": cov_hours, "images": [60] * len(cov_hours)}).to_csv(
+        f"{tmp}/coverage_{stem}_hourly.csv", index=False)
+    n = len(det_hours)
+    return pd.DataFrame({
+        "hour": det_hours, "frames": [detections_per_hour] * n,
+        "frames_with_detection": [detections_per_hour] * n,
+        "detections": [detections_per_hour] * n,
+        "detection_rate": [1.0] * n, "score_max": [0.7] * n})
+
+
+def test_coverage_clips_to_the_rip_record():
+    """Virginia Beach in miniature: stills start months before the rip feed.
+
+    The stills service there runs from 2026-02-03 and the rip service from
+    2026-04-25. Counting that gap as observed zeros invents ~1,200 quiet hours
+    out of weeks when nothing was watching for rips, and it lands entirely in
+    one season, so it lands on the month control too.
+    """
+    print("\napply_coverage: clipping to the detector's record")
+    tmp = tempfile.mkdtemp()
+    old_data = a.DATA_DIR
+    try:
+        a.DATA_DIR = tmp
+        cov = pd.date_range("2026-02-03", "2026-03-04 23:00", freq="h", tz="UTC")
+        # Firings on the first and last day of the record, so the record spans
+        # four days and the clip has something to keep in the middle.
+        det = pd.DatetimeIndex(
+            list(pd.date_range("2026-03-01 12:00", periods=3, freq="h", tz="UTC"))
+            + list(pd.date_range("2026-03-04 12:00", periods=3, freq="h", tz="UTC")))
+        merged, ok = a.apply_coverage(_coverage_case(tmp, "vabeach", det, cov),
+                                      "vabeach")
+        check("coverage was found", ok)
+        days = merged["hour"].dt.floor("D").unique()
+        check("only days inside the rip record survive", len(days) == 4, len(days))
+        check("nothing before the first rip day is kept",
+              merged["hour"].min() >= pd.Timestamp("2026-03-01", tz="UTC"),
+              merged["hour"].min())
+        check("the whole of the last rip day is kept, not just up to the last "
+              "firing", merged["hour"].max().hour == 23, merged["hour"].max())
+        check("the quiet hours on live days are still zeros",
+              int((merged["frames_with_detection"] == 0).sum()) == 90,
+              int((merged["frames_with_detection"] == 0).sum()))
+    finally:
+        a.DATA_DIR = old_data
+        shutil.rmtree(tmp)
+
+
+def test_coverage_reports_days_the_detector_said_nothing():
+    """Corolla in miniature: the camera is up far more than the detector is.
+
+    Its rip feed has data on 89 days of 906 while the stills feed carries 4,627
+    hours. Inside the record a silent day is ambiguous -- no rip all day, or no
+    detector -- so it is reported, and --detector-days-only resolves it one way
+    on purpose rather than the default resolving it the other way in silence.
+    """
+    print("\napply_coverage: days the rip feed published nothing")
+    tmp = tempfile.mkdtemp()
+    old_data = a.DATA_DIR
+    try:
+        a.DATA_DIR = tmp
+        cov = pd.date_range("2026-05-01", "2026-05-10 23:00", freq="h", tz="UTC")
+        # Detections on two days out of ten.
+        det = (list(pd.date_range("2026-05-01 12:00", periods=3, freq="h", tz="UTC"))
+               + list(pd.date_range("2026-05-09 12:00", periods=3, freq="h", tz="UTC")))
+        frame = _coverage_case(tmp, "corolla", pd.DatetimeIndex(det), cov)
+
+        kept, _ = a.apply_coverage(frame, "corolla")
+        # May 1 to May 9 inclusive: the clip already removes May 10, which has
+        # no firing and falls outside the record.
+        check("by default the silent days stay in the denominator",
+              len(kept) == 216, len(kept))
+
+        a.DETECTOR_DAYS_ONLY = True
+        try:
+            dropped, _ = a.apply_coverage(frame, "corolla")
+        finally:
+            a.DETECTOR_DAYS_ONLY = False
+        check("--detector-days-only keeps only the days it published on",
+              len(dropped) == 48, len(dropped))
+        check("and keeps every detection", int(dropped["detections"].sum())
+              == int(kept["detections"].sum()))
+        check("so the rate rises once uptime stops padding it",
+              dropped["detection_rate"].mean() > kept["detection_rate"].mean())
+        check("the scratch day column is not left on the frame",
+              "_day" not in dropped.columns)
+    finally:
+        a.DATA_DIR = old_data
+        shutil.rmtree(tmp)
+
+
 def test_coverage_creates_observed_zeros():
     print("\napply_coverage")
     tmp = tempfile.mkdtemp()
     old_data = a.DATA_DIR
     try:
         a.DATA_DIR = tmp
-        hours = pd.date_range("2025-06-01 15:00", periods=10, freq="h", tz="UTC")
+        # All ten on one calendar day, so this test is about observed zeros and
+        # not about the day-level clip that test_coverage_clips_* covers.
+        hours = pd.date_range("2025-06-01 08:00", periods=10, freq="h", tz="UTC")
         # The detector fired in only 3 of the 10 hours the camera was looking.
         detections = pd.DataFrame({
             "hour": hours[:3], "frames": [2, 2, 2],
@@ -914,6 +1007,8 @@ if __name__ == "__main__":
     test_between_site_effect_is_caught()
     test_focus_tide_reports_per_site()
     test_coverage_creates_observed_zeros()
+    test_coverage_clips_to_the_rip_record()
+    test_coverage_reports_days_the_detector_said_nothing()
     test_regression_drops_identical_columns()
     test_regression_withholds_when_singular()
     test_degenerate_target_is_named()
