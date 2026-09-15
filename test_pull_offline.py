@@ -199,6 +199,72 @@ def check_wind_circular_maths():
     assert hourly["speed_vec"].iloc[0] < 0.01
     print("wind circular maths OK")
 
+def check_coops_refuses_a_datum():
+    """A Great Lakes gauge must not take the whole run down with it.
+
+    Holland (9087031) answers water_level+datum=MLLW with HTTP 400 rather than
+    the 200-and-error-body CO-OPS uses elsewhere, and raise_for_status turned
+    that into an exception that escaped pull_site_observations entirely: the
+    Holland run died after writing ERA5 and marine, and any site queued behind
+    it was never pulled. The station is skipped now, and its retry is on the
+    Great Lakes datum in case that is all it wanted.
+    """
+    calls = []
+
+    class Reply:
+        def __init__(self, status, payload=None):
+            self.status_code = status
+            self.ok = status < 400
+            self._payload = payload or {}
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            # Present so this double fails the way the real thing did, with
+            # the HTTPError that ended the Holland run, rather than with an
+            # AttributeError that only looks like the same line.
+            if not self.ok:
+                raise po.requests.exceptions.HTTPError(
+                    f"{self.status_code} Client Error")
+
+    rows = [{"t": "2025-09-09 00:00", "v": "1.0"}]
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append(params.get("datum"))
+        if params.get("datum") == po.COOPS_DATUM:
+            return Reply(400)
+        return Reply(200, {"data": rows})
+
+    real_get = po.requests.get
+    po.requests.get = fake_get
+    try:
+        frame = po.pull_coops_series(
+            "9087031", "water_level",
+            datetime(2025, 9, 9), datetime(2025, 11, 20))
+    finally:
+        po.requests.get = real_get
+
+    assert frame is not None and not frame.empty, "the lake datum should serve"
+    # MLLW is tried once, refused, and never asked for again: the remaining
+    # chunks go straight to the datum that worked.
+    assert calls.count(po.COOPS_DATUM) == 1, calls
+    assert calls.count(po.COOPS_LAKE_DATUM) == len(calls) - 1, calls
+
+    # And a station that refuses every datum is a note, not a traceback.
+    def always_bad(url, params=None, timeout=None):
+        return Reply(400)
+
+    po.requests.get = always_bad
+    try:
+        dead = po.pull_coops_series(
+            "9087031", "water_level",
+            datetime(2025, 9, 9), datetime(2025, 9, 20))
+    finally:
+        po.requests.get = real_get
+    assert dead is None, "a refusing station returns None so the site goes on"
+    print("CO-OPS datum refusal OK")
+
 
 if __name__ == "__main__":
     check_station_id_canonicalisation()
@@ -208,4 +274,5 @@ if __name__ == "__main__":
     check_gridded_rain_windows()
     check_gridded_site_lists()
     check_wind_circular_maths()
+    check_coops_refuses_a_datum()
     print("\nAll offline pull assertions passed.")

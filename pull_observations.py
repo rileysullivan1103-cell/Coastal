@@ -49,6 +49,11 @@ COOPS_DATA = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
 # The 6-minute products cap a single request at 31 days, so a year is chunked.
 COOPS_CHUNK_DAYS = 31
 COOPS_DATUM = "MLLW"
+# MLLW is a TIDAL datum and the Great Lakes are not tidal: Holland (9087031)
+# answers a water_level request carrying datum=MLLW with HTTP 400, not with a
+# 200 and an error body. Those gauges are published on IGLD, so a 400 on a
+# datum request is retried once on this before the station is given up on.
+COOPS_LAKE_DATUM = "IGLD"
 MAX_TIDE_DISTANCE_KM = 50
 # Below this rate of change the tide is treated as slack rather than
 # rising/falling, so noise around high and low water is not read as direction.
@@ -226,6 +231,10 @@ def coops_stations(station_type):
 def pull_coops_series(station_id, product, start, end):
     """A CO-OPS product over the window, stitched from 31-day chunks."""
     frames, chunk_start = [], start
+    # The datum that works for this station, learned on the first chunk and
+    # then reused: a year is 12 chunks, and rediscovering it every time would
+    # mean a wasted failing request per chunk for every Great Lakes gauge.
+    datum = COOPS_DATUM if product == "water_level" else None
     while chunk_start < end:
         chunk_end = min(chunk_start + timedelta(days=COOPS_CHUNK_DAYS), end)
         params = {"product": product, "station": station_id,
@@ -233,11 +242,28 @@ def pull_coops_series(station_id, product, start, end):
                   "end_date": chunk_end.strftime("%Y%m%d"),
                   "time_zone": "gmt", "units": "metric", "format": "json",
                   "application": "coastal-pipeline"}
-        if product == "water_level":
-            params["datum"] = COOPS_DATUM
+        if datum:
+            params["datum"] = datum
 
         resp = requests.get(COOPS_DATA, params=params, timeout=120)
-        resp.raise_for_status()
+        # A station that cannot serve this request is one station's problem,
+        # never the run's. CO-OPS says so two different ways -- 200 with an
+        # error body (below) and a bare 4xx -- and raising on the second one
+        # aborted a whole multi-site pull at the first Great Lakes gauge,
+        # discarding every site that had not been reached yet.
+        if not resp.ok and datum == COOPS_DATUM:
+            retry = requests.get(
+                COOPS_DATA, params={**params, "datum": COOPS_LAKE_DATUM},
+                timeout=120)
+            if retry.ok:
+                print(f"      {product}: station {station_id} refused "
+                      f"{COOPS_DATUM}; reading it on {COOPS_LAKE_DATUM}")
+                datum = COOPS_LAKE_DATUM
+            resp = retry
+        if not resp.ok:
+            print(f"      {product}: HTTP {resp.status_code} from CO-OPS "
+                  f"for station {station_id}; no {product} from it")
+            return None
         payload = resp.json()
         # CO-OPS answers 200 with an {"error": ...} body for a station that does
         # not carry the product, so status code alone proves nothing.
