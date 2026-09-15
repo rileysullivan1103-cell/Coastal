@@ -1649,13 +1649,27 @@ def report_record(steps, dates, slug, step_px, what, noise=None):
 
 
 def coverage_counts(slug):
-    """Hourly image counts, so an epoch can be measured in stills not samples."""
+    """Hourly image counts, so an epoch can be measured in stills not samples.
+
+    THIS FILE HAS ANOTHER WRITER. pull_rip_detection appends to the same
+    coverage CSV as it works through a camera, so a geometry run started while
+    a pull is in flight can read it mid-append and hit a torn line. That is a
+    decoration -- the stills column beside each epoch -- and it must not take
+    down a run that has just spent twenty minutes correlating a thousand
+    frames. A missing count prints as an epoch without stills; a crash here
+    would lose the dates, the offsets and the cross-check with it.
+    """
     paths = glob.glob(os.path.join(RIP_DIR, f"coverage_{slug}_hourly.csv"))
     if not paths:
         return None
-    frame = pd.read_csv(paths[0])
-    frame["hour"] = pd.to_datetime(frame["hour"], utc=True, errors="coerce")
-    return frame.dropna(subset=["hour"]).set_index("hour")["images"]
+    try:
+        frame = pd.read_csv(paths[0])
+        frame["hour"] = pd.to_datetime(frame["hour"], utc=True, errors="coerce")
+        return frame.dropna(subset=["hour"]).set_index("hour")["images"]
+    except Exception as problem:                      # torn read, or no rows yet
+        print(f"  (still counts unavailable: {type(problem).__name__} reading "
+              f"{os.path.basename(paths[0])} — a pull may be writing it)")
+        return None
 
 
 # ---------------------------------------------------------------------------
