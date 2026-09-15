@@ -371,10 +371,17 @@ def coops_for(station_id, product, start, end):
         try:
             frame = obs.pull_coops_series(station_id, product, start, end)
         except requests.RequestException as exc:
+            # A 400 is this gauge saying it does not serve this product --
+            # a Great Lakes gauge asked for water_level, say. That is an
+            # answer about the gauge, so it is cached and it does not count
+            # against the host. Only a timeout or a 5xx is a refusal.
             reason = _short_error(exc)
-            _host_record(host, False, reason)
-            raise SourceUnavailable(
-                f"CO-OPS {product} at gauge {station_id}: {reason}") from exc
+            if is_refusal(reason):
+                _host_record(host, False, reason)
+                raise SourceUnavailable(
+                    f"CO-OPS {product} at gauge {station_id}: {reason}") from exc
+            _host_record(host, True)
+            return pd.DataFrame()
         _host_record(host, True)
         if frame is not None and not frame.empty and product == "water_level":
             frame = obs.add_tide_state(frame)
