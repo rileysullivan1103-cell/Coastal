@@ -474,6 +474,15 @@ the enterococci criterion genuinely differs.
 
 ## Reading the report
 
+**C2** ends with the **scope line**: how many fitted stations are in each
+state, and a loud warning when the answer is one. Every table below D1
+describes whichever stations survived, and a single-state pass prints the
+same shapes as a national one — same strata, same p-values, same "site type
+is knowable in advance". Nothing else in the report said where those
+stations were, so a reader supplied the wrong answer for free. The first
+Rhode Island run reported `outfall_type` at p=0.005 off 120 stations in one
+state, three of them carrying the level that produced the effect.
+
 **D1** is the distribution: median, IQR, 10th/90th, min, max, n sites, and a
 histogram, per analyte/predictor. The spread is the result.
 

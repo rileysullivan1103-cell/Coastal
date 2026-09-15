@@ -483,6 +483,46 @@ def test_the_shuffle_is_drawn_once_per_site():
           never_smaller)
 
 
+def test_the_report_says_where_its_stations_are():
+    print("\nthe report says what area it covers (C2)")
+    # Every table under D1 describes whichever stations survived. A one-state
+    # pass prints the same shapes as a national one, so the scope has to be
+    # stated or the reader supplies the wrong one for free.
+    import contextlib
+    import io as _io
+
+    def scope_text(rows):
+        buffer = _io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            report.report_scope(pd.DataFrame(rows))
+        return buffer.getvalue()
+
+    one_state = scope_text([{"station_id": f"RI{i}", "state": "RI",
+                             "analyte": "ENT"} for i in range(4)]
+                           + [{"station_id": "RI0", "state": "RI",
+                               "analyte": "ECOLI"}])
+    check("one state is named and called out as one state",
+          "every fitted station is in RI" in one_state, one_state.strip())
+    check("and the station count is stations, not site-analyte pairs",
+          "RI    4" in one_state, one_state)
+
+    many = scope_text([{"station_id": f"S{i}",
+                        "state": state, "analyte": "ENT"}
+                       for i, state in enumerate(
+                           ["RI", "MA", "CA", "FL", "WA", "OR"])])
+    check("six states does not trigger the warning",
+          "SCOPE" not in many, many.strip())
+
+    blank = scope_text([{"station_id": "S1", "state": None, "analyte": "ENT"},
+                        {"station_id": "S2", "state": "RI", "analyte": "ENT"}])
+    check("a station with no state is counted somewhere, not silently dropped",
+          "1 fitted station(s) with no state on record" in blank, blank.strip())
+
+    missing = scope_text([{"station_id": "S1", "analyte": "ENT"}])
+    check("no state column at all says so rather than printing nothing",
+          "cannot say where" in missing, missing.strip())
+
+
 def test_no_usable_predictor_is_counted():
     print("\nsites with no usable predictor (D6)")
     samples = pd.concat([
@@ -579,6 +619,7 @@ def main():
                  test_attrition_is_an_output,
                  test_stratification_detected_when_present_and_absent,
                  test_the_shuffle_is_drawn_once_per_site,
+                 test_the_report_says_where_its_stations_are,
                  test_no_usable_predictor_is_counted,
                  test_multiple_testing_expectation,
                  test_per_site_table_has_what_was_asked_for):

@@ -529,7 +529,54 @@ def report_attrition(attrition):
         by_region["share"] = (by_region["kept"] / by_region["pairs"]).round(3)
         print("\nby region:")
         print(by_region.to_string())
+    report_scope(kept)
     return counts
+
+
+def report_scope(kept):
+    """Where the fitted stations actually are.
+
+    Every number below D1 describes whichever stations survived, and nothing
+    else in this report says where those are. A pass that pulled one state
+    reads exactly like a national pass -- same tables, same p-values, same
+    'site type is knowable in advance' -- and the only thing separating them
+    is a line nobody printed. So print it, and say plainly when the answer is
+    one state, because a stratum that explains the spread within one state has
+    not been shown to explain it anywhere else.
+    """
+    if kept is None or kept.empty or "state" not in kept.columns:
+        print("\n  SCOPE: no state on the attrition table, so this report "
+              "cannot say where\n  its stations are. Read every result below "
+              "as covering an unknown area.")
+        return
+    # kept is one row per site-analyte pair, so count STATIONS, not rows.
+    per_station = kept.drop_duplicates("station_id")
+    named = per_station[per_station["state"].notna()
+                        & (per_station["state"].astype(str) != "")]
+    unnamed = len(per_station) - len(named)
+    if named.empty:
+        print(f"\n  SCOPE: none of the {len(per_station)} fitted station(s) "
+              "carries a state, so this\n  report cannot say where they are.")
+        return
+    counts = named["state"].astype(str).value_counts()
+    print("\nfitted stations by state:")
+    print(counts.to_string())
+    if unnamed:
+        print(f"  (and {unnamed} fitted station(s) with no state on record — "
+              "counted nowhere above)")
+    if len(counts) == 1:
+        only = counts.index[0]
+        print(f"\n  SCOPE: every fitted station is in {only}. This is a "
+              f"{only} result, not a\n  national one. The strata below are "
+              "tested only against the variation that\n  exists inside one "
+              "state — anything they appear to explain here has NOT\n  been "
+              "shown to hold elsewhere, and a stratum that could not vary "
+              "(region,\n  here) could not be tested at all. Pull more "
+              "states before reading D2 as a\n  finding about coastal "
+              "stations in general.")
+    elif len(counts) < 5:
+        print(f"\n  SCOPE: {len(counts)} state(s) — {', '.join(counts.index)}. "
+              "Read D2 as a statement about\n  these, not about the coast.")
 
 
 def report_nondetects(coefficients, nondetects):
