@@ -372,6 +372,67 @@ def test_layers_are_fetched_per_tile_not_per_station():
           len(tiles) <= 12, f"{len(tiles)} tiles")
 
 
+def test_no_data_is_not_a_refusal():
+    """A 404 is the service answering, not the service refusing.
+
+    NLDI answered for eleven stations, then hit three coastal beaches with no
+    NHDPlus flowline near them -- which is an ordinary fact about open coast,
+    not a fault -- and the circuit breaker abandoned the layer for the whole
+    run. The breaker must separate "there is nothing here" from "stop asking
+    me", because only the second is a reason to stop asking.
+    """
+    print("\ncircuit breaker: refusals only")
+    spatial._FAILURES.clear()
+    spatial._SUCCESSES.clear()
+    spatial._TRIPPED.clear()
+
+    host = "example.test"
+    check("429 is a refusal", 429 in spatial.REFUSAL_STATUSES)
+    check("503 is a refusal", 503 in spatial.REFUSAL_STATUSES)
+    check("404 is NOT a refusal — it is an answer",
+          404 not in spatial.REFUSAL_STATUSES)
+    check("400 is NOT a refusal either",
+          400 not in spatial.REFUSAL_STATUSES)
+
+    for _ in range(3):
+        spatial._circuit_record(host, ok=False)
+    tripped = False
+    try:
+        spatial._circuit_check(host)
+    except spatial.LayerFailed:
+        tripped = True
+    check("three refusals trip the breaker", tripped)
+
+    # A host that has answered gets the patient ladder; a cold one does not.
+    spatial._FAILURES.clear()
+    spatial._TRIPPED.clear()
+    cold = "cold.test"
+    warm = "warm.test"
+    spatial._circuit_record(warm, ok=True)
+    check("a cold host gets one short retry",
+          spatial._ladder(cold) == spatial.COLD_BACKOFF,
+          str(spatial._ladder(cold)))
+    check("a host that has answered gets the patient ladder",
+          spatial._ladder(warm) == spatial.RATE_LIMIT_BACKOFF,
+          str(spatial._ladder(warm)))
+
+    # A success resets the consecutive count, so intermittent trouble at a
+    # working service never accumulates into an abandonment.
+    spatial._circuit_record(warm, ok=False)
+    spatial._circuit_record(warm, ok=False)
+    spatial._circuit_record(warm, ok=True)
+    spatial._circuit_record(warm, ok=False)
+    still_ok = True
+    try:
+        spatial._circuit_check(warm)
+    except spatial.LayerFailed:
+        still_ok = False
+    check("a success in between resets the count", still_ok)
+    spatial._FAILURES.clear()
+    spatial._SUCCESSES.clear()
+    spatial._TRIPPED.clear()
+
+
 def test_coverage_rule_on_covariates():
     print("\nthe ~70% coverage rule")
     frame = pd.DataFrame({
@@ -583,6 +644,7 @@ def main():
                  test_stream_covariates,
                  test_landcover_ids_are_not_hardcoded,
                  test_layers_are_fetched_per_tile_not_per_station,
+                 test_no_data_is_not_a_refusal,
                  test_coverage_rule_on_covariates,
                  test_manifest_records_layers_and_amendments,
                  test_beach_type_is_hand_assigned_only,

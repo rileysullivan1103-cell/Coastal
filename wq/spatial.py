@@ -219,8 +219,13 @@ USER_AGENT = ("coastal-wq/1.0 (research pipeline; "
               "https://github.com/rileysullivan1103-cell/Coastal)")
 
 
+# Statuses that mean the SERVICE is refusing, as opposed to answering "there
+# is nothing here". Only these count toward the circuit breaker.
+REFUSAL_STATUSES = (429, 500, 502, 503, 504)
+
+
 def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
-         **_ignored):
+         count_failures=True, **_ignored):
     """One request, with the failure body attached to the error.
 
     A bare "HTTP 406" is not diagnosable -- it was 406 from Overpass that hid
@@ -256,20 +261,28 @@ def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
                 response = requests.get(url, params=params, timeout=timeout,
                                         headers=headers)
         except requests.RequestException as exc:
-            _circuit_record(host, ok=False)
+            if count_failures:
+                _circuit_record(host, ok=False)
             raise LayerFailed(f"{host}: {type(exc).__name__}") from exc
-        if response.status_code not in (429, 502, 503, 504):
+        if response.status_code not in REFUSAL_STATUSES:
             break
-        # Every refusal counts toward the circuit, so a host that is simply
-        # saying no stops being asked within seconds rather than minutes.
-        _circuit_record(host, ok=False)
+        if count_failures:
+            _circuit_record(host, ok=False)
         stated = response.headers.get("Retry-After")
         if stated and str(stated).isdigit():
             wait = min(int(stated), 300)
             print(f"      {host} asked for {wait}s")
             time.sleep(wait)
-    _circuit_record(host, ok=response is not None
-                    and response.status_code == 200)
+    # A 404 is the service ANSWERING: there is no flowline at this
+    # coordinate. Plenty of open-coast beaches have none, and three such
+    # stations in a row were enough to make the breaker abandon NLDI for a
+    # whole run after it had already answered eleven times. Only a refusal
+    # counts against a host; "nothing here" is data.
+    if count_failures and response is not None:
+        if response.status_code == 200:
+            _circuit_record(host, ok=True)
+        elif response.status_code in REFUSAL_STATUSES:
+            _circuit_record(host, ok=False)
     if probe:
         print(f"    {method} {response.url[:150]}")
         print(f"      HTTP {response.status_code}, "
@@ -294,7 +307,10 @@ def _first_working(candidates, probe=False):
     failures = []
     for url, params in candidates:
         try:
-            return _get(url, params=params, probe=probe), url
+            # A candidate that does not exist is the point of the list, not a
+            # failure of the host, so probing never trips the breaker.
+            return _get(url, params=params, probe=probe,
+                        count_failures=False), url
         except LayerFailed as exc:
             failures.append(str(exc))
             if probe:
