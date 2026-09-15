@@ -179,6 +179,63 @@ def assign_strata(pool, cut, edges):
     return pool
 
 
+def clip_to_rip_record(coverage, frames, label=""):
+    """Drop imagery hours outside the span the DETECTOR was publishing over.
+
+    The stills feed and the rip feed do not start on the same day, and where
+    the stills run first those early hours are not quiet detector hours -- they
+    are hours when nothing was watching for rips at all. Sampling them into the
+    'none' stratum would fill it with frames the detector never had a chance to
+    fire on, and the false-omission rate computed from that measures the pull
+    window rather than the detector.
+
+    Clipped by DAY: the feed publishes on a detection, so the last detection is
+    not the end of the detector's shift, and an hour-level clip would discard
+    the genuinely quiet hours after the final firing of the last day -- exactly
+    the observed zeros the 'none' stratum is made of.
+    """
+    stamps = frames["hour"].dropna()
+    if stamps.empty or coverage.empty:
+        return coverage, 0
+    low = stamps.min().floor("D")
+    high = stamps.max().floor("D") + pd.Timedelta(days=1)
+    outside = int(((coverage["hour"] < low) | (coverage["hour"] >= high)).sum())
+    if outside:
+        coverage = coverage[(coverage["hour"] >= low)
+                            & (coverage["hour"] < high)]
+        print(f"  {label}dropped {outside} imagery hours outside the rip record "
+              f"({low:%Y-%m-%d} to {stamps.max():%Y-%m-%d}) — the camera was up "
+              "but\n    nothing was publishing rips, so they are not quiet "
+              "detector hours")
+    return coverage, outside
+
+
+def deduplicate_frames(pool, label=""):
+    """One row per timestamp. Keeps the strongest detection at a tie.
+
+    The same still can appear more than once -- a payload re-published, an
+    overlapping pull window -- and a duplicate is not harmless here: it doubles
+    that frame's chance of being drawn, and if both copies are drawn the same
+    image is labelled twice under one frame_id, so the second save silently
+    overwrites the first.
+    """
+    if "timestamp" not in pool.columns:
+        return pool, 0
+    before = len(pool)
+    order = pool.get("score_max")
+    if order is not None:
+        pool = pool.assign(_rank=pd.to_numeric(order, errors="coerce")
+                           .fillna(-1.0)).sort_values("_rank", ascending=False)
+    pool = pool.drop_duplicates(subset=["timestamp"], keep="first")
+    pool = pool.drop(columns=["_rank"], errors="ignore")
+    pool = pool.sort_values("timestamp").reset_index(drop=True)
+    removed = before - len(pool)
+    if removed:
+        print(f"  {label}dropped {removed} duplicate frames sharing a timestamp "
+              f"({before} -> {len(pool)})")
+    return pool, removed
+
+
 def drawable_pool(pool):
     """The candidates the grid may draw from: everything with a wave tercile.
 
@@ -437,6 +494,7 @@ def main():
     conditions = hourly_conditions(args.camera, lat, lon)
 
     detected = frames[frames["detected"].astype(bool)].copy()
+    coverage, _ = clip_to_rip_record(coverage, frames, label="coverage: ")
     blank_hours = coverage[~coverage["hour"].isin(frames["hour"])].copy()
     for column in ("score_max", "detection_count", "bbox_count", "bbox_area_max",
                    "source_file", "original_image", "timestamp"):
@@ -447,6 +505,7 @@ def main():
     keep = ["timestamp", "hour", "score_max", "detection_count", "bbox_count",
             "bbox_area_max", "source_file", "original_image"]
     pool = pd.concat([detected[keep], blank_hours[keep]], ignore_index=True)
+    pool, _ = deduplicate_frames(pool, label="pool: ")
     pool = pool.merge(conditions, on="hour", how="left")
 
     scores = pool["score_max"].dropna()
