@@ -209,7 +209,7 @@ def _cache_path(name):
 _FAILED_THIS_RUN = {}
 
 
-def _cached_json(name, builder, expects=(), refresh=False):
+def _cached_json(name, builder, expects=(), schema=None, refresh=False):
     """Read the cached payload, or build and cache it.
 
     `expects` names the keys this caller is about to read. A cache file
@@ -218,6 +218,13 @@ def _cached_json(name, builder, expects=(), refresh=False):
     rather than served. Without this, adding a fetch to a builder is silent:
     the new covariates read `None` from the old payload, nothing raises, and
     the coverage table shows an empty layer with no reason recorded.
+
+    `schema` catches what `expects` cannot. A key is a shallow test: the ECHO
+    payload kept its "records" key while the RECORDS inside it changed from
+    useless two-column rows to placed facilities, so the check passed and the
+    stale list was served for a second time. When a caller changes what a
+    fetch means rather than which keys it returns, it bumps the schema string
+    and every payload written under the old one is rebuilt.
 
     `refresh` fetches even when the cache would answer. A PROBE is a question
     about the service, not about the covariate, so serving it from disk
@@ -232,10 +239,16 @@ def _cached_json(name, builder, expects=(), refresh=False):
             payload = json.load(handle)
         missing = [key for key in expects
                    if not isinstance(payload, dict) or key not in payload]
-        if not missing:
+        stale = (schema is not None
+                 and (not isinstance(payload, dict)
+                      or payload.get("_schema") != schema))
+        if not missing and not stale:
             return payload
-        print(f"      {name}: cached payload predates "
-              f"{', '.join(missing)}; refetching")
+        why = (f"predates {', '.join(missing)}" if missing
+               else f"was written under schema "
+                    f"{payload.get('_schema') if isinstance(payload, dict) else None!r}, "
+                    f"not {schema!r}")
+        print(f"      {name}: cached payload {why}; refetching")
         os.remove(path)
     if name in _FAILED_THIS_RUN:
         raise LayerFailed(f"{_FAILED_THIS_RUN[name]} (already failed for this "
@@ -245,6 +258,8 @@ def _cached_json(name, builder, expects=(), refresh=False):
     except LayerFailed as exc:
         _FAILED_THIS_RUN[name] = str(exc)
         raise
+    if schema is not None and isinstance(payload, dict):
+        payload["_schema"] = schema
     with open(path, "w") as handle:
         json.dump(payload, handle)
     return payload
@@ -1024,7 +1039,12 @@ def for_site(site, record=None, probe=False, want=None):
             payload = _cached_json(
                 f"echo_{_tile_slug(lat, lon)}",
                 lambda: {"records": fetch_outfalls(lat, lon, probe=probe)},
-                expects=("records",), refresh=probe)
+                expects=("records",), refresh=probe,
+                # get_qid + get_map, with coordinates. Payloads written
+                # by the CSV download carry the same "records" key and
+                # none of the coordinates, so the key alone cannot tell
+                # them apart.
+                schema="echo/get_qid+get_map/2026-09-15")
             records = payload.get("records") or []
             values = outfall_covariates(lat, lon, records)
             out.update(values)

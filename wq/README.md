@@ -109,6 +109,15 @@ key whose value is `None` still counts as present — the builder ran and the
 fetch failed, and that is an answer worth keeping rather than 120 requests a
 run to re-learn.
 
+**A key is a shallow test, so a cache entry also carries a schema string.**
+ECHO proved this too: when the outfalls moved off the CSV download onto
+`get_qid` + `get_map`, the cached payload kept its `records` key while the
+records *inside* it changed from useless two-column rows to placed
+facilities. The key check passed, the stale list was served a second time,
+and `n_outfalls_within_2km` read a constant zero again. When a fetch changes
+what it *means* rather than which keys it returns, the caller bumps the
+schema string and every payload written under the old one is rebuilt.
+
 Offline checks, no network:
 
 ```bash

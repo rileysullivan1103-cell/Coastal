@@ -383,6 +383,39 @@ def test_a_cache_from_an_older_schema_is_not_an_answer():
         spatial._cached_json("nhd_S2", build_none, expects=new_keys)
         check("a key recorded as None is an answer, not a miss",
               builds == ["old", "new", "none"], str(builds))
+
+        # A key is a shallow test. ECHO's payload kept its "records" key
+        # while the records INSIDE it went from useless two-column rows to
+        # placed facilities, so `expects` passed and the stale list was
+        # served a second time -- the same silent-success failure, one level
+        # down. A schema string catches a change in what a fetch MEANS
+        # rather than which keys it returns.
+        def build_flat():
+            builds.append("flat")
+            return {"records": [{"SourceID": "A"}]}
+
+        def build_placed():
+            builds.append("placed")
+            return {"records": [{"SourceID": "A", "FacLat": "1",
+                                 "FacLong": "2"}]}
+
+        spatial._cached_json("echo_t1", build_flat, expects=("records",),
+                             schema="v1")
+        spatial._cached_json("echo_t1", build_flat, expects=("records",),
+                             schema="v1")
+        check("a payload under the same schema is reused",
+              builds[-1] == "flat" and builds.count("flat") == 1, str(builds))
+        payload = spatial._cached_json("echo_t1", build_placed,
+                                       expects=("records",), schema="v2")
+        check("the SAME keys under a new schema are rebuilt anyway",
+              builds[-1] == "placed", str(builds))
+        check("and the rebuilt records carry what the new schema promises",
+              payload["records"][0].get("FacLong") == "2",
+              str(payload["records"][0]))
+        spatial._cached_json("echo_t1", build_placed, expects=("records",),
+                             schema="v2")
+        check("then it caches again under the new schema",
+              builds.count("placed") == 1, str(builds))
     finally:
         shutil.rmtree(spatial.CACHE_DIR, ignore_errors=True)
         spatial.CACHE_DIR = kept
