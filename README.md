@@ -446,6 +446,13 @@ Established by running the pull, not assumed:
   and Santa Barbara serve wind but no water temperature. The pull tries the
   three nearest stations for each product rather than only the closest, and
   pulls each station/product combination once even when several sites share it.
+- **The Great Lakes are not tidal, and MLLW is a tidal datum.** Holland
+  (`9087031`) answers a `water_level` request carrying `datum=MLLW` with HTTP
+  400 rather than the 200-and-error-body CO-OPS returns elsewhere, so the
+  status code alone does not tell the two apart. The pull retries such a
+  refusal once on IGLD and reuses whichever datum worked for the remaining
+  chunks. A station that refuses both is reported under "Sites with something
+  missing" and skipped: one gauge can cost a site its tide, never the run.
 
 ## Reading the WebCOOS product catalogue
 
