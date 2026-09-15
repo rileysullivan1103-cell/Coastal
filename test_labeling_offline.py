@@ -391,6 +391,47 @@ def check_boxes_come_off_disk_and_belong_to_their_frame():
               not os.path.exists("payload.json"))
 
 
+def check_a_repair_does_not_lose_labels():
+    """Half-labelled in, half-labelled out, and the count must say so.
+
+    The count is the only evidence the user has that --repair-boxes kept their
+    work. Blank cells come back from the CSV as NaN, whose str() is "nan", so
+    the naive spelling reports every unlabelled row as labelled -- a line that
+    reads "360 existing labels preserved" whether or not anything survived.
+    """
+    import build_label_sample as bls
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "labels.csv")
+        rows = []
+        for i in range(10):
+            rows.append({"frame_id": f"f{i}", "rip_present": "yes" if i < 3 else "",
+                         "notes": "swirl" if i == 0 else "", "boxes": "[]"})
+        pd.DataFrame(rows).to_csv(path, index=False)
+
+        back = pd.read_csv(path)
+        check("three of ten rows are labelled, not ten",
+              bls.count_labelled(back) == 3, f"{bls.count_labelled(back)}")
+        check("a table with no verdict column counts zero",
+              bls.count_labelled(back.drop(columns=["rip_present"])) == 0)
+
+        blank = pd.read_csv(path)
+        blank["rip_present"] = ""
+        check("a wholly unlabelled table counts zero, not its row count",
+              bls.count_labelled(blank) == 0, f"{bls.count_labelled(blank)}")
+
+        # The round trip a repair performs: rewrite boxes, leave verdicts alone.
+        back["boxes"] = ['[{"x": 1, "y": 2, "w": 3, "h": 4}]'] * len(back)
+        back.to_csv(path, index=False)
+        after = pd.read_csv(path)
+        check("the verdicts survived the rewrite",
+              bls.count_labelled(after) == 3, f"{bls.count_labelled(after)}")
+        check("the note survived with them",
+              str(after.iloc[0]["notes"]) == "swirl")
+        check("the boxes really were replaced",
+              after["boxes"].iloc[0] != "[]")
+
+
 def main():
     print("labelling pipeline offline checks\n")
     check_weighting_beats_the_sample()
@@ -405,6 +446,7 @@ def main():
     check_missing_wave_height_gets_its_own_cell()
     check_missing_wave_height_does_not_eat_the_budget()
     check_boxes_come_off_disk_and_belong_to_their_frame()
+    check_a_repair_does_not_lose_labels()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
 

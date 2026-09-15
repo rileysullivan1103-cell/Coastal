@@ -351,6 +351,21 @@ def report_boxes(table):
     return drawn
 
 
+def count_labelled(table):
+    """How many rows carry a verdict.
+
+    fillna before astype(str): a blank cell reads back from the CSV as NaN, and
+    str(NaN) is the non-empty string "nan", so the obvious spelling counts every
+    unlabelled row as labelled. It reported "360 existing labels preserved" on a
+    sample with no labels in it -- harmless there, but this line is the only
+    evidence a repair run mid-labelling did not discard the work.
+    """
+    if "rip_present" not in table.columns:
+        return 0
+    verdicts = table["rip_present"].fillna("").astype(str).str.strip()
+    return int(verdicts.ne("").sum())
+
+
 def repair_boxes(slug, frames):
     """Recompute only the boxes column of an existing labels.csv.
 
@@ -383,8 +398,7 @@ def repair_boxes(slug, frames):
                      else "[]")
     table["boxes"] = boxes
 
-    labelled = int(table["rip_present"].astype(str).str.strip().ne("").sum()) \
-        if "rip_present" in table.columns else 0
+    labelled = count_labelled(table)
     temporary = LABEL_CSV + ".tmp"
     table.to_csv(temporary, index=False)
     os.replace(temporary, LABEL_CSV)
