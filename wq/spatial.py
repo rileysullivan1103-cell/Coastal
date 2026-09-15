@@ -1382,6 +1382,87 @@ def probe_streams(lat, lon):
              path.format(lookups=NLDI_LOOKUPS, base=NLDI_BASE), {"f": "json"})
 
 
+def probe_outfalls(lat, lon):
+    """Ask ECHO which columns it will actually give, instead of guessing.
+
+    The box is right and the query is right: 113 permitted facilities inside
+    the Rhode Island tile, with the station inside its own box. The DOWNLOAD
+    is what fails. Asked for six columns by name, it returned two --
+    CWPName and SourceID -- and dropped FacLat and FacLong without a word.
+    An unrecognised column name is not an error to ECHO, it is a column that
+    quietly does not appear, so a distance calculation over the result finds
+    nothing, everywhere, and reports a confident zero.
+
+    Two names have now been tried and neither placed a facility. A third
+    guess is worth less than one question, so this asks the service for its
+    own column list, and tries the geometry endpoints that would make column
+    names irrelevant.
+
+    Prints raw status and body. It interprets nothing.
+    """
+    def show(label, url, params=None, head=400):
+        print(f"\n--- {label}\n    {url}")
+        if params:
+            print(f"    params {params}")
+        try:
+            response = _get(url, params=params, probe=False,
+                            count_failures=False)
+            body = response.text
+            print(f"    HTTP {response.status_code}  {len(body)} bytes")
+            print(f"    {' '.join(body.split())[:head]}")
+            return response
+        except LayerFailed as exc:
+            print(f"    FAILED {exc}")
+            return None
+
+    south, west, north, east = tile_bounds(lat, lon, OUTFALL_SEARCH_KM)
+    box = {"output": "JSON", "responseset": "5000",
+           "p_c1lon": f"{west:.5f}", "p_c1lat": f"{north:.5f}",
+           "p_c2lon": f"{east:.5f}", "p_c2lat": f"{south:.5f}"}
+
+    # 1. The authoritative column list. If FacLat is spelled something else
+    #    here, that is the answer and no further guessing is needed.
+    meta = show("the column list ECHO publishes for this service",
+                "https://echodata.epa.gov/echo/cwa_rest_services.metadata",
+                {"output": "JSON"}, head=1200)
+    if meta is not None:
+        try:
+            items = (meta.json().get("Results") or {}).get("ResultColumns") or []
+            names = [c.get("ObjectName") for c in items]
+            print(f"\n    {len(names)} column(s) published")
+            hits = [n for n in names if n and
+                    any(k in n.upper() for k in ("LAT", "LON", "GEO", "COORD"))]
+            print(f"    anything positional: {hits}")
+        except (ValueError, AttributeError) as exc:
+            print(f"    could not read the column list: {exc}")
+
+    response = show("the facility query, to get a QueryID to download",
+                    ECHO_FACILITIES, box, head=300)
+    qid = None
+    if response is not None:
+        try:
+            results = response.json().get("Results") or {}
+            qid = results.get("QueryID")
+            print(f"    QueryID {qid}, rows {results.get('QueryRows')}")
+        except ValueError:
+            pass
+    if not qid:
+        print("\n    no QueryID, so nothing below can be tried")
+        return
+
+    # 2. What the download gives when nothing is asked for. The default set
+    #    carried FacLong and no FacLat, which is its own kind of answer.
+    show("the download with NO qcolumns at all", ECHO_DOWNLOAD,
+         {"qid": qid, "output": "CSV"}, head=600)
+
+    # 3. Geometry endpoints. If one of these answers with coordinates, the
+    #    column names stop mattering entirely.
+    for name in ("get_geojson", "get_map", "get_qid"):
+        show(f"the {name} endpoint, which would carry coordinates itself",
+             f"https://echodata.epa.gov/echo/cwa_rest_services.{name}",
+             {"qid": qid, "output": "JSON"}, head=500)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lat", type=float)
@@ -1393,9 +1474,13 @@ def main():
     parser.add_argument("--probe-streams", action="store_true",
                         help="ask NLDI and StreamCat which stream/land-cover "
                              "path actually answers, and print it raw")
+    parser.add_argument("--probe-outfalls", action="store_true",
+                        help="ask ECHO which columns it publishes and whether "
+                             "any endpoint carries coordinates, and print it "
+                             "raw")
     args = parser.parse_args()
 
-    if args.probe_streams:
+    if args.probe_streams or args.probe_outfalls:
         lat, lon = args.lat, args.lon
         if lat is None or lon is None:
             path = os.path.join(config.DATA_DIR, "site_covariates.csv")
@@ -1409,7 +1494,10 @@ def main():
             row = sites.dropna(subset=["lat", "lon"]).iloc[0]
             lat, lon = float(row["lat"]), float(row["lon"])
             print(f"probing at {row['station_id']}  ({lat}, {lon})")
-        probe_streams(lat, lon)
+        if args.probe_streams:
+            probe_streams(lat, lon)
+        if args.probe_outfalls:
+            probe_outfalls(lat, lon)
         return
 
     if args.lat is not None and args.lon is not None:

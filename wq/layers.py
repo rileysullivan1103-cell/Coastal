@@ -81,6 +81,20 @@ LAYERS = {
         "supplies": ["dist_to_outfall_m", "outfall_type",
                      "n_outfalls_within_2km"],
         "declared_vintage": "ECHO refreshes weekly from ICIS-NPDES",
+        # Probed 2026-09-15 from a live network. The service is UP and the
+        # query is right: 113 permitted facilities inside the Rhode Island
+        # tile, with the station inside its own bounding box. The download is
+        # what fails -- asked for six columns by name it returns two (CWPName,
+        # SourceID) and drops FacLat and FacLong silently. An unrecognised
+        # column name is not an error to ECHO, it is a column that does not
+        # appear, so every distance came back empty and n_outfalls_within_2km
+        # read a confident 0 at all 120 sites.
+        "observed_absent": "ECHO answers with 113 facilities in the box but "
+                           "its CWA download omits FacLat/FacLong, so nothing "
+                           "returned can be placed (probed 2026-09-15). The "
+                           "correct column names have not been established; "
+                           "wq.spatial --probe-outfalls asks the service for "
+                           "its own list rather than guessing a third set.",
         "vintage_source": "response carries no timestamp; accessed_at is the "
                           "only date available",
         "note": "the download needs an explicit qcolumns list — ECHO's "
