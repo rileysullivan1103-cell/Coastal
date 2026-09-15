@@ -281,6 +281,30 @@ def test_an_empty_layer_has_to_say_why():
     check("two sites failing for one tiled request count as one tile",
           tiles.get("HTTP 429 overpass-api.de") == 1, str(tiles))
 
+    # A layer with no request of its own goes quiet when its parent fails,
+    # and a layer you chose not to fetch did not fail at all. Both read as
+    # "empty for no reason" until they are told to say otherwise.
+    inherited = pd.DataFrame([{
+        "station_id": "a", "tile": "t1",
+        "echo_note": "not fetched — excluded by --skip-layers on this run",
+        "nhdplus_note": "api.water.usgs.gov: HTTP 404 — No catchment found",
+        "coastline_note": "overpass-api.de: HTTP 429",
+    }])
+    table = spatial.outcomes(inherited, want=set(layers.LAYERS))
+    reasons = dict(zip(table["layer"], table["reason"]))
+    check("a skipped layer says it was skipped, not that it is mysteriously "
+          "empty", "--skip-layers" in reasons.get("echo", ""),
+          reasons.get("echo"))
+    check("nlcd inherits the outcome of the request it rides in on",
+          reasons.get("nlcd", "").startswith("via nhdplus:"),
+          reasons.get("nlcd"))
+    check("and so does nhdplus_vaa",
+          reasons.get("nhdplus_vaa", "").startswith("via nhdplus:"),
+          reasons.get("nhdplus_vaa"))
+    check("no fetched layer is left saying nothing",
+          "EMPTY, NO REASON RECORDED" not in
+          {reasons.get(k) for k in layers.FETCHED}, str(reasons))
+
     # Every covariate the coverage table names has to have a layer beside it,
     # or nobody can check its vintage.
     orphans = [name for name in config.SITE_COVARIATES

@@ -112,8 +112,29 @@ def test_sanity_check_catches_a_reversed_way():
     # share a node.
     passing = [[(0.0, -20000.0), (0.0, 0.0)],
                [(30.0, 20000.0), (30.0, 0.0)]]
-    joins, mismatches, _ = geo.way_junctions(passing)
+    joins, mismatches, _suspect, _ambiguous = geo.way_junctions(passing)
     check("two ways passing 30 m apart are not a junction",
+          joins == 0 and mismatches == 0, f"{joins} join(s)")
+
+    # A river mouth where one way ends and two begin. Scored pairwise, the two
+    # starts look like a reversal; they are a node of degree three, and the
+    # head-to-tail rule says nothing about it.
+    fork = [[(0.0, -20000.0), (0.0, 0.0)],
+            [(0.0, 0.0), (-15000.0, 8000.0)],
+            [(0.0, 0.0), (15000.0, 8000.0)]]
+    joins, mismatches, suspect, ambiguous = geo.way_junctions(fork)
+    check("a node where three ways meet is not called a reversal",
+          mismatches == 0 and not suspect, f"{mismatches} mismatch(es)")
+    check("it is reported as unjudged rather than passed over silently",
+          ambiguous == 1, f"{ambiguous} ambiguous")
+    ok, detail = geo.coastline_sanity(fork)
+    check("and the coastline still passes", ok, detail)
+
+    # Both ends of one closed ring land in the same cluster and say nothing
+    # about any other way's direction.
+    ring = [[(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (0.0, 0.0)]]
+    joins, mismatches, _suspect, _ambiguous = geo.way_junctions(ring)
+    check("a closed ring does not join itself",
           joins == 0 and mismatches == 0, f"{joins} join(s)")
 
 

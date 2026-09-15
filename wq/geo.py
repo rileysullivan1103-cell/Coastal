@@ -137,34 +137,70 @@ JOIN_TOLERANCE_M = 1.0
 
 
 def way_junctions(lines, join_tolerance_m=JOIN_TOLERANCE_M):
-    """(joins, mismatches, suspect) for a set of coastline ways.
+    """(joins, mismatches, suspect, ambiguous) for a set of coastline ways.
 
-    `suspect` is the indices of the ways meeting at a junction that does not
-    chain head to tail. Both ways of such a pair are suspect: the geometry
-    says one of them runs the wrong way, not which.
+    Endpoints are CLUSTERED first, then judged, because the head-to-tail rule
+    only applies to a node where exactly two way-ends meet. Judging pairwise
+    instead invents a reversal at every node of degree three or more: at a
+    river mouth where A ends and both B and C start, the B-C pair is two
+    starts, and pairwise scoring calls that backwards when nothing is.
+
+    A cluster of one is a way whose neighbour lies outside the search box --
+    dangling, not wrong. A cluster of three or more is reported as ambiguous
+    and never as a reversal.
+
+    `suspect` is the indices of the ways at a two-way junction that does not
+    chain head to tail. Both are suspect: the geometry says one of the pair
+    runs the wrong way, not which.
     """
-    joins = mismatches = 0
-    suspect = set()
-    for i, first in enumerate(lines):
-        if len(first) < 2:
+    ends = []
+    for index, line in enumerate(lines):
+        if len(line) < 2:
             continue
-        for j in range(i + 1, len(lines)):
-            second = lines[j]
-            if len(second) < 2:
-                continue
-            for a_point, a_is_end in ((first[0], False), (first[-1], True)):
-                for b_point, b_is_end in ((second[0], False),
-                                          (second[-1], True)):
-                    if math.hypot(a_point[0] - b_point[0],
-                                  a_point[1] - b_point[1]) > join_tolerance_m:
-                        continue
-                    joins += 1
-                    # Head to tail is one end and one start. Two ends or two
-                    # starts means one of the pair runs the wrong way.
-                    if a_is_end == b_is_end:
-                        mismatches += 1
-                        suspect.update((i, j))
-    return joins, mismatches, suspect
+        ends.append((line[0], index, False))
+        ends.append((line[-1], index, True))
+
+    # Union-find over endpoints within tolerance of each other, so a chain of
+    # near-coincident points becomes one node rather than several.
+    parent = list(range(len(ends)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(ends)):
+        for j in range(i + 1, len(ends)):
+            if math.hypot(ends[i][0][0] - ends[j][0][0],
+                          ends[i][0][1] - ends[j][0][1]) <= join_tolerance_m:
+                a, b = find(i), find(j)
+                if a != b:
+                    parent[a] = b
+
+    clusters = {}
+    for i in range(len(ends)):
+        clusters.setdefault(find(i), []).append(ends[i])
+
+    joins = mismatches = ambiguous = 0
+    suspect = set()
+    for members in clusters.values():
+        # Both ends of one closed ring land in the same cluster and say
+        # nothing about any other way's direction.
+        ways = {index for _point, index, _is_end in members}
+        if len(members) < 2 or len(ways) < 2:
+            continue
+        if len(members) > 2:
+            ambiguous += 1
+            continue
+        joins += 1
+        (_p1, i1, end1), (_p2, i2, end2) = members
+        # Head to tail is one end and one start. Two ends or two starts means
+        # one of the pair runs the wrong way.
+        if end1 == end2:
+            mismatches += 1
+            suspect.update((i1, i2))
+    return joins, mismatches, suspect, ambiguous
 
 
 def coastline_sanity(lines, join_tolerance_m=JOIN_TOLERANCE_M):
@@ -194,16 +230,19 @@ def coastline_sanity(lines, join_tolerance_m=JOIN_TOLERANCE_M):
     if not usable:
         return False, "no coastline"
 
-    joins, mismatches, _suspect = way_junctions(usable, join_tolerance_m)
+    joins, mismatches, _suspect, ambiguous = way_junctions(usable,
+                                                           join_tolerance_m)
+    extra = f", {ambiguous} node(s) of degree 3+ not judged" if ambiguous else ""
     if joins == 0:
         closed = sum(1 for line in usable if is_closed(line))
-        return True, (f"{len(usable)} way(s), {closed} closed, none joined — "
-                      "direction could not be cross-checked")
+        return True, (f"{len(usable)} way(s), {closed} closed, no two-way "
+                      f"junction to cross-check direction against{extra}")
     if mismatches:
-        return False, (f"{mismatches} of {joins} way junction(s) meet end-to-end "
-                       "or start-to-start, so at least one way is digitised "
-                       "backwards and land and sea are inverted along it")
-    return True, f"{joins} way junction(s) all chain head to tail"
+        return False, (f"{mismatches} of {joins} two-way junction(s) meet "
+                       "end-to-end or start-to-start, so at least one way is "
+                       f"digitised backwards and land and sea are inverted "
+                       f"along it{extra}")
+    return True, f"{joins} two-way junction(s) all chain head to tail{extra}"
 
 
 def _walk(line, start_index, start_t, distance_m):

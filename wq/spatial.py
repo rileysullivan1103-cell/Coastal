@@ -813,6 +813,12 @@ def for_site(site, record=None, probe=False, want=None):
     # TILE, not per station. Without it a hundred identical failure lines look
     # like a hundred failures instead of the four they actually are.
     out = {"station_id": station, "tile": _tile_slug(lat, lon)}
+    # A layer you chose not to fetch is not a layer that failed, and it is not
+    # a layer that came back empty for no reason either. Say so on the row.
+    for key in layers.FETCHED:
+        if key not in want:
+            out[f"{key}_note"] = ("not fetched — excluded by --skip-layers "
+                                  "on this run")
 
     if "coastline" in want:
         record[ "coastline"]["sites_attempted"] += 1
@@ -1020,12 +1026,29 @@ def coverage(frame, covariates=None):
     return pd.DataFrame(rows)
 
 
-def _note_of(row, key):
+def _raw_note(row, key):
     value = row.get(f"{key}_note")
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
     text = str(value).strip()
     return text or None
+
+
+def _note_of(row, key):
+    """The note for a layer, or its parent's where the layer has no fetch.
+
+    nlcd and nhdplus_vaa arrive inside the NHDPlus response. When that request
+    fails they are empty with nothing recorded against them, which is
+    indistinguishable from code that never called them at all.
+    """
+    note = _raw_note(row, key)
+    if note is not None:
+        return note
+    parent = layers.DERIVED_FROM.get(key)
+    if parent is None:
+        return None
+    inherited = _raw_note(row, parent)
+    return None if inherited is None else f"via {parent}: {inherited}"
 
 
 def outcomes(frame, want=None, width=150):

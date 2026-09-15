@@ -121,10 +121,19 @@ def stage_spatial(args):
     want = set(layers.LAYERS)
     if getattr(args, "skip_layers", None):
         skipped = {s.strip() for s in args.skip_layers.split(",") if s.strip()}
-        unknown = skipped - want
+        # Only the layers with a request of their own can be skipped. nlcd and
+        # nhdplus_vaa ride inside the NHDPlus response, so naming them here
+        # would print a reassuring message and change nothing.
+        unknown = skipped - set(layers.FETCHED)
         if unknown:
+            derived = {k for k in unknown if k in layers.DERIVED_FROM}
+            if derived:
+                sys.exit("; ".join(
+                    f"{k} has no request of its own — it comes back inside "
+                    f"{layers.DERIVED_FROM[k]}, so skip that instead"
+                    for k in sorted(derived)))
             sys.exit(f"not layers: {sorted(unknown)}. "
-                     f"Known: {sorted(want)}")
+                     f"Known: {sorted(layers.FETCHED)}")
         want -= skipped
         print(f"  skipping {', '.join(sorted(skipped))} at your request — "
               "their covariates will be empty and the coverage rule will "

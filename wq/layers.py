@@ -124,6 +124,18 @@ LAYERS = {
     },
 }
 
+# Layers with no request of their own: they arrive inside another layer's
+# response, so their outcome IS that layer's outcome. Without this they go
+# quiet when their parent fails -- empty, with nothing recorded against them,
+# which reads exactly like a bug in the code that never called them.
+DERIVED_FROM = {"nlcd": "nhdplus", "nhdplus_vaa": "nhdplus"}
+
+# The layers for_site() actually branches on. coops_datums is fetched in one
+# bulk pull outside the per-site loop, and the derived layers above come back
+# inside nhdplus, so neither is something --skip-layers can meaningfully skip.
+FETCHED = tuple(key for key in LAYERS
+                if key not in DERIVED_FROM and key != "coops_datums")
+
 # Which layer each covariate comes from, so the manifest can be written from
 # the covariate side and read from the layer side.
 COVARIATE_LAYER = {covariate: key
