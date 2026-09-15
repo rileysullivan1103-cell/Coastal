@@ -447,6 +447,66 @@ def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
     return frame
 
 
+def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
+                      min_confidence=MIN_CONFIDENCE):
+    """Each frame against the one BEFORE it, rather than against a reference.
+
+    This is the check the direct-to-reference pass cannot perform on itself.
+    Registering January against a reference in June asks the correlator to
+    match two frames that differ in sun angle, season, haze and tide as well as
+    in camera position, and it can lock onto the wrong thing while still
+    producing a confident peak. Consecutive weeks are the easiest possible
+    pair, so a sequential pass is the most reliable measurement available -- and
+    its CUMULATIVE SUM should reproduce the direct measurement exactly, because
+    both are describing the same camera.
+
+    Where the two agree, a single translation describes the record and the
+    steps are real. Where they diverge, the direct pass is registering
+    something other than the scene, and no number it produced can be trusted.
+    That is a test with a right answer, which nothing before it in this module
+    has been.
+    """
+    rows = []
+    previous, previous_date = None, None
+    for path, date in zip(paths, dates):
+        image = load_gray(path, downsample=downsample)
+        if image is None:
+            continue
+        if previous is None:
+            rows.append({"date": date, "dy": 0.0, "dx": 0.0,
+                         "confidence": float("inf")})
+            previous, previous_date = image, date
+            continue
+        if image.shape != previous.shape:
+            height = min(previous.shape[0], image.shape[0])
+            width = min(previous.shape[1], image.shape[1])
+            base, moved = previous[:height, :width], image[:height, :width]
+        else:
+            base, moved = previous, image
+        got = phase_shift(base, moved)
+        previous, previous_date = image, date
+        if got is None:
+            continue
+        dy, dx, confidence = got
+        rows.append({"date": date, "dy": dy * downsample,
+                     "dx": dx * downsample, "confidence": confidence})
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows).set_index("date").sort_index()
+    # A weak link breaks the chain rather than one row of it: everything after
+    # an unmeasured step is offset by whatever that step was. Carrying zero is
+    # the least-wrong choice and the count is reported so it can be judged.
+    weak = int((frame["confidence"] < min_confidence).sum())
+    if weak:
+        print(f"  {weak}/{len(frame)} consecutive pairs below confidence "
+              f"{min_confidence}; their step is carried as zero")
+        frame.loc[frame["confidence"] < min_confidence, ["dy", "dx"]] = 0.0
+    frame["step"] = np.hypot(frame["dx"], frame["dy"])
+    frame["cum_dy"] = frame["dy"].cumsum()
+    frame["cum_dx"] = frame["dx"].cumsum()
+    return frame
+
+
 def propose_rois(paths, size=ROI_SIZE, count=CANDIDATES, bands=BANDS,
                  land_fraction=LAND_FRACTION, sample=16,
                  top_margin=0, bottom_margin=0):
@@ -1029,6 +1089,46 @@ def coverage_counts(slug):
 # Plot
 # ---------------------------------------------------------------------------
 
+def plot_registration(direct, sequential, steps, path):
+    """The plots the brief actually asked for: offset against date, and the
+    frame-to-frame magnitude that catches a step."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    fig, axes = plt.subplots(3, 1, figsize=(11, 9), sharex=True)
+    axes[0].plot(direct.index, direct["dx"], marker=".", lw=0.8, label="dx")
+    axes[0].plot(direct.index, direct["dy"], marker=".", lw=0.8, label="dy")
+    axes[0].set_ylabel("offset from reference, px")
+    axes[0].legend(fontsize=8)
+    axes[1].plot(direct.index, direct["offset"], color="#12212B", lw=1.0,
+                 label="measured against the reference")
+    if sequential is not None and not sequential.empty:
+        walk = np.hypot(sequential["cum_dx"], sequential["cum_dy"])
+        axes[1].plot(sequential.index, walk, color="#E4572E", lw=1.0, ls="--",
+                     label="cumulative sum of frame-to-frame steps")
+    axes[1].set_ylabel("displacement, px")
+    axes[1].legend(fontsize=8)
+    if sequential is not None and not sequential.empty:
+        axes[2].plot(sequential.index, sequential["step"], color="#E4572E",
+                     lw=0.9)
+    axes[2].set_ylabel("frame-to-frame step, px")
+    axes[2].set_xlabel("date")
+    for step in steps:
+        for axis in axes:
+            axis.axvline(step["date"], color="#E4572E", ls=":", lw=1)
+    for axis in axes:
+        axis.grid(alpha=0.2)
+        axis.axhline(0, color="#7C8F99", lw=0.6)
+    axes[0].set_title("Whole-frame registration")
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return path
+
+
 def plot(frame, signal, steps, path):
     try:
         import matplotlib
@@ -1314,8 +1414,89 @@ def main():
                   f"{coarse['offset'].max():.2f} px on "
                   f"{coarse['offset'].idxmax():%Y-%m-%d}")
             coarse_steps = find_steps(coarse["offset"], threshold=args.step_px)
-            report_record(coarse_steps, coarse.index, slug, args.step_px,
-                          "the whole frame")
+
+            # Does a single translation actually describe this record? The
+            # direct pass cannot answer that about itself. Consecutive weeks
+            # are the easiest pair to register, so their steps summed must
+            # reproduce the direct measurement -- and where they do not, the
+            # direct numbers are not measuring the scene.
+            print("\nCROSS-CHECK: frame to frame, summed")
+            sequential = sequential_shifts(paths, dates)
+            reliable = True
+            if sequential.empty:
+                print("  no consecutive pair could be registered")
+                sequential = None
+            else:
+                walk = np.hypot(sequential["cum_dx"], sequential["cum_dy"])
+                shared = direct_index = coarse.index.intersection(walk.index)
+                # Both describe displacement from the FIRST frame; the direct
+                # pass measures from the reference, so compare like with like
+                # by removing each one's own value at the reference date.
+                anchor = walk.reindex(direct_index).loc[dates[pick]] \
+                    if dates[pick] in walk.index else 0.0
+                aligned = walk.reindex(shared) - anchor
+                straight = np.hypot(coarse["dx"].reindex(shared)
+                                    - coarse["dx"].reindex([dates[pick]]).iloc[0],
+                                    coarse["dy"].reindex(shared)
+                                    - coarse["dy"].reindex([dates[pick]]).iloc[0])
+                gap = float(np.nanmedian(np.abs(aligned - straight)))
+                print(f"  largest single frame-to-frame step: "
+                      f"{sequential['step'].max():.1f} px on "
+                      f"{sequential['step'].idxmax():%Y-%m-%d}")
+                biggest = sequential["step"].nlargest(5)
+                for date, value in biggest.items():
+                    print(f"    {date:%Y-%m-%d}  {value:8.1f} px")
+                print(f"  the two passes differ by a median of {gap:.1f} px")
+                reliable = gap <= max(args.step_px * 2, 10.0)
+                if reliable:
+                    print("  They agree, so one translation describes the "
+                          "record and the")
+                    print("  discontinuities above are the camera.")
+                else:
+                    print("\n" + "!" * 74)
+                    print("THE TWO PASSES DISAGREE. Registering each frame "
+                          "against a distant")
+                    print("reference and registering it against its neighbour "
+                          "must give the")
+                    print("same answer, because there is one camera. They do "
+                          "not, so at least")
+                    print("one pass is locking onto something other than the "
+                          "scene -- cloud,")
+                    print("sun glint or surf can all produce a confident peak "
+                          "at the wrong")
+                    print("place. The offsets and the epochs above are NOT "
+                          "evidence.")
+                    print("!" * 74)
+            if reliable:
+                report_record(coarse_steps, coarse.index, slug, args.step_px,
+                              "the whole frame")
+            else:
+                # Not "one epoch" either. An untrustworthy registration cannot
+                # report stability any more than it can report a move: an
+                # earlier version printed "the record reads as ONE geometric
+                # epoch" directly under the warning saying its numbers were not
+                # evidence.
+                print(f"\n{len(coarse_steps)} apparent discontinuit"
+                      f"{'y' if len(coarse_steps) == 1 else 'ies'} and any "
+                      "epoch split are WITHHELD.")
+                print("Neither a move nor stability can be claimed from a "
+                      "registration that")
+                print("does not agree with itself. Re-run with --every 3: "
+                      "denser sampling")
+                print("makes consecutive frames easier to match and often "
+                      "settles it.")
+            registration = coarse.copy()
+            if sequential is not None:
+                registration = registration.join(
+                    sequential[["step", "cum_dx", "cum_dy"]], how="outer")
+            reg_csv = os.path.join(OUT_DIR, f"registration_{slug}.csv")
+            registration.to_csv(reg_csv)
+            reg_png = plot_registration(
+                coarse, sequential, coarse_steps if reliable else [],
+                os.path.join(OUT_DIR, f"registration_{slug}.png"))
+            print(f"\nwrote {reg_csv}")
+            if reg_png:
+                print(f"wrote {reg_png}")
             if coarse["offset"].max() > args.roi_size / 2:
                 print(f"\n  NOTE: the record moves further than half a "
                       f"{args.roi_size} px patch "

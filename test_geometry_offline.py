@@ -778,6 +778,101 @@ def test_a_move_bigger_than_a_patch():
         shutil.rmtree(tmp)
 
 
+def coastal_frames(tmp, dates, motion, seed=7):
+    """Frames with a realistic share of rigid structure and a planted motion.
+
+    `motion` maps an index to the (dy, dx) the camera is at by then.
+    """
+    from PIL import Image
+    base = np.full((768, 1024), 55.0)
+    edges = [40, 150, 330, 395, 560, 690, 745, 900]
+    for index, x in enumerate(edges):
+        width = 45 + 11 * (index % 4)
+        base[150:260, x:x + width] = 205
+        base[110:150, x + 8:x + width - 8] = 240
+    base[90:100, :] = 175
+    base[260:270, :] = 140
+    rng = np.random.default_rng(seed)
+    paths = []
+    for index, _ in enumerate(dates):
+        dy, dx = motion(index)
+        frame = shifted(base, int(dy), int(dx)).astype(float)
+        frame[300:, :] = 110 + rng.normal(0, 35, (768 - 300, 1024))
+        frame += rng.normal(0, 4, frame.shape)
+        path = os.path.join(tmp, f"f{index:02d}.jpg")
+        Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+        paths.append(path)
+    return paths
+
+
+def test_frame_to_frame_agrees_with_the_reference():
+    """The one test in this module with a right answer it can check itself.
+
+    Registering each frame against a distant reference and registering it
+    against its neighbour are two routes to the same quantity, because there is
+    one camera. Consecutive weeks are the easier pair -- same season, similar
+    sun -- so where the two routes agree, a single translation describes the
+    record; where they diverge, the direct pass is locking onto something other
+    than the scene, and it can do that while still reporting a confident peak.
+    """
+    print("\nframe-to-frame against direct-to-reference")
+    tmp = tempfile.mkdtemp()
+    try:
+        dates = pd.date_range("2024-01-07", periods=24, freq="7D", tz="UTC")
+        # Two moves, so the cumulative sum has something to accumulate.
+        def motion(index):
+            if index < 8:
+                return (0.0, 0.0)
+            if index < 16:
+                return (-40.0, 90.0)
+            return (-40.0, 210.0)
+        paths = coastal_frames(tmp, dates, motion)
+
+        direct = g.coarse_shifts(paths, list(dates), 0, downsample=2)
+        steps = g.sequential_shifts(paths, list(dates), downsample=2)
+        check("every consecutive pair is measured",
+              len(steps) == len(dates), len(steps))
+
+        walk = np.hypot(steps["cum_dx"], steps["cum_dy"])
+        gap = float(np.nanmedian(np.abs(walk.reindex(direct.index)
+                                        - direct["offset"])))
+        check("the two routes agree on a clean record", gap < 3.0, gap)
+
+        # Both moves show as a single large frame-to-frame step, on the day.
+        big = steps["step"].nlargest(2).sort_index()
+        check("exactly the planted moves stand out",
+              list(big.index) == [dates[8], dates[16]], list(big.index))
+        check("and the rest of the record is quiet",
+              steps["step"].drop(list(big.index)).max() < 3.0,
+              steps["step"].drop(list(big.index)).max())
+        check("the first move's magnitude is right",
+              abs(big.iloc[0] - np.hypot(40, 90)) < 3.0, big.iloc[0])
+        check("and the second's",
+              abs(big.iloc[1] - np.hypot(0, 120)) < 3.0, big.iloc[1])
+
+        # And the failure it exists to catch: a record where the direct pass
+        # is fed frames it cannot match. Every frame after the midpoint is
+        # replaced by unrelated content, so the direct pass registers noise
+        # while the sequential pass sees one huge step and then quiet.
+        # The two routes must then disagree.
+        rng = np.random.default_rng(1)
+        from PIL import Image
+        for index in range(12, 24):
+            junk = rng.normal(128, 45, (768, 1024))
+            Image.fromarray(junk.clip(0, 255).astype(np.uint8)).save(paths[index])
+        broken = g.coarse_shifts(paths, list(dates), 0, downsample=2)
+        broken_steps = g.sequential_shifts(paths, list(dates), downsample=2)
+        if not broken.empty and not broken_steps.empty:
+            walk = np.hypot(broken_steps["cum_dx"], broken_steps["cum_dy"])
+            gap = float(np.nanmedian(np.abs(walk.reindex(broken.index)
+                                            - broken["offset"])))
+            check("an unregistrable record makes the two routes diverge",
+                  gap > 10.0 or len(broken) < len(dates) * 0.75,
+                  f"gap {gap:.1f}, {len(broken)} of {len(dates)} registered")
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_the_survey_tiles_the_whole_frame():
     """The survey asks nothing about appearance, so it must cover everything.
 
@@ -921,6 +1016,7 @@ def main():
                  test_a_frame_with_nothing_rigid_in_it_returns_nothing,
                  test_features_with_no_overlapping_dates_are_not_linked,
                  test_a_move_bigger_than_a_patch,
+                 test_frame_to_frame_agrees_with_the_reference,
                  test_the_survey_tiles_the_whole_frame,
                  test_a_large_survey_still_finds_the_rigid_block,
                  test_a_changed_frame_size_is_reported,
