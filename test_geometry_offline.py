@@ -891,6 +891,42 @@ def test_a_move_the_magnitude_cannot_see():
           g.find_steps(still, threshold=5.0) == [], g.find_steps(still, 5.0))
 
 
+def test_the_two_passes_are_set_against_each_other():
+    """Two epoch lists are not an answer until someone diffs them.
+
+    The whole-frame pass and the agreeing patches measure the same camera by
+    different means, so what they AGREE on is the finding. A step only one of
+    them saw is a question -- and the first thing to ask is whether the other
+    pass had frames on both sides of that date at all, because a run dropped
+    for fog leaves a hole no step detector can fire inside.
+    """
+    print("\nsetting the two passes against each other")
+    when = pd.date_range("2025-09-07", periods=30, freq="7D", tz="UTC")
+
+    def step(date, jump):
+        return {"date": date, "jump": jump, "before": 0.0, "after": jump}
+
+    both = g.reconcile([step(when[10], 8.5), step(when[20], 30.0)], list(when),
+                       [step(when[11], 8.8)], list(when))
+    kinds = [row[0] for row in both]
+    check("a step both passes saw, a week apart, is matched",
+          kinds.count("both") == 1, kinds)
+    check("and it carries both sizes",
+          [row[3] for row in both if row[0] == "both"] == [8.8],
+          [row[3] for row in both])
+    check("the unmatched one is contradicted where the other pass had frames",
+          "whole frame only" in kinds, kinds)
+
+    # Now the same unmatched step, but the patches have no frames near it.
+    blind = list(when[:14])
+    gapped = g.reconcile([step(when[20], 30.0)], list(when), [], blind)
+    check("with no frames there it is unmeasured, not contradicted",
+          gapped[0][0] == "whole frame, patches blind", gapped[0][0])
+
+    check("and a pair of empty lists reconciles to nothing",
+          g.reconcile([], list(when), [], list(when)) == [], "empty")
+
+
 def test_a_stable_record_reports_no_step():
     print("\nstep detection on a camera that never moved")
     dates = pd.date_range("2024-01-07", periods=30, freq="7D", tz="UTC")
@@ -1605,6 +1641,7 @@ def main():
                  test_water_wins_a_median_split_when_it_covers_most_of_the_frame,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
+                 test_the_two_passes_are_set_against_each_other,
                  test_a_move_the_magnitude_cannot_see,
                  test_disagreement_is_measured_as_a_vector,
                  test_the_agreeing_group_is_recovered_from_noise,

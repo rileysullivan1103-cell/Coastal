@@ -1487,6 +1487,51 @@ def spark(series, width=86, height=13, marks=(), label=""):
     return lines
 
 
+def reconcile(first, first_dates, second, second_dates,
+              persist=PERSIST, window_days=14):
+    """Set the two passes' step lists against each other, date by date.
+
+    The whole-frame pass and the agreeing patches measure the same camera by
+    different means, so a real move shows in both. Printing two lists of
+    epochs and leaving the reader to diff them hides the only thing that
+    matters: which steps BOTH passes found.
+
+    A step the other pass missed is not automatically wrong. It matters
+    whether that pass could see the date at all -- a run of frames it dropped
+    for fog leaves a hole that no step detector can fire inside. So each
+    unmatched step is reported as contradicted (the other pass had frames on
+    both sides and found nothing) or as unmeasured (it did not).
+    """
+    def near(date, dates, days):
+        return [d for d in dates if abs((d - date).days) <= days]
+
+    def covered(date, dates):
+        before = [d for d in dates if d < date]
+        after = [d for d in dates if d >= date]
+        return len(before) >= persist and len(after) >= persist and \
+            near(date, dates, window_days)
+
+    rows = []
+    for step in first:
+        match = near(step["date"], [s["date"] for s in second], window_days)
+        if match:
+            twin = min(second, key=lambda s: abs((s["date"] - step["date"]).days))
+            rows.append(("both", step["date"], step["jump"], twin["jump"]))
+        elif covered(step["date"], second_dates):
+            rows.append(("whole frame only", step["date"], step["jump"], None))
+        else:
+            rows.append(("whole frame, patches blind",
+                         step["date"], step["jump"], None))
+    for step in second:
+        if not near(step["date"], [s["date"] for s in first], window_days):
+            if covered(step["date"], first_dates):
+                rows.append(("patches only", step["date"], step["jump"], None))
+            else:
+                rows.append(("patches, whole frame blind",
+                             step["date"], step["jump"], None))
+    return sorted(rows, key=lambda row: row[1])
+
+
 def report_record(steps, dates, slug, step_px, what, noise=None):
     """Print the epoch split, or its absence, for one registration pass.
 
@@ -2306,6 +2351,33 @@ def main():
     else:
         report_record(steps, signal.index, slug, args.step_px,
                       "the agreeing patches")
+
+    # The two passes measure the same camera by different means. The answer is
+    # what they AGREE on, and that is worth stating rather than leaving to be
+    # diffed out of two epoch lists.
+    if coarse is not None and trustworthy:
+        rows = reconcile(coarse_steps, list(coarse.index),
+                         steps, list(signal.index))
+        print("\n" + "=" * 74)
+        print("THE TWO PASSES, SIDE BY SIDE")
+        print("=" * 74)
+        if not rows:
+            print("Neither pass found a step. Nothing moved by more than each "
+                  "pass could see.")
+        for verdict, date, jump, twin in rows:
+            size = f"{jump:5.1f} px" + (f" / {twin:.1f} px" if twin else "")
+            print(f"  {date:%Y-%m-%d}  {size:<20} {verdict}")
+        agreed = [row for row in rows if row[0] == "both"]
+        print(f"\n{len(agreed)} of {len(rows)} candidate move"
+              f"{'' if len(rows) == 1 else 's'} are seen BY BOTH passes. "
+              "Those are the")
+        print("ones to respect when pooling. A step only one pass found is a "
+              "question,")
+        print("not a finding: check whether the other pass had frames there "
+              "at all")
+        print("(the label says), and look at those dates in --contact-sheet "
+              "before")
+        print("either accepting or dismissing it.")
 
 def finish():
     """List everything written, in one block, and open it if asked.
