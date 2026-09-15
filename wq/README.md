@@ -25,21 +25,60 @@ out. The inhibitor is probed before the re-exec, because `systemd-inhibit`
 exists inside containers that have no bus to inhibit and exits non-zero there —
 an unprobed `execvpe` would end the run instead of protecting it.
 
-Stage by stage, which is also the order the pre-registration requires:
+Stage by stage:
 
 ```bash
 python -m wq.run_wq --stations      # coastal recreational stations, per state
-python -m wq.run_wq --spatial       # site covariates from the spatial layers
-python -m wq.run_wq --review        # the beach_type worklist, for a HUMAN
-python -m wq.run_wq --strata        # assign strata from METADATA ONLY
-python -m wq.run_wq --manifest      # freeze the specification, with a timestamp
 python -m wq.run_wq --results       # 10 years of samples, per (state, year)
 python -m wq.run_wq --ckan          # California's own resource
 python -m wq.run_wq --clean         # hygiene, with a count for every decision
+python -m wq.run_wq --spatial       # site covariates, for the analysable sites
+python -m wq.run_wq --review        # the beach_type worklist, for a HUMAN
+python -m wq.run_wq --strata        # assign strata from METADATA ONLY
+python -m wq.run_wq --manifest      # freeze the specification, with a timestamp
 python -m wq.run_wq --covariates    # conditions per site
 python -m wq.run_wq --fit           # per site, per analyte, per predictor
 python -m wq.run_wq --report        # the distribution
 ```
+
+### Why the samples come before the spatial layers
+
+The WQP pull returns **32,513 coastal stations** nationally. The first version
+of this ran the spatial layers over all of them, at roughly three requests
+each: ~100,000 requests, thirty hours, and — against a free community service
+like Overpass — straightforwardly abusive. It was also mostly wasted, because
+a station with four bacteria samples in ten years can never clear the
+pre-registered floor and will never be fitted whatever its coastline looks
+like.
+
+So the samples are pulled first, and the spatial layers run only for stations
+that could actually enter the study. **The pre-registration is not weakened by
+this**: A1 requires the specification frozen before any *model* runs, and the
+manifest is still written before `--covariates` and `--fit`. The covariate
+values still come from the coordinate alone. Only the question of which
+stations are worth computing them for is informed by the sample counts — which
+is the same attrition filter C2 already reports, and those stations are named
+in it as excluded on sample count.
+
+Two further reductions, for the same reason:
+
+**Coastline and permitted-discharge data are fetched per TILE, not per
+station.** Both are shared between neighbouring stations, so a quarter-degree
+tile with forty monitoring stations on it costs one query rather than forty.
+The tile box is widened by the full search radius, so a station beside a tile
+boundary still sees the coastline on the other side of it — without that
+margin it would read as open water. In a realistic coastal cluster, 200
+stations collapse to 4 tiles.
+
+**429 is answered in minutes, not seconds.** The shared `get_with_retry`
+ladder is 2/4/8 seconds, which on a rate-limited service means three retries
+inside fourteen seconds and then a failed site — the national run produced
+pages of those and no data. Requests to each host are now throttled to a
+minimum interval, `Retry-After` is honoured where the service states one, and
+the backoff runs 15s / 60s / 180s.
+
+`--spatial` prints the station count, the tile count and the expected request
+count before it starts, so a run this size cannot begin by surprise.
 
 Everything is resumable. Stations cache per state, results per `(state, year)`,
 ERA5 and waves per 0.1-degree grid cell, tide and water temperature per CO-OPS

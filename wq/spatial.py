@@ -55,6 +55,14 @@ DEVELOPED_PATTERNS = ("NLCD", "DEV")
 DEVELOPED_CLASSES = ("21", "22", "23", "24")
 BASIN_AREA_ID = "TOT_BASIN_AREA"
 
+# Coastline and permitted-discharge linework is SHARED between neighbouring
+# stations, and fetching it per station is the single thing that made a
+# national run take thirty hours. Both are fetched per TILE instead: one
+# query covering the tile plus a margin, cached, and reused by every station
+# inside it. Beaches cluster hard along the coast, so a quarter-degree tile
+# routinely serves dozens of stations, and the request count falls by roughly
+# two orders of magnitude.
+TILE_DEGREES = 0.25
 COASTLINE_BBOX_KM = 30.0   # must exceed the fetch cap, or fetch is censored
 FETCH_CAP_KM = 25.0
 STREAM_SEARCH_KM = 2.0
@@ -62,9 +70,59 @@ OUTFALL_SEARCH_KM = 2.0
 MOUTH_SNAP_M = 300.0       # how close a flowline's end must be to the shore
 
 
+# Minimum seconds between requests to one host, and how long to wait when a
+# service says it has had enough. Overpass in particular is a free community
+# service whose usage policy asks for light, non-bulk use; an earlier version
+# of this module sent one query per station, which at 32,513 coastal stations
+# is neither light nor non-bulk. Tiling (below) cut the count by two orders of
+# magnitude and this throttle keeps the remainder polite.
+HOST_MIN_INTERVAL = {
+    "overpass-api.de": 3.0,
+    "overpass.kumi.systems": 2.0,
+    "overpass.private.coffee": 2.0,
+    "api.water.usgs.gov": 0.5,
+    "echodata.epa.gov": 0.5,
+    "watersgeo.epa.gov": 0.5,
+}
+DEFAULT_MIN_INTERVAL = 0.25
+RATE_LIMIT_BACKOFF = (15, 60, 180)
+_LAST_CALL = {}
+
+
+def _throttle(host):
+    wait = HOST_MIN_INTERVAL.get(host, DEFAULT_MIN_INTERVAL)
+    last = _LAST_CALL.get(host)
+    if last is not None:
+        remaining = wait - (time.time() - last)
+        if remaining > 0:
+            time.sleep(remaining)
+    _LAST_CALL[host] = time.time()
+
+
 class LayerFailed(RuntimeError):
     """One layer did not answer for one site. Never fatal: the covariate goes
     missing, the coverage rule sees it, and the manifest records it."""
+
+
+def tile_of(lat, lon, size=TILE_DEGREES):
+    """The tile a coordinate falls in, as (south, west) of its corner."""
+    return (math.floor(float(lat) / size) * size,
+            math.floor(float(lon) / size) * size)
+
+
+def tile_bounds(lat, lon, margin_km, size=TILE_DEGREES):
+    """The tile's box, widened by margin_km so a station near an edge still
+    sees the coastline on the other side of it."""
+    south, west = tile_of(lat, lon, size)
+    dlat = margin_km / 111.0
+    mid_lat = south + size / 2
+    dlon = margin_km / (111.0 * max(math.cos(math.radians(mid_lat)), 0.01))
+    return (south - dlat, west - dlon, south + size + dlat, west + size + dlon)
+
+
+def _tile_slug(lat, lon, size=TILE_DEGREES):
+    south, west = tile_of(lat, lon, size)
+    return f"{south:+07.2f}_{west:+08.2f}".replace(".", "p")
 
 
 def _cache_path(name):
@@ -100,15 +158,36 @@ def _get(url, params=None, timeout=120, method="GET", data=None, probe=False,
     """
     import requests
     import scan_cameras as scan
+    host = url.split("/")[2]
     headers = {"User-Agent": USER_AGENT}
-    try:
-        if method == "POST":
-            response = requests.post(url, data=data, timeout=timeout,
-                                     headers=headers)
-        else:
-            response = scan.get_with_retry(url, params=params, headers=headers)
-    except requests.RequestException as exc:
-        raise LayerFailed(f"{url.split('/')[2]}: {type(exc).__name__}") from exc
+
+    # 429 means the service is asking to be left alone, and scan_cameras'
+    # 2/4/8-second ladder is far too short an answer -- it retries three times
+    # inside fourteen seconds and then fails the site, which on a national run
+    # produced page after page of retries and no data. Back off in minutes,
+    # and honour Retry-After when the service states one.
+    for attempt, pause in enumerate((0,) + RATE_LIMIT_BACKOFF):
+        if pause:
+            print(f"      {host} rate-limited; waiting {pause}s "
+                  f"(attempt {attempt}/{len(RATE_LIMIT_BACKOFF)})")
+            time.sleep(pause)
+        _throttle(host)
+        try:
+            if method == "POST":
+                response = requests.post(url, data=data, timeout=timeout,
+                                         headers=headers)
+            else:
+                response = scan.get_with_retry(url, params=params,
+                                               headers=headers)
+        except requests.RequestException as exc:
+            raise LayerFailed(f"{host}: {type(exc).__name__}") from exc
+        if response.status_code not in (429, 503, 504):
+            break
+        stated = response.headers.get("Retry-After")
+        if stated and str(stated).isdigit():
+            wait = min(int(stated), 300)
+            print(f"      {host} asked for {wait}s")
+            time.sleep(wait)
     if probe:
         print(f"    {method} {response.url[:150]}")
         print(f"      HTTP {response.status_code}, "
@@ -146,14 +225,15 @@ def _first_working(candidates, probe=False):
 # ---------------------------------------------------------------------------
 
 def fetch_coastline(lat, lon, km=COASTLINE_BBOX_KM, probe=False):
-    """(lines, vintage). lines are [[(lat, lon), ...], ...] in OSM order.
+    """(lines, vintage) for the TILE this coordinate falls in.
 
-    The way ORDER is load-bearing -- land is on the left of it -- so nothing
-    here sorts, reverses or merges the ways it gets back.
+    Fetched per tile rather than per station, and cached by tile, so a
+    stretch of coast with forty monitoring stations on it costs one query
+    rather than forty. The way ORDER is load-bearing -- land is on the left
+    of it -- so nothing here sorts, reverses or merges what comes back.
     """
-    dlat = km / 111.0
-    dlon = km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
-    bbox = f"{lat - dlat:.4f},{lon - dlon:.4f},{lat + dlat:.4f},{lon + dlon:.4f}"
+    south, west, north, east = tile_bounds(lat, lon, km)
+    bbox = f"{south:.4f},{west:.4f},{north:.4f},{east:.4f}"
     query = (f"[out:json][timeout:120];"
              f'way["natural"="coastline"]({bbox});'
              f"out geom;")
@@ -503,12 +583,16 @@ ECHO_COLUMNS = ("SourceID", "CWPName", "FacLat", "FacLong",
 
 
 def fetch_outfalls(lat, lon, km=OUTFALL_SEARCH_KM, probe=False):
-    dlat = km / 111.0
-    dlon = km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    """Permitted facilities in this coordinate's TILE, plus a margin.
+
+    Per tile for the same reason as the coastline: the answer is shared, and
+    the per-station distances are computed locally from it afterwards.
+    """
+    south, west, north, east = tile_bounds(lat, lon, km)
     params = {
         "output": "JSON", "responseset": "5000",
-        "p_c1lon": f"{lon - dlon:.5f}", "p_c1lat": f"{lat + dlat:.5f}",
-        "p_c2lon": f"{lon + dlon:.5f}", "p_c2lat": f"{lat - dlat:.5f}",
+        "p_c1lon": f"{west:.5f}", "p_c1lat": f"{north:.5f}",
+        "p_c2lon": f"{east:.5f}", "p_c2lat": f"{south:.5f}",
     }
     payload = _get(ECHO_FACILITIES, params=params, probe=probe).json()
     results = payload.get("Results") or {}
@@ -614,7 +698,7 @@ def for_site(site, record=None, probe=False, want=None):
                 lines, vintage = fetch_coastline(lat, lon, probe=probe)
                 return {"lines": lines, "vintage": vintage}
 
-            payload = _cached_json(f"coastline_{_slug(station)}", build)
+            payload = _cached_json(f"coastline_{_tile_slug(lat, lon)}", build)
             values = coastline_covariates(lat, lon, payload["lines"],
                                           payload.get("vintage"))
             out.update(values)
@@ -638,7 +722,7 @@ def for_site(site, record=None, probe=False, want=None):
 
             payload = _cached_json(f"nhd_{_slug(station)}", build)
             lines = []
-            cached = _cache_path(f"coastline_{_slug(station)}")
+            cached = _cache_path(f"coastline_{_tile_slug(lat, lon)}")
             if os.path.exists(cached):
                 with open(cached) as handle:
                     lines = json.load(handle).get("lines") or []
@@ -663,7 +747,7 @@ def for_site(site, record=None, probe=False, want=None):
         record["echo"]["sites_attempted"] += 1
         try:
             payload = _cached_json(
-                f"echo_{_slug(station)}",
+                f"echo_{_tile_slug(lat, lon)}",
                 lambda: {"records": fetch_outfalls(lat, lon, probe=probe)})
             values = outfall_covariates(lat, lon, payload.get("records"))
             out.update(values)
@@ -724,6 +808,21 @@ def build(sites, record=None, progress=True, want=None):
     record = record if record is not None else layers.blank_record()
     rows = []
     total = len(sites)
+
+    # Say the cost before spending it. The tiled layers cost one request per
+    # TILE and NLDI costs one per station, so these two numbers are what the
+    # run actually is -- and if the tile count is close to the station count,
+    # the tiling is not helping and something is wrong with the geography.
+    tiles = {_tile_slug(r["lat"], r["lon"]) for _, r in sites.iterrows()
+             if pd.notna(r.get("lat")) and pd.notna(r.get("lon"))}
+    print(f"  {total} stations across {len(tiles)} tiles")
+    print(f"  coastline and outfalls: ~{len(tiles)} requests each (per tile)")
+    print(f"  NHDPlus: up to {total} requests (per station — a comid is a "
+          "point lookup)")
+    if len(tiles) > total / 2:
+        print("  NOTE: nearly as many tiles as stations, so the tiling is "
+              "buying little here. Expect this to be slow.")
+
     started = time.time()
     for index, (_, site) in enumerate(sites.iterrows(), 1):
         if pd.isna(site.get("lat")) or pd.isna(site.get("lon")):

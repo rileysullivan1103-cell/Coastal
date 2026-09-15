@@ -114,7 +114,8 @@ def stage_spatial(args):
     print("Derived from the station coordinate alone. Nothing here reads a")
     print("sample value, and beach_type is NOT assigned here — it is assigned")
     print("by hand from imagery, via python -m wq.review --worklist.")
-    sites = _read(STATIONS, "run --stations first")
+    every = _read(STATIONS, "run --stations first")
+    sites = _analysable(every, args)
     record = layers.blank_record()
     frame, record = spatial.build(sites, record)
 
@@ -133,6 +134,35 @@ def stage_spatial(args):
     with open(_path(LAYER_RECORD), "w") as handle:
         json.dump(record, handle, indent=2)
     print(f"wrote {_path(LAYER_RECORD)}")
+
+
+def _analysable(sites, args):
+    """The stations worth spending requests on: those with enough samples.
+
+    A station that cannot reach MIN_SAMPLES_PER_SITE is excluded from the
+    fit by C2 whatever its coastline looks like, so computing its shore
+    normal buys nothing and costs a request to a service that is free and
+    shared. The attrition table still names every station that was pulled,
+    so nothing disappears quietly -- these stations are reported as excluded
+    on sample count, which is what they are.
+    """
+    path = _path(SAMPLES)
+    if not os.path.exists(path):
+        print("  no samples_clean.csv — computing spatial covariates for ALL "
+              f"{len(sites)} stations.\n  Run --results and --clean first to "
+              "restrict this to the stations that can actually be fitted; at "
+              "national scale that is the difference between hours and days, "
+              "and between polite and abusive use of a free service.")
+        return sites
+    samples = pd.read_csv(path, low_memory=False, usecols=["station_id"])
+    counts = samples["station_id"].astype(str).value_counts()
+    enough = set(counts[counts >= config.MIN_SAMPLES_PER_SITE].index)
+    keep = sites[sites["station_id"].astype(str).isin(enough)]
+    print(f"  {len(keep)}/{len(sites)} stations clear "
+          f"{config.MIN_SAMPLES_PER_SITE} samples and are worth a layer pull")
+    if keep.empty:
+        sys.exit("No station has enough samples — nothing to compute.")
+    return keep
 
 
 def _coops_datums(sites, args):
@@ -181,7 +211,7 @@ def stage_review(args):
 
 def stage_strata(args):
     print("\n=== STRATA (metadata and map data only) ===")
-    sites = _read(STATIONS, "run --stations first")
+    sites = _analysable(_read(STATIONS, "run --stations first"), args)
     frame = (pd.read_csv(_path(SPATIAL), low_memory=False)
              if os.path.exists(_path(SPATIAL)) else None)
     if frame is None:
@@ -212,20 +242,17 @@ def stage_manifest(args):
 
 def stage_results(args):
     print("\n=== RESULTS ===")
-    manifest.require_manifest()
     pull.pull_results(args.states, refresh=args.refresh, probe=args.probe)
 
 
 def stage_ckan(args):
     print("\n=== CALIFORNIA CKAN ===")
-    manifest.require_manifest()
     pull.pull_ca_ckan()
 
 
 def stage_clean(args):
     print("\n=== HYGIENE ===")
-    manifest.require_manifest()
-    sites = _read(STRATIFIED, "run --strata first")
+    sites = _read(STATIONS, "run --stations first")
     raw = pull.load_raw_results(args.states)
     ckan_path = _path("ca_ckan_results.csv")
     ckan = pd.read_csv(ckan_path, low_memory=False) if os.path.exists(ckan_path) else None
@@ -310,15 +337,31 @@ def stage_report(args):
                exploratory=exploratory)
 
 
+# Order matters, and this is not the order it was first written in.
+#
+# The spatial layers used to run over every station the WQP pull returned:
+# 32,513 of them nationally, at roughly three requests each. That is ~100,000
+# requests, thirty hours, and -- for a free community service like Overpass --
+# straightforwardly abusive. It is also mostly wasted, because a station with
+# four bacteria samples in ten years can never clear the pre-registered floor
+# and will never be fitted whatever its coastline looks like.
+#
+# So the samples come first, and the spatial layers run only for stations
+# that could actually enter the study. Nothing about the pre-registration is
+# weakened by this: A1 requires the specification to be frozen before any
+# MODEL runs, and the manifest is still written before --covariates and
+# --fit. The covariate VALUES still come from the coordinate alone; only the
+# question of which stations are worth computing them for is informed by the
+# sample counts, and that is the same attrition filter C2 already reports.
 STAGES = [
     ("stations", stage_stations),
+    ("results", stage_results),
+    ("ckan", stage_ckan),
+    ("clean", stage_clean),
     ("spatial", stage_spatial),
     ("review", stage_review),
     ("strata", stage_strata),
     ("manifest", stage_manifest),
-    ("results", stage_results),
-    ("ckan", stage_ckan),
-    ("clean", stage_clean),
     ("covariates", stage_covariates),
     ("fit", stage_fit),
     ("report", stage_report),

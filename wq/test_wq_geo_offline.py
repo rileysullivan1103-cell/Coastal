@@ -310,6 +310,68 @@ def test_landcover_ids_are_not_hardcoded():
     check("no NLCD id is pinned in the module's code", not pinned, str(pinned))
 
 
+def test_layers_are_fetched_per_tile_not_per_station():
+    """The thing that made a national run thirty hours long.
+
+    One Overpass query per station is 32,513 queries against a free community
+    service whose usage policy asks for light use. Coastline and permitted
+    discharges are shared between neighbouring stations, so both are fetched
+    per tile and reused.
+    """
+    print("\ntiling: neighbouring stations share one fetch")
+    santa_cruz = (36.9612, -122.0088)
+    wharf = (36.9628, -122.0170)        # ~1 km along the same beach
+    capitola = (36.9714, -121.9530)     # ~5 km along the same bay
+    san_diego = (32.7700, -117.2300)
+
+    check("two beaches 1 km apart share a tile",
+          spatial._tile_slug(*santa_cruz) == spatial._tile_slug(*wharf))
+    check("a beach 600 km away does not",
+          spatial._tile_slug(*santa_cruz) != spatial._tile_slug(*san_diego))
+
+    # A grid boundary WILL separate two stations a few km apart -- Capitola
+    # sits in the next tile east of Santa Cruz. That is harmless only because
+    # the margin makes each tile's box reach well past its own edge, so both
+    # stations still get coastline covering the other's position. Without
+    # that, a station beside a boundary would see the sea end at the tile
+    # edge and read as open water.
+    check("a tile boundary can split neighbours",
+          spatial._tile_slug(*santa_cruz) != spatial._tile_slug(*capitola),
+          f"{spatial._tile_slug(*santa_cruz)} vs {spatial._tile_slug(*capitola)}")
+    for here, there in ((santa_cruz, capitola), (capitola, santa_cruz)):
+        south, west, north, east = spatial.tile_bounds(
+            *here, margin_km=spatial.COASTLINE_BBOX_KM)
+        check("but each box still covers the other station",
+              south <= there[0] <= north and west <= there[1] <= east,
+              f"{there} outside {south:.2f}..{north:.2f}, {west:.2f}..{east:.2f}")
+
+    # The tile box must still cover every station in it out to the full
+    # search radius, or a station near an edge silently loses the coastline
+    # on the other side of that edge -- which would read as open water.
+    south, west, north, east = spatial.tile_bounds(*santa_cruz,
+                                                   margin_km=spatial.COASTLINE_BBOX_KM)
+    for corner_lat, corner_lon in ((36.75, -122.25), (37.0, -122.0)):
+        reach_lat = spatial.COASTLINE_BBOX_KM / 111.0
+        check(f"the box reaches {spatial.COASTLINE_BBOX_KM:.0f} km beyond "
+              f"({corner_lat}, {corner_lon})",
+              south <= corner_lat - reach_lat and north >= corner_lat + reach_lat,
+              f"box {south:.2f}..{north:.2f}")
+    check("the box is wider than the tile itself",
+          (north - south) > spatial.TILE_DEGREES,
+          f"{north - south:.3f} vs {spatial.TILE_DEGREES}")
+
+    # A realistic coastal cluster: many stations, few tiles.
+    rng = np.random.default_rng(7)
+    cluster = pd.DataFrame({
+        "station_id": [str(i) for i in range(200)],
+        "lat": 36.95 + rng.normal(0, 0.05, 200),
+        "lon": -122.0 + rng.normal(0, 0.05, 200)})
+    tiles = {spatial._tile_slug(r["lat"], r["lon"])
+             for _, r in cluster.iterrows()}
+    check("200 clustered stations collapse to a handful of tiles",
+          len(tiles) <= 12, f"{len(tiles)} tiles")
+
+
 def test_coverage_rule_on_covariates():
     print("\nthe ~70% coverage rule")
     frame = pd.DataFrame({
@@ -520,6 +582,7 @@ def main():
                  test_outfall_covariates,
                  test_stream_covariates,
                  test_landcover_ids_are_not_hardcoded,
+                 test_layers_are_fetched_per_tile_not_per_station,
                  test_coverage_rule_on_covariates,
                  test_manifest_records_layers_and_amendments,
                  test_beach_type_is_hand_assigned_only,
