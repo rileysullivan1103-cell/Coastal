@@ -487,6 +487,50 @@ def test_the_reference_is_the_one_the_record_matches():
         shutil.rmtree(tmp)
 
 
+def test_the_search_window_is_a_prior_that_reports_itself():
+    """A camera bolted to a building does not move a quarter of its frame.
+
+    The correlation surface spans the whole image, so a spurious peak 600 px
+    away competes on equal terms with the true one 5 px away. At Walton three
+    "independent" frame-to-frame steps landed within 1.5 px of each other at
+    ~592 px, which is not what independent errors do.
+
+    Limiting the search is a prior and has to behave like one: it must not
+    change a measurement inside the window, it must say so when it overrules a
+    peak outside it, and it must be removable -- otherwise a genuine repoint
+    would be quietly reported as a small move, which is the failure this whole
+    module exists to prevent.
+    """
+    print("\nthe search window")
+    real = np.random.default_rng(0).normal(128, 30, (512, 512))
+
+    small = shifted(real, 4, -9)
+    unlimited = g.phase_shift(real, small)
+    limited = g.phase_shift(real, small, max_shift=150)
+    check("a shift inside the window is unchanged by it",
+          unlimited[:2] == limited[:2], (unlimited[:2], limited[:2]))
+    check("and is not flagged as overruled", limited[3] is False, limited[3])
+
+    far = shifted(real, 0, 200)
+    found = g.phase_shift(real, far, max_shift=150)
+    check("a shift beyond the window is overruled", found[3] is True)
+    check("and what is returned lies inside it",
+          abs(found[1]) <= 151, found[1])
+    check("removing the limit finds the real one",
+          abs(g.phase_shift(real, far)[1] - 200) < 1,
+          g.phase_shift(real, far)[1])
+    check("a limit wide enough finds it too",
+          abs(g.phase_shift(real, far, max_shift=400)[1] - 200) < 1,
+          g.phase_shift(real, far, max_shift=400)[1])
+
+    # The wrap matters: -200 lives at index n-200, so a naive window over
+    # rows 0..R would call every negative shift "outside".
+    back = shifted(real, 0, -100)
+    inside = g.phase_shift(real, back, max_shift=150)
+    check("a NEGATIVE shift inside the window is not overruled",
+          inside[3] is False and abs(inside[1] + 100) < 1, inside[:2] + (inside[3],))
+
+
 def test_a_blank_frame_cannot_register_or_anchor():
     """The worst bug in this module's history, and the most convincing one.
 
@@ -1212,6 +1256,7 @@ def main():
                  test_the_reference_is_the_one_the_record_matches,
                  test_noise_never_becomes_the_reference,
                  test_a_blank_frame_cannot_register_or_anchor,
+                 test_the_search_window_is_a_prior_that_reports_itself,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_disagreement_is_measured_as_a_vector,

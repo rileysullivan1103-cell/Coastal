@@ -99,6 +99,17 @@ BLANK_STD = 1.0
 # run when the reference is compared with itself. Finite, so it cannot poison a
 # median or a comparison downstream.
 PERFECT_MATCH = 1e6
+# How far the camera is allowed to have moved, in original pixels. This is a
+# PRIOR, not a measurement, and it is here because the alternative is worse: a
+# correlation surface spans the whole frame, so a spurious peak 600 px away
+# competes on equal terms with the true one 5 px away, and at Walton three
+# "independent" frame-to-frame steps landed within 1.5 px of each other at
+# ~592 px, which is not what independent errors do. A camera bolted to a
+# building does not move a quarter of its frame between two weekly stills.
+# Raise it with --max-shift if a genuine repoint is being looked for; the run
+# reports how often the best peak anywhere was outside this window, so the
+# prior can be checked rather than trusted.
+MAX_SHIFT_PX = 150
 # How many candidates to propose and track before the agreement test picks the
 # keepers. More candidates is cheap -- the frames are already loaded, and a
 # 128x128 FFT is nothing next to decoding a 2560x1920 JPEG -- and it is the
@@ -339,8 +350,13 @@ def _parabolic(values, index):
     return 0.5 * (before - after) / denominator
 
 
-def phase_shift(reference, image):
-    """(dy, dx, confidence): how far `image` has MOVED from `reference`.
+def phase_shift(reference, image, max_shift=None):
+    """(dy, dx, confidence, outside): how far `image` has MOVED from `reference`.
+
+    `max_shift` limits the search to displacements within that many pixels of
+    zero. `outside` is True when the tallest peak ANYWHERE was outside that
+    window -- the count of those is how the prior gets audited against the
+    record rather than assumed.
 
     Sign convention matters here and is easy to get backwards. The correlation
     peak gives the shift that maps `image` back onto `reference`, which is the
@@ -380,7 +396,21 @@ def phase_shift(reference, image):
     magnitude[magnitude < 1e-12] = 1e-12
     surface = np.fft.ifft2(cross / magnitude).real
 
-    peak = np.unravel_index(int(np.argmax(surface)), surface.shape)
+    rows, cols = surface.shape
+    free = np.unravel_index(int(np.argmax(surface)), surface.shape)
+    peak, outside = free, False
+    if max_shift:
+        # The surface is circular, so the allowed band wraps: rows 0..R and
+        # rows n-R..n-1 are both "within R of no movement".
+        reach_y, reach_x = min(int(max_shift), rows // 2), min(int(max_shift),
+                                                              cols // 2)
+        window = np.zeros(surface.shape, dtype=bool)
+        window[np.ix_(np.r_[0:reach_y + 1, rows - reach_y:rows],
+                      np.r_[0:reach_x + 1, cols - reach_x:cols])] = True
+        if not window[free]:
+            outside = True
+            near = np.where(window, surface, -np.inf)
+            peak = np.unravel_index(int(np.argmax(near)), surface.shape)
     # Mask a few pixels around the peak before measuring the background, so a
     # peak two or three pixels wide is not counted as part of its own noise.
     background = np.ones(surface.shape, dtype=bool)
@@ -408,16 +438,15 @@ def phase_shift(reference, image):
     dy = peak[0] + _parabolic(surface[:, peak[1]], peak[0])
     dx = peak[1] + _parabolic(surface[peak[0], :], peak[1])
     # The correlation surface is circular: a shift of -2 appears at n-2.
-    rows, cols = surface.shape
     if dy > rows / 2:
         dy -= rows
     if dx > cols / 2:
         dx -= cols
-    return float(-dy), float(-dx), confidence
+    return float(-dy), float(-dx), confidence, outside
 
 
 def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
-                  min_confidence=MIN_CONFIDENCE):
+                  min_confidence=MIN_CONFIDENCE, max_shift=MAX_SHIFT_PX):
     """Whole-frame displacement per date, against the reference frame.
 
     Two reasons this runs before the patches rather than instead of them.
@@ -453,15 +482,23 @@ def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
             base, moved = (reference[:height, :width], image[:height, :width])
         else:
             base, moved = reference, image
-        got = phase_shift(base, moved)
+        got = phase_shift(base, moved,
+                          max_shift=max_shift / downsample if max_shift
+                          else None)
         if got is None:
             continue
-        dy, dx, confidence = got
+        dy, dx, confidence, outside = got
         rows.append({"date": date, "dy": dy * downsample, "dx": dx * downsample,
-                     "confidence": confidence})
+                     "confidence": confidence, "outside": outside})
     if not rows:
         return pd.DataFrame()
     frame = pd.DataFrame(rows).set_index("date").sort_index()
+    strayed = int(frame["outside"].sum())
+    if strayed:
+        print(f"  {strayed}/{len(frame)} frames had their tallest peak beyond "
+              f"{max_shift:.0f} px and were\n  re-measured inside it — that "
+              "count IS the evidence for the limit; if it is\n  most of the "
+              "record the limit is wrong, not the record")
     weak = int((frame["confidence"] < min_confidence).sum())
     if weak:
         print(f"  {weak}/{len(frame)} frames below confidence "
@@ -551,7 +588,7 @@ def registration_quality(direct, sequential, dates, min_confidence=MIN_CONFIDENC
 
 
 def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
-                      min_confidence=MIN_CONFIDENCE):
+                      min_confidence=MIN_CONFIDENCE, max_shift=MAX_SHIFT_PX):
     """Each frame against the one BEFORE it, rather than against a reference.
 
     This is the check the direct-to-reference pass cannot perform on itself.
@@ -586,11 +623,13 @@ def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
             base, moved = previous[:height, :width], image[:height, :width]
         else:
             base, moved = previous, image
-        got = phase_shift(base, moved)
+        got = phase_shift(base, moved,
+                          max_shift=max_shift / downsample if max_shift
+                          else None)
         previous, previous_date = image, date
         if got is None:
             continue
-        dy, dx, confidence = got
+        dy, dx, confidence, _ = got
         rows.append({"date": date, "dy": dy * downsample,
                      "dx": dx * downsample, "confidence": confidence})
     if not rows:
@@ -897,7 +936,7 @@ def best_reference(paths, probes=8, downsample=8):
                 continue
             got = phase_shift(base, images[other][:shape[0], :shape[1]])
             if got is not None:
-                peaks.append(got[2])
+                peaks.append(got[2])  # (dy, dx, confidence, outside)
         scores.append((float(np.median(peaks)) if peaks else 0.0, index))
     return max(scores)[1]
 
@@ -940,7 +979,7 @@ def track(paths, dates, rois, pick=0, min_confidence=MIN_CONFIDENCE,
             shifted = phase_shift(base, patch)
             if shifted is None:
                 continue
-            dy, dx, confidence = shifted
+            dy, dx, confidence, _ = shifted
             rows.append({"date": date, "feature": roi["name"],
                          "dx": dx + shift_x, "dy": dy + shift_y,
                          "confidence": confidence,
@@ -1543,6 +1582,12 @@ def main():
                     help="name:x,y,w,h — repeatable; overrides auto-selection")
     ap.add_argument("--land-fraction", type=float, default=LAND_FRACTION,
                     help="auto-selection uses only the top this much of frame")
+    ap.add_argument("--max-shift", type=float, default=MAX_SHIFT_PX,
+                    help=f"how far the camera is allowed to have moved, in "
+                         f"pixels (default {MAX_SHIFT_PX}). A PRIOR, not a "
+                         "measurement: it stops a spurious peak halfway across "
+                         "the frame outcompeting the true one. Raise it to "
+                         "look for a genuine repoint; 0 removes it.")
     ap.add_argument("--contact-sheet", action="store_true",
                     help="write every sampled frame as one labelled grid. "
                          "Written automatically when the registration does "
@@ -1662,7 +1707,10 @@ def main():
         print("mostly water does not confuse it: uncorrelated content raises the")
         print("floor of the correlation surface rather than competing for the")
         print("peak, so the peak comes from whatever IS common to both frames.")
-        coarse = coarse_shifts(paths, dates, pick)
+        print(f"  peaks are searched within {args.max_shift:.0f} px of no "
+              "movement; a real move\n  beyond that reads as the count "
+              "below, not as itself")
+        coarse = coarse_shifts(paths, dates, pick, max_shift=args.max_shift)
         if coarse.empty:
             print("  no frame could be registered against the reference")
             coarse = None
@@ -1681,7 +1729,8 @@ def main():
             # reproduce the direct measurement -- and where they do not, the
             # direct numbers are not measuring the scene.
             print("\nCROSS-CHECK: frame to frame, summed")
-            sequential = sequential_shifts(paths, dates)
+            sequential = sequential_shifts(paths, dates,
+                                           max_shift=args.max_shift)
             reliable = True
             if sequential.empty:
                 print("  no consecutive pair could be registered")
