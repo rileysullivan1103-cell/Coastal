@@ -645,8 +645,8 @@ def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
         if image is None:
             continue
         if previous is None:
-            rows.append({"date": date, "dy": 0.0, "dx": 0.0,
-                         "confidence": float("inf")})
+            rows.append({"date": date, "previous": pd.NaT, "dy": 0.0,
+                         "dx": 0.0, "confidence": PERFECT_MATCH})
             previous, previous_date = image, date
             continue
         if image.shape != previous.shape:
@@ -658,12 +658,16 @@ def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
         got = phase_shift(base, moved,
                           max_shift=max_shift / downsample if max_shift
                           else None)
+        # The pair this step spans is recorded, so the cross-check can compare
+        # it against the SAME pair measured the other way.
+        spanned = previous_date
         previous, previous_date = image, date
         if got is None:
             continue
         dy, dx, confidence, _ = got
-        rows.append({"date": date, "dy": dy * downsample,
-                     "dx": dx * downsample, "confidence": confidence})
+        rows.append({"date": date, "previous": spanned,
+                     "dy": dy * downsample, "dx": dx * downsample,
+                     "confidence": confidence})
     if not rows:
         return pd.DataFrame()
     frame = pd.DataFrame(rows).set_index("date").sort_index()
@@ -1795,7 +1799,7 @@ def main():
             # are the easiest pair to register, so their steps summed must
             # reproduce the direct measurement -- and where they do not, the
             # direct numbers are not measuring the scene.
-            print("\nCROSS-CHECK: frame to frame, summed")
+            print("\nCROSS-CHECK: frame to frame, PER STEP")
             sequential = sequential_shifts(paths, dates,
                                            max_shift=args.max_shift)
             reliable = True
@@ -1803,27 +1807,47 @@ def main():
                 print("  no consecutive pair could be registered")
                 sequential = None
             else:
-                walk = np.hypot(sequential["cum_dx"], sequential["cum_dy"])
-                shared = direct_index = coarse.index.intersection(walk.index)
-                # Both describe displacement from the FIRST frame; the direct
-                # pass measures from the reference, so compare like with like
-                # by removing each one's own value at the reference date.
-                anchor = walk.reindex(direct_index).loc[dates[pick]] \
-                    if dates[pick] in walk.index else 0.0
-                aligned = walk.reindex(shared) - anchor
-                straight = np.hypot(coarse["dx"].reindex(shared)
-                                    - coarse["dx"].reindex([dates[pick]]).iloc[0],
-                                    coarse["dy"].reindex(shared)
-                                    - coarse["dy"].reindex([dates[pick]]).iloc[0])
-                gap = float(np.nanmedian(np.abs(aligned - straight)))
+                # COMPARE PER STEP, NOT CUMULATIVELY. The first version of this
+                # test summed the frame-to-frame steps and compared the total
+                # against the direct measurement -- which compares a RANDOM WALK
+                # against something that does not accumulate. With 13 px of
+                # per-step noise over 145 frames, a camera that never moved at
+                # all drifts ~130 px, and the test called that "the two passes
+                # disagree" and withheld every verdict. It was measuring its own
+                # error budget.
+                #
+                # The honest comparison is between two measurements of the SAME
+                # pair of frames: the sequential step from A to B, against the
+                # difference of the two direct measurements of A and B. Neither
+                # accumulates, so agreement means what it says.
+                pairs = sequential.dropna(subset=["previous"])
+                pairs = pairs[pairs.index.isin(coarse.index)
+                              & pairs["previous"].isin(coarse.index)]
+                if len(pairs) < 5:
+                    print("  too few pairs measured both ways to compare")
+                    reliable, gap = False, float("nan")
+                else:
+                    later = coarse.loc[pairs.index]
+                    earlier = coarse.loc[pairs["previous"]]
+                    apart = np.hypot(
+                        pairs["dx"].to_numpy()
+                        - (later["dx"].to_numpy() - earlier["dx"].to_numpy()),
+                        pairs["dy"].to_numpy()
+                        - (later["dy"].to_numpy() - earlier["dy"].to_numpy()))
+                    gap = float(np.median(apart))
+                    print(f"  {len(pairs)} frame pairs measured BOTH ways "
+                          "(against each other, and as the")
+                    print("  difference of their two measurements against the "
+                          "reference)")
+                    print(f"  the two routes differ by a median of {gap:.1f} px "
+                          "on the same pair")
                 print(f"  largest single frame-to-frame step: "
                       f"{sequential['step'].max():.1f} px on "
                       f"{sequential['step'].idxmax():%Y-%m-%d}")
                 biggest = sequential["step"].nlargest(5)
                 for date, value in biggest.items():
                     print(f"    {date:%Y-%m-%d}  {value:8.1f} px")
-                print(f"  the two passes differ by a median of {gap:.1f} px")
-                reliable = gap <= max(args.step_px * 2, 10.0)
+                reliable = bool(gap <= max(args.step_px * 2, 10.0))
                 covered = len(coarse) / max(len(paths), 1)
                 if reliable and covered >= 0.7:
                     print("  They agree, so one translation describes the "
@@ -1845,12 +1869,12 @@ def main():
                     print("  unregistered frames are explained.")
                 else:
                     print("\n" + "!" * 74)
-                    print("THE TWO PASSES DISAGREE. Registering each frame "
-                          "against a distant")
-                    print("reference and registering it against its neighbour "
-                          "must give the")
-                    print("same answer, because there is one camera. They do "
-                          "not, so at least")
+                    print("THE TWO ROUTES DISAGREE ON THE SAME PAIR OF "
+                          "FRAMES. Measuring A against")
+                    print("B directly, and measuring each against the "
+                          "reference and subtracting,")
+                    print("must give the same answer. They do not, so at "
+                          "least")
                     print("one pass is locking onto something other than the "
                           "scene -- cloud,")
                     print("sun glint or surf can all produce a confident peak "

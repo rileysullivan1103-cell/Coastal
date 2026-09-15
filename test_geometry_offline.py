@@ -1032,10 +1032,62 @@ def test_frame_to_frame_agrees_with_the_reference():
         check("every consecutive pair is measured",
               len(steps) == len(dates), len(steps))
 
-        walk = np.hypot(steps["cum_dx"], steps["cum_dy"])
-        gap = float(np.nanmedian(np.abs(walk.reindex(direct.index)
-                                        - direct["offset"])))
+        def routes_differ(direct, steps):
+            """Median disagreement between the two routes ON THE SAME PAIR.
+
+            NOT the cumulative sum against the direct measurement: that
+            compares a random walk to something that does not accumulate, so a
+            perfectly still camera with per-step noise e over n frames "differs"
+            by about e*sqrt(n). At 13 px over 145 frames that is ~130 px of
+            pure artefact, which is what the first version of this test
+            reported as a broken registration.
+            """
+            pairs = steps.dropna(subset=["previous"])
+            pairs = pairs[pairs.index.isin(direct.index)
+                          & pairs["previous"].isin(direct.index)]
+            later, earlier = direct.loc[pairs.index], direct.loc[pairs["previous"]]
+            return float(np.median(np.hypot(
+                pairs["dx"].to_numpy()
+                - (later["dx"].to_numpy() - earlier["dx"].to_numpy()),
+                pairs["dy"].to_numpy()
+                - (later["dy"].to_numpy() - earlier["dy"].to_numpy()))))
+
+        gap = routes_differ(direct, steps)
         check("the two routes agree on a clean record", gap < 3.0, gap)
+
+        # The bias this replaces. A camera that NEVER MOVES, measured with
+        # ordinary independent noise on every measurement. The per-step
+        # comparison must stay flat as the record lengthens, because nothing
+        # accumulates; the cumulative sum must drift further and further,
+        # because it is a random walk. The old test compared the walk against
+        # the level and therefore punished long records for being long.
+        def still_record(length, noise=6.0, seed=4):
+            rng = np.random.default_rng(seed)
+            when = pd.date_range("2024-01-07", periods=length, freq="7D",
+                                 tz="UTC")
+            level = rng.normal(0, noise, (length, 2))     # measuring a fixed camera
+            step = rng.normal(0, noise, (length, 2))      # measuring zero motion
+            return (pd.DataFrame({"dx": level[:, 0], "dy": level[:, 1]},
+                                 index=when),
+                    pd.DataFrame({"previous": [pd.NaT] + list(when[:-1]),
+                                  "dx": step[:, 0], "dy": step[:, 1]},
+                                 index=when))
+
+        per_step, cumulative = {}, {}
+        for length in (30, 300):
+            level, step = still_record(length)
+            per_step[length] = routes_differ(level, step)
+            walk = np.hypot(np.cumsum(step["dx"]), np.cumsum(step["dy"]))
+            cumulative[length] = float(walk.median())
+        check("per-step disagreement does not grow with record length",
+              abs(per_step[300] - per_step[30]) < 3.0,
+              {k: round(v, 1) for k, v in per_step.items()})
+        check("the cumulative sum does, on the very same still camera",
+              cumulative[300] > 2 * cumulative[30],
+              {k: round(v, 1) for k, v in cumulative.items()})
+        check("so a long still record passes per-step and failed cumulatively",
+              per_step[300] < 20.0 < cumulative[300],
+              (round(per_step[300], 1), round(cumulative[300], 1)))
 
         # Both moves show as a single large frame-to-frame step, on the day.
         big = steps["step"].nlargest(2).sort_index()
