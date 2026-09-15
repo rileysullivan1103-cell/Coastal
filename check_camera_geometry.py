@@ -347,10 +347,13 @@ def propose_rois(paths, size=ROI_SIZE, count=N_FEATURES,
     # banner test does not fire. It has failed on Walton repeatedly, and a
     # camera's overlay is a fixed, known property of that camera: being able
     # to say "ignore the top 100 px" beats another round of inference.
+    # The margin has to exclude the whole PATCH, not its centre. --top-margin
+    # 100 put a centre at row 100 and therefore a patch spanning rows 36-164,
+    # which is still half on the banner. Add the patch half-height.
     if top_margin:
-        usable[: top_margin // 2, :] = False
+        usable[: (top_margin + size // 2) // 2, :] = False
     if bottom_margin:
-        usable[-(bottom_margin // 2):, :] = False
+        usable[-((bottom_margin + size // 2) // 2):, :] = False
     if not usable.any():
         print("  the margins leave nothing searchable")
         return []
@@ -479,9 +482,40 @@ def crop(image, roi):
     return patch if patch.shape == (roi["h"], roi["w"]) else None
 
 
+def sharpest(paths, rois):
+    """Index of the frame with the most structure inside the chosen patches.
+
+    Not the first frame. Walton's record opens on 2023-07-02, which is heavy
+    fog: the far shore is barely visible, so every patch is being matched
+    against a reference that has almost nothing in it. Everything is measured
+    relative to the reference, so a soft reference degrades every measurement
+    in the run, not just its own.
+    """
+    best, best_score = 0, -1.0
+    for index, path in enumerate(paths):
+        image = load_gray(path)
+        if image is None:
+            continue
+        score = 0.0
+        for roi in rois:
+            patch = crop(image, roi)
+            if patch is None:
+                continue
+            gy, gx = np.gradient(patch)
+            score += float(np.hypot(gy, gx).mean())
+        if score > best_score:
+            best, best_score = index, score
+    return best
+
+
 def track(paths, dates, rois, min_confidence=MIN_CONFIDENCE):
-    """dx/dy per frame per feature, against the first readable frame."""
-    reference, reference_date = None, None
+    """dx/dy per frame per feature, against the sharpest readable frame."""
+    pick = sharpest(paths, rois)
+    reference, reference_date = load_gray(paths[pick]), dates[pick]
+    if reference is not None:
+        print(f"  reference frame: {reference_date:%Y-%m-%d} "
+              f"({os.path.basename(paths[pick])}), the sharpest of "
+              f"{len(paths)}")
     rows, unreadable = [], 0
     for path, date in zip(paths, dates):
         image = load_gray(path)
@@ -490,7 +524,6 @@ def track(paths, dates, rois, min_confidence=MIN_CONFIDENCE):
             continue
         if reference is None:
             reference, reference_date = image, date
-            print(f"  reference frame: {date:%Y-%m-%d} ({os.path.basename(path)})")
         for roi in rois:
             base, patch = crop(reference, roi), crop(image, roi)
             if base is None or patch is None:
@@ -859,6 +892,16 @@ def main():
         print("the step threshold, or one inside a gap in the sampling, would")
         print("not appear. Re-run with --every 3 and a lower --step-px before")
         print("committing to a shoreline trend.")
+    elif not trustworthy:
+        # Steps found among features that do not agree are steps in the
+        # disagreement, not in the camera. Printing dates and epoch sizes under
+        # the warning invites them to be read as findings, which is how the
+        # first Walton run produced "2 epochs" out of four patches on fog.
+        print(f"\n{len(steps)} apparent step"
+              f"{'' if len(steps) == 1 else 's'} found, NOT reported: with the "
+              "features this far apart they")
+        print("describe the disagreement, not the camera. Fix the patches "
+              "first.")
     else:
         print(f"\n{len(steps)} candidate discontinuit"
               f"{'y' if len(steps) == 1 else 'ies'}:")

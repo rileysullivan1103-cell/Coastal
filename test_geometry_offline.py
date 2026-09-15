@@ -414,6 +414,68 @@ def test_roi_preview_is_written():
         shutil.rmtree(tmp)
 
 
+def test_the_margin_excludes_the_whole_patch():
+    """--top-margin 100 must not leave a patch spanning rows 36-164.
+
+    The first version excluded patch CENTRES above the margin, so a 128 px
+    patch centred exactly on the boundary still had half its body on the
+    banner. The margin has to account for the patch's half-height.
+    """
+    print("\nmargins exclude the patch, not its centre")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene(width=640, height=480)
+        paths = []
+        for index in range(12):
+            frame = water(base, seed=index)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+        rois = g.propose_rois(paths, size=64, count=3, land_fraction=0.7,
+                              top_margin=60)
+        check("every patch starts at or below the margin",
+              all(r["y"] >= 60 for r in rois), [r["y"] for r in rois])
+        check("not merely centred below it",
+              all(r["y"] + r["h"] // 2 > 60 for r in rois))
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_the_reference_is_the_sharpest_frame():
+    """Not the first. Walton's record opens on its foggiest frame.
+
+    Everything is measured relative to the reference, so a soft reference
+    degrades every measurement in the run and not only its own.
+    """
+    print("\nthe reference frame is chosen, not assumed")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        base = beach_scene(width=512, height=384)
+        rois = [{"name": "a", "x": 100, "y": 120, "w": 96, "h": 96},
+                {"name": "b", "x": 300, "y": 130, "w": 96, "h": 96}]
+        dates = pd.date_range("2024-01-07", periods=6, freq="7D", tz="UTC")
+        paths = []
+        for index in range(6):
+            frame = water(base, seed=index)
+            if index != 3:
+                # Fog: wash the contrast out of everything but the sharp one.
+                frame = frame * 0.25 + 150
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame.clip(0, 255).astype(np.uint8)).save(path)
+            paths.append(path)
+
+        check("it picks the one clear frame", g.sharpest(paths, rois) == 3,
+              g.sharpest(paths, rois))
+        frame, reference = g.track(paths, list(dates), rois)
+        check("and registers against it", reference == dates[3], reference)
+        check("every frame is still measured",
+              set(frame["feature"]) == {"a", "b"}, set(frame["feature"]))
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_a_planted_step_is_found_on_the_right_date():
     print("\nstep detection on a planted remount")
     tmp = tempfile.mkdtemp()
@@ -515,6 +577,8 @@ def main():
                  test_a_banner_with_a_live_timestamp_is_still_rejected,
                  test_explicit_margins_exclude_the_banner,
                  test_roi_preview_is_written,
+                 test_the_margin_excludes_the_whole_patch,
+                 test_the_reference_is_the_sharpest_frame,
                  test_a_planted_step_is_found_on_the_right_date,
                  test_a_stable_record_reports_no_step,
                  test_epochs_count_stills_not_just_samples):
