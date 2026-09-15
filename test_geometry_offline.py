@@ -1176,6 +1176,84 @@ def test_frame_to_frame_agrees_with_the_reference():
         shutil.rmtree(tmp)
 
 
+def test_the_gap_between_routes_is_a_resolution_not_a_verdict():
+    """The cross-check reports the instrument's precision. It is not a pass mark.
+
+    Two routes to the same pair each carry the per-measurement error e: the
+    sequential step carries e, the difference of two direct measurements
+    carries e*sqrt(2), and the gap between the routes carries e*sqrt(3) BY
+    CONSTRUCTION, on data with no defect in it at all. A fixed absolute
+    threshold on that gap therefore does not test the registration -- it tests
+    whether the record happens to be precise enough to clear an arbitrary
+    number, and a record with 14 px of error can never clear 10 px however
+    honest it is. What the gap actually buys is the smallest move worth
+    believing.
+    """
+    print("\nthe two-route gap as a precision")
+    import io
+    import contextlib
+
+    def routes_differ(direct, steps):
+        pairs = steps.dropna(subset=["previous"])
+        later, earlier = direct.loc[pairs.index], direct.loc[pairs["previous"]]
+        return float(np.median(np.hypot(
+            pairs["dx"].to_numpy()
+            - (later["dx"].to_numpy() - earlier["dx"].to_numpy()),
+            pairs["dy"].to_numpy()
+            - (later["dy"].to_numpy() - earlier["dy"].to_numpy()))))
+
+    def still_record(error, length=400, seed=11):
+        """A camera that never moves, measured with error `error` per frame."""
+        rng = np.random.default_rng(seed)
+        when = pd.date_range("2024-01-07", periods=length, freq="7D", tz="UTC")
+        level = rng.normal(0, error, (length, 2))
+        step = rng.normal(0, error, (length, 2))
+        return (pd.DataFrame({"dx": level[:, 0], "dy": level[:, 1]}, index=when),
+                pd.DataFrame({"previous": [pd.NaT] + list(when[:-1]),
+                              "dx": step[:, 0], "dy": step[:, 1]}, index=when))
+
+    for error in (5.0, 10.0, 14.0):
+        level, step = still_record(error)
+        gap = routes_differ(level, step)
+        recovered, resolution = g.noise_floor(gap)
+        check(f"a {error:.0f} px error shows as a {error * 1.73:.0f} px gap",
+              abs(recovered - error) < 0.25 * error,
+              f"gap {gap:.1f} -> error {recovered:.1f}")
+        check("  and the resolution limit is 3x the error",
+              abs(resolution - 3 * recovered) < 1e-6, round(resolution, 1))
+
+    # The point of the floor: noise must not read as a step, and a move that
+    # clears the floor must still be found.
+    level, step = still_record(14.0)
+    _, resolution = g.noise_floor(routes_differ(level, step))
+    offset = np.hypot(level["dx"], level["dy"])
+    check("no step survives the floor on a still camera",
+          g.find_steps(offset, threshold=resolution) == [],
+          f"floor {resolution:.0f} px")
+    check("but the old 3 px threshold invents them",
+          len(g.find_steps(offset, threshold=3.0)) > 0,
+          len(g.find_steps(offset, threshold=3.0)))
+
+    moved = offset.copy()
+    moved.iloc[200:] += 2.0 * resolution
+    found = g.find_steps(moved, threshold=resolution)
+    check("a move well clear of the floor is still found",
+          len(found) == 1 and abs((found[0]["date"] - moved.index[200]).days) <= 14,
+          [str(s["date"].date()) for s in found])
+
+    # And the words. A null result at a floor of 40 px is not "the camera was
+    # stable"; it is "nothing moved by more than the smallest move visible".
+    said = io.StringIO()
+    with contextlib.redirect_stdout(said):
+        g.report_record([], moved.index, "nowhere", 40.0, "the whole frame",
+                        noise=13.3)
+    text = said.getvalue()
+    check("the null result names the resolution it holds at",
+          "AT THIS RESOLUTION" in text and "40 px" in text, text.strip()[:60])
+    check("and does not claim a smaller move was ruled out",
+          "neither found nor ruled out" in text, text.strip()[-70:])
+
+
 def test_the_contact_sheet_and_quality_table():
     """When the numbers cannot say why, show the frames.
 
@@ -1425,6 +1503,7 @@ def main():
                  test_features_with_no_overlapping_dates_are_not_linked,
                  test_a_move_bigger_than_a_patch,
                  test_frame_to_frame_agrees_with_the_reference,
+                 test_the_gap_between_routes_is_a_resolution_not_a_verdict,
                  test_the_text_chart,
                  test_the_contact_sheet_and_quality_table,
                  test_the_survey_tiles_the_whole_frame,

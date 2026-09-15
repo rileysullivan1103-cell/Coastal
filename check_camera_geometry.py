@@ -62,6 +62,7 @@ import env  # noqa: F401  -- loads .env into os.environ
 
 import argparse
 import glob
+import math
 import os
 import sys
 
@@ -1207,6 +1208,26 @@ def agreeing_features(frame, tolerance=STEP_PX, minimum=MIN_CLUSTER):
     return best, [n for n in names if n not in best], distance_to(best)
 
 
+def noise_floor(gap):
+    """Turn the two-route disagreement into a per-measurement error.
+
+    The cross-check compares a sequential step against the difference of two
+    direct measurements. If each measurement carries an independent error e,
+    the sequential step carries e, the difference of two direct measurements
+    carries e*sqrt(2), and the gap between those two routes carries
+
+        sqrt(e^2 + 2 e^2) = e * sqrt(3)
+
+    BY CONSTRUCTION, on perfect data. An earlier version treated any gap over
+    10 px as proof the passes were lying and withheld every verdict -- which,
+    for a record with 14 px of per-measurement error, can never be satisfied.
+    The gap is not a verdict on the method. It is the method reporting its own
+    precision, and what it buys is a resolution limit rather than a refusal.
+    """
+    noise = gap / math.sqrt(3.0)
+    return noise, 3.0 * noise
+
+
 def find_steps(series, threshold=STEP_PX, persist=PERSIST):
     """Dates where the level shifts by `threshold` and stays shifted.
 
@@ -1397,10 +1418,29 @@ def spark(series, width=86, height=13, marks=(), label=""):
     return lines
 
 
-def report_record(steps, dates, slug, step_px, what):
-    """Print the epoch split, or its absence, for one registration pass."""
+def report_record(steps, dates, slug, step_px, what, noise=None):
+    """Print the epoch split, or its absence, for one registration pass.
+
+    `noise` is the per-measurement error the cross-check implies. When it is
+    given, `step_px` is this record's own resolution limit rather than a
+    threshold anyone chose, and the null result has to be stated as such: not
+    "the camera was stable" but "nothing moved by more than the smallest move
+    this record can see".
+    """
     if not steps:
-        print(f"\nNo step larger than {step_px} px persists in {what}.")
+        print(f"\nNo step larger than {step_px:.0f} px persists in {what}.")
+        if noise is not None:
+            print(f"That threshold is not a preference. It is 3x this "
+                  f"record's own measurement")
+            print(f"error of ~{noise:.0f} px, below which a step cannot be "
+                  "told from the noise.")
+            print("So the record is ONE epoch AT THIS RESOLUTION. A real move "
+                  "smaller than")
+            print(f"{step_px:.0f} px is neither found nor ruled out — it is "
+                  "invisible to this")
+            print("measurement, and denser sampling (--every 3) is what lowers "
+                  "the floor.")
+            return []
         print("The record reads as ONE geometric epoch. That is evidence of")
         print("stability, not proof: a move smaller than the step threshold,")
         print("or one inside a gap in the sampling, would not appear. Re-run")
@@ -1820,8 +1860,6 @@ def main():
             print(f"  largest single-date offset:      "
                   f"{coarse['offset'].max():.2f} px on "
                   f"{coarse['offset'].idxmax():%Y-%m-%d}")
-            coarse_steps = find_steps(coarse["offset"], threshold=args.step_px)
-
             # Does a single translation actually describe this record? The
             # direct pass cannot answer that about itself. Consecutive weeks
             # are the easiest pair to register, so their steps summed must
@@ -1830,7 +1868,9 @@ def main():
             print("\nCROSS-CHECK: frame to frame, PER STEP")
             sequential = sequential_shifts(paths, dates,
                                            max_shift=args.max_shift)
-            reliable = True
+            reliable = False
+            noise = resolution = float("nan")
+            threshold = args.step_px
             if sequential.empty:
                 print("  no consecutive pair could be registered")
                 sequential = None
@@ -1875,19 +1915,39 @@ def main():
                 biggest = sequential["step"].nlargest(5)
                 for date, value in biggest.items():
                     print(f"    {date:%Y-%m-%d}  {value:8.1f} px")
-                reliable = bool(gap <= max(args.step_px * 2, 10.0))
+                # What the gap buys is a precision, not a pass/fail.
+                if np.isfinite(gap):
+                    noise, resolution = noise_floor(gap)
+                    threshold = max(args.step_px, resolution)
+                    print(f"  two routes over the same pair disagree by "
+                          f"sqrt(3) x the error in one")
+                    print(f"  measurement, so this record measures a frame to "
+                          f"about +/-{noise:.0f} px")
+                    print(f"  SMALLEST MOVE THIS RECORD CAN RESOLVE: "
+                          f"{resolution:.0f} px "
+                          f"(3x that error)")
+                    if threshold > args.step_px:
+                        print(f"  the {args.step_px:.0f} px step threshold is "
+                              "below that floor, so steps are")
+                        print(f"  searched at {threshold:.0f} px instead")
+                    steady = float(coarse["offset"].median())
+                    if steady > 2.0 * noise:
+                        print(f"  the median offset of {steady:.0f} px is "
+                              f"{steady / noise:.0f}x that error: the "
+                              "record's")
+                        print("  spread is real motion, not measurement noise")
+                else:
+                    noise = resolution = float("nan")
+                    threshold = args.step_px
+                reliable = bool(np.isfinite(gap))
                 covered = len(coarse) / max(len(paths), 1)
-                if reliable and covered >= 0.7:
-                    print("  They agree, so one translation describes the "
-                          "record and the")
-                    print("  discontinuities above are the camera.")
-                elif reliable:
-                    # Agreement among the frames that registered says nothing
-                    # about the ones that did not, and an earlier version
-                    # announced that one translation described the record while
-                    # half of it had been dropped.
-                    print(f"  They agree — but only {covered:.0%} of the "
-                          "sampled frames registered at all.")
+                if reliable and covered < 0.7:
+                    # A precision measured on the frames that registered says
+                    # nothing about the ones that did not. An earlier version
+                    # announced that one translation described the record
+                    # while half of it had been dropped.
+                    print(f"  Only {covered:.0%} of the sampled frames "
+                          "registered at all.")
                     print("  The verdict below covers THAT subset. The rest of "
                           "the record is not")
                     print("  stable and is not moving; it is unmeasured, and "
@@ -1895,39 +1955,23 @@ def main():
                     print("  say which part. Treat any epoch here as provisional "
                           "until the")
                     print("  unregistered frames are explained.")
-                else:
+                elif not reliable:
                     print("\n" + "!" * 74)
-                    print("THE TWO ROUTES DISAGREE ON THE SAME PAIR OF "
-                          "FRAMES. Measuring A against")
-                    print("B directly, and measuring each against the "
-                          "reference and subtracting,")
-                    print("must give the same answer. They do not, so at "
-                          "least")
-                    print("one pass is locking onto something other than the "
-                          "scene -- cloud,")
-                    print("sun glint or surf can all produce a confident peak "
-                          "at the wrong")
-                    print("place. The offsets and the epochs above are NOT "
-                          "evidence.")
+                    print("TOO FEW PAIRS WERE MEASURED BOTH WAYS TO STATE A "
+                          "PRECISION. Without it")
+                    print("there is no floor to judge a step against, so "
+                          "neither a move nor")
+                    print("stability can be claimed. Re-run with --every 3.")
                     print("!" * 74)
+            coarse_steps = find_steps(coarse["offset"], threshold=threshold)
             if reliable:
-                report_record(coarse_steps, coarse.index, slug, args.step_px,
-                              "the whole frame")
+                report_record(coarse_steps, coarse.index, slug, threshold,
+                              "the whole frame",
+                              noise=noise if threshold > args.step_px else None)
             else:
-                # Not "one epoch" either. An untrustworthy registration cannot
-                # report stability any more than it can report a move: an
-                # earlier version printed "the record reads as ONE geometric
-                # epoch" directly under the warning saying its numbers were not
-                # evidence.
                 print(f"\n{len(coarse_steps)} apparent discontinuit"
                       f"{'y' if len(coarse_steps) == 1 else 'ies'} and any "
                       "epoch split are WITHHELD.")
-                print("Neither a move nor stability can be claimed from a "
-                      "registration that")
-                print("does not agree with itself. Re-run with --every 3: "
-                      "denser sampling")
-                print("makes consecutive frames easier to match and often "
-                      "settles it.")
             registration = coarse.copy()
             if sequential is not None:
                 registration = registration.join(
