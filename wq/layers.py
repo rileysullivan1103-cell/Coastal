@@ -102,6 +102,28 @@ LAYERS = {
                        "and LON together), joined on the permit id — PUV on "
                        "the map, SourceID on the record. Verified 2026-09-15 "
                        "against 113 facilities in the Rhode Island tile.",
+        # And a third finding, from the same tile on the same day. get_qid
+        # returns exactly 24 fields, and neither CWPMajorMinorStatusFlag nor
+        # CWPFacilityTypeIndicator is one of them: populated on 0 of 113
+        # records, which is absent rather than blank. Both are published by
+        # .metadata as valid ObjectNames among 260 columns, each with a
+        # numeric ColumnID, so the CSV download can carry them when asked by
+        # NUMBER. That is why dist_to_outfall_m and n_outfalls_within_2km read
+        # 120/120 while outfall_type read 0/120 from the same nearest facility.
+        "attributes_absent": "get_qid carries 24 fields and the major/minor "
+                             "flag, the facility type and the permit type are "
+                             "not among them (each populated on 0 of 113 "
+                             "records, probed 2026-09-15). The 260-column "
+                             ".metadata list publishes all three with numeric "
+                             "ColumnIDs.",
+        "attributes_replaced_by": "cwa_rest_services.get_download with "
+                                  "qcolumns given as the numeric ColumnIDs "
+                                  "read from .metadata, joined back onto the "
+                                  "get_qid records on SourceID. The header "
+                                  "that comes back is read rather than "
+                                  "assumed, so asking for four columns and "
+                                  "receiving two is visible instead of "
+                                  "silently mis-zipped.",
         "vintage_source": "response carries no timestamp; accessed_at is the "
                           "only date available",
         "note": "the download needs an explicit qcolumns list — ECHO's "

@@ -381,6 +381,19 @@ specification with a passing grade beside it. The manifest records the
 distinct-value count next to the coverage share, so it says which half of the
 rule did the dropping.
 
+**A field on an endpoint is not a field on every endpoint.** Once the
+coordinates were solved, `dist_to_outfall_m` and `n_outfalls_within_2km`
+populated at 120/120 with 120 and 14 distinct values, and `outfall_type` —
+set in the same block, from the same nearest facility — stayed at 0/120. The
+two fields it reads were populated on **0 of 113** records, which is absent
+rather than blank: `get_qid` returns 24 fields and neither is one of them.
+Both are published by ECHO's `.metadata` among 260 columns, each with a
+numeric `ColumnID`, so the CSV download carries them when asked by number and
+they join back on `SourceID`. What made this findable was widening the probe
+to dump the *whole* record: it had been printing the first twenty keys, and a
+truncated record cannot distinguish a field the service does not publish from
+a field nobody looked at.
+
 ### Recorded but never stratified on
 
 `STRATIFY_ON` in `config.py` is a **subset** of the covariates. Three are

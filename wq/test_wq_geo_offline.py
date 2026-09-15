@@ -468,6 +468,60 @@ def test_outfall_covariates():
           and values["dist_to_outfall_m"] < 100,
           str(values.get("dist_to_outfall_m")))
 
+    # get_qid returns 24 fields and the major/minor flag is not one of them --
+    # populated on 0 of 113 records, which is absent rather than blank. The
+    # metadata publishes it with a numeric ColumnID, so the CSV download can
+    # be asked for it by NUMBER and joined back on the permit id. That is
+    # what leaves outfall_type empty at every site while the distance beside
+    # it is right, so both halves are tested here.
+    print("\nattributes get_qid does not carry")
+    csv_text = ('"CWPName","SourceID","CWPMajorMinorStatusFlag",'
+                '"CWPFacilityTypeIndicator"\n'
+                '"KSJ SEAFOOD, INC.","RI0023949","M","POTW"\n'
+                '"BAILEY BROOK","RIR101457","N",""\n'
+                '"SHORT ROW","RIR101178"\n')
+    attributes = spatial.parse_outfall_attributes(csv_text)
+    check("the download is keyed on the permit id",
+          sorted(attributes) == ["RI0023949", "RIR101457"], str(sorted(attributes)))
+    check("a populated attribute comes through",
+          attributes["RI0023949"]["CWPMajorMinorStatusFlag"] == "M")
+    check("an empty cell is not carried as an empty string",
+          "CWPFacilityTypeIndicator" not in attributes["RIR101457"],
+          str(attributes["RIR101457"]))
+    check("a row with the wrong width is skipped, not mis-zipped",
+          "RIR101178" not in attributes)
+    check("SourceID is not repeated inside its own attributes",
+          all("SourceID" not in v for v in attributes.values()))
+
+    # A header that does not carry SourceID cannot be joined to anything, and
+    # returning {} is the honest answer rather than a positional guess.
+    check("a download with no SourceID column yields nothing",
+          spatial.parse_outfall_attributes('"CWPName","CWPState"\n"A","RI"\n')
+          == {})
+    check("an empty body yields nothing", spatial.parse_outfall_attributes("") == {})
+
+    records = [
+        {"SourceID": "RI0023949", "FacLat": "41.3", "FacLong": "-71.5"},
+        {"SourceID": "RIR101457", "CWPMajorMinorStatusFlag": "M"},
+        {"SourceID": "RI9999999"},
+    ]
+    merged, enriched = spatial.attach_attributes(records, attributes)
+    check("a missing field is filled from the download",
+          merged[0]["CWPMajorMinorStatusFlag"] == "M"
+          and merged[0]["CWPFacilityTypeIndicator"] == "POTW")
+    check("a field the record already carries is not overwritten",
+          merged[1]["CWPMajorMinorStatusFlag"] == "M")
+    check("but its other empty fields are still filled",
+          merged[1]["CWPName"] == "BAILEY BROOK", str(merged[1]))
+    check("a record the download does not mention is untouched",
+          list(merged[2]) == ["SourceID"], str(merged[2]))
+    check("only records that actually gained something are counted",
+          enriched == 2, str(enriched))
+    values = spatial.outfall_covariates(41.3, -71.5, merged)
+    check("and outfall_type is now populated from those attributes",
+          values.get("outfall_type") == "major/POTW",
+          str(values.get("outfall_type")))
+
 
 def test_stream_covariates():
     print("\nNHDPlus streams")

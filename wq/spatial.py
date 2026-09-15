@@ -17,6 +17,8 @@ to assign the label.
 """
 
 import argparse
+import csv
+import io
 import json
 import math
 import os
@@ -47,6 +49,16 @@ ECHO_DOWNLOAD = "https://echodata.epa.gov/echo/cwa_rest_services.get_download"
 # Both were verified against a live response on 2026-09-15.
 ECHO_RECORDS = "https://echodata.epa.gov/echo/cwa_rest_services.get_qid"
 ECHO_MAP = "https://echodata.epa.gov/echo/cwa_rest_services.get_map"
+# get_qid returns 24 fields, and the major/minor flag and the facility type
+# are not among them -- populated on 0 of 113 records, not blank on some.
+# Both ARE published by .metadata as valid ObjectNames with numeric ColumnIDs,
+# so the download can carry them if it is asked by NUMBER. That is what this
+# is for: the attributes come from the CSV, the coordinates from get_map, the
+# rest from get_qid, all joined on the permit id.
+ECHO_METADATA = "https://echodata.epa.gov/echo/cwa_rest_services.metadata"
+ECHO_ATTRIBUTES = ("SourceID", "CWPMajorMinorStatusFlag",
+                   "CWPFacilityTypeIndicator", "CWPPermitTypeDesc")
+_ECHO_COLUMN_IDS = {}
 # Overpass mirrors, tried in order. The main instance rate-limits and
 # occasionally rejects a request the mirrors accept, and a coastline is the
 # one layer with no substitute, so it is worth a second and third try.
@@ -854,7 +866,122 @@ def fetch_outfalls(lat, lon, km=OUTFALL_SEARCH_KM, probe=False):
     if probe:
         print(f"  {placed} of {len(records)} record(s) carry a usable "
               "coordinate pair")
+
+    # The major/minor flag and the facility type, which get_qid does not
+    # return. Best effort: without them outfall_type stays empty and the
+    # coverage rule drops it, which is the honest outcome, not a broken run.
+    records, enriched = attach_attributes(
+        records, fetch_outfall_attributes(qid, probe=probe))
+    if probe:
+        print(f"  {enriched} of {len(records)} record(s) gained an attribute "
+              "from the download")
     return records
+
+
+def echo_column_ids(probe=False):
+    """ObjectName -> numeric ColumnID, from ECHO's own published column list.
+
+    Fetched once per process. A name this returns nothing for is a name ECHO
+    does not publish, which is a different finding from a column it publishes
+    and leaves empty, and the caller says which.
+    """
+    if _ECHO_COLUMN_IDS:
+        return _ECHO_COLUMN_IDS
+    payload = _get(ECHO_METADATA, params={"output": "JSON"},
+                   probe=probe).json()
+    columns = (payload.get("Results") or {}).get("ResultColumns") or []
+    for column in columns:
+        name, ident = column.get("ObjectName"), column.get("ColumnID")
+        if name and ident:
+            _ECHO_COLUMN_IDS[name] = str(ident).strip()
+    if probe:
+        print(f"  ECHO metadata: {len(_ECHO_COLUMN_IDS)} column(s) published")
+    return _ECHO_COLUMN_IDS
+
+
+def fetch_outfall_attributes(qid, probe=False):
+    """The facility attributes get_qid does not carry, asked for by number.
+
+    Returns {SourceID: {ObjectName: value}}. Empty on any failure: this is
+    one covariate's worth of detail, not the distance, and it is not worth
+    abandoning a tile over.
+    """
+    try:
+        ids = echo_column_ids(probe=probe)
+    except LayerFailed as exc:
+        if probe:
+            print(f"  ECHO metadata failed: {exc}")
+        return {}
+    wanted = [(name, ids[name]) for name in ECHO_ATTRIBUTES if name in ids]
+    missing = [name for name in ECHO_ATTRIBUTES if name not in ids]
+    if probe and missing:
+        print(f"  ECHO does not publish: {missing}")
+    if not wanted:
+        return {}
+    try:
+        response = _get(ECHO_DOWNLOAD,
+                        params={"qid": qid, "output": "CSV",
+                                "qcolumns": ",".join(i for _, i in wanted)},
+                        probe=probe)
+    except LayerFailed as exc:
+        if probe:
+            print(f"  ECHO get_download failed: {exc}")
+        return {}
+    return parse_outfall_attributes(response.text, probe=probe)
+
+
+def parse_outfall_attributes(text, probe=False):
+    """Parse the attribute CSV into {SourceID: {column: value}}.
+
+    Separate from the fetch so the parsing can be tested without a network,
+    and so the header ECHO actually returned is read rather than assumed --
+    asking for four columns by number is no guarantee of getting four back,
+    and that is exactly the failure this whole layer has already had once.
+    """
+    rows = list(csv.reader(io.StringIO(text or "")))
+    if not rows:
+        return {}
+    header = [cell.strip() for cell in rows[0]]
+    if probe:
+        print(f"  ECHO download header: {header}")
+    if "SourceID" not in header:
+        if probe:
+            print("  no SourceID column, so nothing can be joined on")
+        return {}
+    key_at = header.index("SourceID")
+    out = {}
+    for row in rows[1:]:
+        if len(row) != len(header):
+            continue
+        key = row[key_at].strip()
+        if not key:
+            continue
+        out[key] = {name: value.strip()
+                    for name, value in zip(header, row)
+                    if name != "SourceID" and value.strip()}
+    return out
+
+
+def attach_attributes(records, attributes):
+    """Copy the downloaded attributes onto the facility records.
+
+    Only fills a field the record does not already carry, on the same
+    principle as place_outfalls: what the facility record says about itself
+    wins over what a second endpoint says about it. Returns (records,
+    enriched) so the caller can report how many actually gained anything.
+    """
+    enriched = 0
+    for record in records:
+        extra = attributes.get(str(record.get("SourceID") or "").strip())
+        if not extra:
+            continue
+        gained = False
+        for name, value in extra.items():
+            if record.get(name) in (None, ""):
+                record[name] = value
+                gained = True
+        enriched += 1 if gained else 0
+    return records, enriched
 
 
 def place_outfalls(records, located):
@@ -1044,7 +1171,7 @@ def for_site(site, record=None, probe=False, want=None):
                 # by the CSV download carry the same "records" key and
                 # none of the coordinates, so the key alone cannot tell
                 # them apart.
-                schema="echo/get_qid+get_map/2026-09-15")
+                schema="echo/get_qid+get_map+get_download/2026-09-15")
             records = payload.get("records") or []
             values = outfall_covariates(lat, lon, records)
             out.update(values)
