@@ -435,6 +435,72 @@ def check_residualizing_blanks_rows_rather_than_mixing():
           bool(np.isfinite(residuals["detection_rate"].to_numpy()[:40]).all()))
 
 
+def check_object_only_cameras_are_not_analysed_as_rip_cameras():
+    """Three real cameras are 0% rip_current. Their "detection rate" is people.
+
+    Corolla Hampton Inn (10,766 frames), Corolla Sailfish (10,239) and Carova
+    (34) have never produced a rip detection. Run unfiltered, a changepoint in
+    their detection rate is a changepoint in how busy the beach was -- a real
+    signal about something, but not about the detector's rip behaviour, and
+    certainly not a version bump to go and confirm.
+    """
+    import io
+    import contextlib
+
+    waves = wave_series()
+    original = ad.DATA_DIR
+    with tempfile.TemporaryDirectory() as folder:
+        ad.DATA_DIR = folder
+        try:
+            camera = "Objects Only, Nowhere, NC"
+            slug = build_camera(folder, camera,
+                                rate_of=lambda i, w: 0.4,
+                                floor_of=lambda i: 0.3, waves=waves)
+            path = os.path.join(folder, "rip_detection", f"rip_{slug}.csv")
+            table = pd.read_csv(path)
+            table["score_classes"] = "person"
+            table.to_csv(path, index=False)
+
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                daily, note = cp.daily_metrics(path, 5, "rip_current")
+            check("a camera with no rip detections is not analysed",
+                  daily is None, "analysed anyway" if daily is not None else "")
+            check("and the reason names the class", "no rip_current" in note,
+                  note)
+            check("and points at the way to analyse it anyway",
+                  "--detection-class any" in note, note)
+
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                daily, _ = cp.daily_metrics(path, 5, "any")
+            check("with 'any' the same record analyses fine",
+                  daily is not None and len(daily) == DAYS,
+                  f"{0 if daily is None else len(daily)} days")
+
+            # And a mixed record keeps only the rip rows.
+            table["score_classes"] = (["rip_current"] * (len(table) // 2)
+                                      + ["boat"] * (len(table) - len(table) // 2))
+            table.to_csv(path, index=False)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                mixed, _ = cp.daily_metrics(path, 5, "rip_current")
+            with contextlib.redirect_stdout(io.StringIO()):
+                pooled, _ = cp.daily_metrics(path, 5, "any")
+            check("a mixed record analyses fewer detections when filtered",
+                  mixed is not None and pooled is not None
+                  and mixed["n_detections"].sum() < pooled["n_detections"].sum(),
+                  f"{mixed['n_detections'].sum()} vs "
+                  f"{pooled['n_detections'].sum()}")
+
+            mix = cp.class_mix(pd.read_csv(path))
+            check("the class mix is reported for the header",
+                  mix.get("rip_current", 0) > 0 and mix.get("boat", 0) > 0,
+                  str(dict(mix)))
+        finally:
+            ad.DATA_DIR = original
+
+
 def main():
     print("detector changepoint offline checks\n")
     check_a_clean_step_is_found_where_it_was_put()
@@ -443,6 +509,7 @@ def main():
     check_shift_scales_by_within_segment_spread()
     check_end_to_end_recovers_both_dates()
     check_thin_cameras_are_not_residualized()
+    check_object_only_cameras_are_not_analysed_as_rip_cameras()
     check_residualizing_blanks_rows_rather_than_mixing()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))

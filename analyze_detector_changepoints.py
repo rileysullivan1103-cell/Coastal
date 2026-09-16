@@ -53,6 +53,7 @@ import numpy as np
 import pandas as pd
 
 import analyze_drivers as ad
+import build_label_sample as bls
 
 OUT_DIR = f"{ad.DATA_DIR}/changepoints"
 RESIDUALIZE_DEFAULT = ["Walton Lighthouse, Santa Cruz, CA"]
@@ -290,7 +291,20 @@ def cameras_on_disk():
     return found
 
 
-def daily_metrics(path, min_frames):
+def class_mix(frame):
+    """Counts per score_classes value, for the header line."""
+    if "score_classes" not in frame.columns:
+        return {}
+    from collections import Counter
+    tally = Counter()
+    for value in frame["score_classes"].fillna(""):
+        name = str(value).strip()
+        if name:
+            tally[name] += 1
+    return tally
+
+
+def daily_metrics(path, min_frames, wanted=bls.RIP_CLASS):
     """One row per day: the five metrics, plus the counts they rest on.
 
     A day is kept only if it has at least min_frames scored frames. A median
@@ -310,6 +324,18 @@ def daily_metrics(path, min_frames):
         return None, "no parseable timestamps"
     frame["date"] = frame["timestamp"].dt.floor("D")
     frame["hour"] = ad.to_hour(frame["timestamp"])
+
+    # Written before the feed was found to carry two models' output. Without
+    # this filter, "detection rate" at Walton is 19% people and boats, and at
+    # Corolla it is 100% of them -- so a changepoint would be a changepoint in
+    # how often the beach was busy. bls.keep_class keeps rows with no class at
+    # all, which are the observed zeros.
+    if wanted and wanted != "any":
+        frame, dropped = bls.keep_class(frame, wanted, label="class: ")
+        if frame.empty or not frame.get("detected", pd.Series(dtype=bool)).any():
+            return None, (f"no {wanted} detections at all "
+                          f"({dropped} frames of other classes) — "
+                          "pass --detection-class any to analyse them")
 
     if "detected" in frame.columns:
         detected = frame[frame["detected"].astype(bool)]
@@ -688,6 +714,9 @@ def main():
     parser.add_argument("--residualize", nargs="*", default=None,
                         help="cameras to also run on weather-residualized series; "
                              "default Walton, '' for none")
+    parser.add_argument("--detection-class", default=bls.RIP_CLASS,
+                        help="analyse only this class; 'any' pools every class, "
+                             "which is what the earlier version did")
     parser.add_argument("--min-frames", type=int, default=MIN_FRAMES_PER_DAY)
     parser.add_argument("--min-segment", type=int, default=MIN_SEGMENT_DAYS,
                         help="shortest run of days that can be called a regime")
@@ -745,7 +774,17 @@ def main():
     for camera, slug, path in found:
         print(f"\n{'=' * 72}\n{camera}\n{'=' * 72}")
 
-        daily, note = daily_metrics(path, args.min_frames)
+        whole = ad.read_csv(path)
+        mix = class_mix(whole) if whole is not None else {}
+        if mix:
+            top = ", ".join(f"{name} {count}" for name, count
+                            in sorted(mix.items(), key=lambda kv: -kv[1])[:6])
+            rip = mix.get(bls.RIP_CLASS, 0)
+            print(f"  classes: {top}")
+            print(f"  {bls.RIP_CLASS}: {rip} of {sum(mix.values())} "
+                  f"({rip / max(sum(mix.values()), 1):.0%})")
+
+        daily, note = daily_metrics(path, args.min_frames, args.detection_class)
         if daily is None or daily.empty:
             print(f"  skipped: {note or 'no usable days'}")
             treatment.append({"camera": camera, "treatment": "skipped",
