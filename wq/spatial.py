@@ -1307,7 +1307,16 @@ def build(sites, record=None, progress=True, want=None):
 
 
 def add_tidal_datums(frame, sites, datums):
-    """tidal_range_m and datum_gauge_dist_km, from the CO-OPS gauge list."""
+    """tidal_range_m and datum_gauge_dist_km, from the CO-OPS gauge list.
+
+    Also records WHY a site got no tidal range. Without this the outcome
+    table said "EMPTY, NO REASON RECORDED" for every such site -- which this
+    module's own report calls a bug in this code rather than in the service,
+    and rightly: a station forty kilometres up an estuary with no gauge near
+    it and a station whose gauge publishes no datums are the same blank cell
+    and are not the same fact. Neither is a failure, but a reader cannot know
+    that from a blank.
+    """
     from .strata import tidal_range, _haversine_km
     values, gauges = tidal_range(sites, datums)
     out = frame.copy()
@@ -1315,6 +1324,20 @@ def add_tidal_datums(frame, sites, datums):
     gauge_of = dict(zip(sites["station_id"].astype(str), gauges))
     out["tidal_range_m"] = out["station_id"].astype(str).map(keyed)
     out["datum_gauge"] = out["station_id"].astype(str).map(gauge_of)
+
+    # tidal_range() reports the two cases distinguishably without being asked
+    # to: beyond the radius it returns no gauge at all, while a gauge that
+    # answered but published no MHHW/MLLW comes back named with a NaN range.
+    def why(row):
+        if pd.notna(row["tidal_range_m"]):
+            return None
+        gauge = row.get("datum_gauge")
+        if gauge is None or (isinstance(gauge, float) and pd.isna(gauge)):
+            return (f"no CO-OPS gauge within "
+                    f"{config.MAX_TIDE_GAUGE_KM:g} km of this station")
+        return f"nearest gauge ({gauge}) publishes no MHHW/MLLW datum"
+
+    out["coops_datums_note"] = out.apply(why, axis=1)
     if datums is not None and not datums.empty:
         coords = datums.set_index(datums["station_id"].astype(str))
         distances = []
