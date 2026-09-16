@@ -630,6 +630,17 @@ def check_a_class_switching_on_fools_only_the_unfiltered_run():
             check("while rip_current is unchanged across it",
                   before[ct.RIP].sum() > 0 and after[ct.RIP].sum() > 0)
 
+            # The combined object column counts a frame ONCE however many
+            # object classes it names, so it can never exceed the frame count
+            # and can never be less than any single object group.
+            check("the combined object column starts at zero too",
+                  before["object"].sum() == 0)
+            check("and never exceeds that month's frame count",
+                  bool((monthly["object"] <= monthly["frames"]).all()))
+            check("nor falls below any single object group it contains",
+                  bool((monthly["object"]
+                        >= monthly[list(ct.OBJECT_GROUPS)].max(axis=1)).all()))
+
             with contextlib.redirect_stdout(quiet):
                 rows_out = cp.compare_classes(camera, path, slug, args, events)
             marked = [r for r in rows_out if r["class_event"]]

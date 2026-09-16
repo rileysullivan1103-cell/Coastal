@@ -87,6 +87,11 @@ def monthly_table(frame):
         for name in GROUPS:
             row[name] = int(group["groups"].map(
                 lambda names, n=name: n in names).sum())
+        # Any COCO object class, counted ONCE per frame. The per-group columns
+        # count a "boat,person" frame twice, which is right for "how often does
+        # boat appear" and wrong for "how much of this month is not rips".
+        row["object"] = int(group["groups"].map(
+            lambda names: bool(names & set(OBJECT_GROUPS))).sum())
         rows.append(row)
     return pd.DataFrame(rows).sort_values("month").reset_index(drop=True)
 
@@ -158,14 +163,21 @@ def report(camera, frame):
                 else dict(zip(versions["month"], versions["tag"])))
 
     print(f"\n  {len(frame)} frames, {span_first:%Y-%m-%d} to {span_last:%Y-%m-%d}")
-    print(f"\n  {'month':<9} {'frames':>7} {'rip':>7} {'person':>7} {'boat':>7} "
-          f"{'other':>7} {'blank':>7}  model")
+    print(f"\n  {'month':<9} {'frames':>7} {'rip':>7} {'object':>7} "
+          f"{'obj%':>6} {'person':>7} {'boat':>7} {'other':>7} {'blank':>7}"
+          "  model")
     flagged = {c["date"].strftime("%Y-%m") for c in changes}
     for _, row in table.iterrows():
         mark = " <-" if row["month"] in flagged else ""
+        share = row["object"] / row["frames"] if row["frames"] else 0.0
         print(f"  {row['month']:<9} {row['frames']:>7} {row[RIP]:>7} "
+              f"{row['object']:>7} {share:>5.0%} "
               f"{row['person']:>7} {row['boat']:>7} {row['other object']:>7} "
               f"{row['blank']:>7}  {by_month.get(row['month'], '')}{mark}")
+    totals = table[["frames", RIP, "object"]].sum()
+    print(f"  {'TOTAL':<9} {int(totals['frames']):>7} {int(totals[RIP]):>7} "
+          f"{int(totals['object']):>7} "
+          f"{totals['object'] / max(totals['frames'], 1):>5.0%}")
 
     print(f"\n  {'group':<14} {'n':>7}  {'first':<12} {'last':<12} months")
     for event in events:
