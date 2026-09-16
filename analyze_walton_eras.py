@@ -88,6 +88,11 @@ ORIGINAL = {
               "p": 2.4e-34},
     "cloud_box": {"rho": 0.122, "rho_hrmo": 0.128},
 }
+# Set once in main(). mop_vs_buoy needs the split to say whether A had any
+# hours to re-censor, and threading it through every caller for one boolean
+# would be worse than a module-level note that it is set exactly once.
+SPLIT_HOURS = []
+
 RAIN_COLUMNS = ["rain_24h_mm", "rain_48h_mm"]
 RAIN_TARGETS = ["detection_rate", "detections"]
 
@@ -351,6 +356,13 @@ def mop_vs_buoy(observed, targets):
     if both.empty:
         return None
     rows = []
+    # How many matched hours A actually re-censors. At Walton the answer is
+    # zero: buoy 46236's record starts well after the split, so every hour
+    # where MOP and the buoy both report is post-era, and A's series on those
+    # hours is pooled's series unchanged. Printing a verdict for A there would
+    # be reporting the pooled number under A's name.
+    pre_hours = int((both["hour"] < SPLIT_HOURS[0]).sum()) if SPLIT_HOURS \
+        else -1
     for target in targets:
         if target not in both.columns:
             continue
@@ -364,7 +376,7 @@ def mop_vs_buoy(observed, targets):
                  else np.nan)
         rows.append({"target": target, "n": n, "mop_rho": mop_rho,
                      "mop_p": mop_p, "buoy_rho": buoy_rho, "buoy_p": buoy_p,
-                     "ratio": ratio})
+                     "ratio": ratio, "pre_hours": pre_hours})
     return pd.DataFrame(rows) if rows else None
 
 
@@ -376,6 +388,9 @@ def rain_table(observed, targets=RAIN_TARGETS, columns=RAIN_COLUMNS):
             rho_c, _, p_c = demeaned_rho(observed, column, target, "hr_mo")
             rows.append({"predictor": column, "target": target, "n": n,
                          "rho": rho, "p": p, "rho_hrmo": rho_c, "p_hrmo": p_c})
+    if not rows:
+        return pd.DataFrame(columns=["predictor", "target", "n", "rho", "p",
+                                     "rho_hrmo", "p_hrmo"])
     return pd.DataFrame(rows)
 
 
@@ -534,6 +549,8 @@ def main():
     args = parser.parse_args()
 
     split = pd.Timestamp(args.split, tz="UTC")
+    SPLIT_HOURS.clear()
+    SPLIT_HOURS.append(split)
     if args.check_recensoring:
         print(f"\nPER-ERA SCORE FLOOR IN {args.check_recensoring}")
         print(f"  split {split:%Y-%m-%d}, floor {args.floor:.2f}\n")
@@ -718,8 +735,12 @@ def finding_mop_buoy(variants):
           f"{original['bbox_area_max']}x, on {original['n']} matched hours")
     print("  rule: survives where |rho_mop| / |rho_buoy| > 1 with the MOP side "
           "significant.")
+    print("  'pre hrs' is how many of the matched hours fall before the "
+          "split. Where it\n  is 0 the buoy never reported in the low-floor "
+          "era, so A has nothing to\n  re-censor here and B_pre has nothing "
+          "to compute.")
     print(f"\n  {'variant':<8}{'target':<16}{'n':>6}{'mop rho':>10}{'p':>10}"
-          f"{'buoy rho':>10}{'p':>10}{'ratio':>8}")
+          f"{'buoy rho':>10}{'p':>10}{'ratio':>8}{'pre hrs':>10}")
     verdicts = {}
     for label in present(variants):
         table = mop_vs_buoy(variants[label]["observed"], TARGETS)
@@ -732,7 +753,7 @@ def finding_mop_buoy(variants):
             print(f"  {label:<8}{row['target']:<16}{row['n']:>6}"
                   f"{fmt(row['mop_rho']):>10}{fmt_p(row['mop_p']):>10}"
                   f"{fmt(row['buoy_rho']):>10}{fmt_p(row['buoy_p']):>10}"
-                  f"{ratio:>8}")
+                  f"{ratio:>8}{int(row['pre_hours']):>10}")
         verdicts[label] = table
     print()
     # One verdict per target, not one per variant. The original finding is
@@ -743,6 +764,14 @@ def finding_mop_buoy(variants):
         table = verdicts.get(label)
         if table is None:
             verdict_line(label, None, "MOP and buoy never overlap here")
+            continue
+        vacuous = label == "A" and int(table["pre_hours"].iloc[0]) == 0
+        if vacuous:
+            verdict_line("A", None,
+                         "A cannot test this: no matched hour lies before the "
+                         "split,")
+            print(f"    {'':<24} {'':<18} so A's series here IS pooled's and "
+                  "the row above is a copy.")
             continue
         for _, row in table.iterrows():
             survives = bool(pd.notna(row["ratio"]) and row["ratio"] > 1
@@ -787,15 +816,18 @@ def finding_rain(variants, args):
         pre, post = pairs[label]
         merged, flipped = rain_reversals(pre, post)
         print(f"\n  [{label}]  {'predictor':<14}{'target':<16}"
-              f"{'pre rho':>10}{'p':>10}{'post rho':>10}{'p':>10}")
+              f"{'pre n':>7}{'pre rho':>10}{'p':>10}"
+              f"{'post n':>8}{'post rho':>10}{'p':>10}")
         for _, row in merged.iterrows():
             flag = "   <- reverses" if (
                 pd.notna(row["rho_pre"]) and pd.notna(row["rho_post"])
                 and np.sign(row["rho_pre"]) != np.sign(row["rho_post"])
                 and row["p_pre"] < 0.05 and row["p_post"] < 0.05) else ""
             print(f"          {row['predictor']:<14}{row['target']:<16}"
-                  f"{fmt(row['rho_pre']):>10}{fmt_p(row['p_pre']):>10}"
-                  f"{fmt(row['rho_post']):>10}{fmt_p(row['p_post']):>10}{flag}")
+                  f"{int(row['n_pre']):>7}{fmt(row['rho_pre']):>10}"
+                  f"{fmt_p(row['p_pre']):>10}"
+                  f"{int(row['n_post']):>8}{fmt(row['rho_post']):>10}"
+                  f"{fmt_p(row['p_post']):>10}{flag}")
         verdict_line(label, len(flipped) > 0,
                      f"{len(flipped)} of {len(merged)} pairs reverse with both "
                      "sides significant")

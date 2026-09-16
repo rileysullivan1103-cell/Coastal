@@ -394,6 +394,46 @@ def check_a_workspace_inside_data_cannot_leak_into_the_mirror():
               os.path.isdir(os.path.join(safe, "rip_detection")))
 
 
+def check_a_buoy_that_only_covers_one_era_is_flagged():
+    """A cannot test a finding computed on hours it never re-censors.
+
+    Walton's buoy record starts after the split, so every hour where MOP and
+    the buoy both report is post-era. A's series on those hours IS pooled's,
+    and a verdict printed under A's name there is pooled's number wearing A's
+    label. The pre-hour count is what makes that visible.
+    """
+    print("\na buoy that only reports in one era")
+    hours = pd.date_range(SPLIT - pd.Timedelta(hours=400), periods=800,
+                          freq="h", tz="UTC")
+    rng = np.random.default_rng(31)
+    mop = rng.gamma(2.0, 0.6, len(hours))
+    frame = pd.DataFrame({
+        "hour": hours, "mop_wave_height": mop,
+        "WVHT": mop + rng.normal(0, 0.4, len(hours)),
+        "detection_rate": np.clip(0.1 * mop + rng.normal(0, 0.1, len(hours)),
+                                  0, 1),
+        "hour_of_day": hours.hour, "month": hours.month,
+    })
+    frame["hr_mo"] = (frame["hour_of_day"].astype(str) + "-"
+                      + frame["month"].astype(str))
+
+    we.SPLIT_HOURS.clear()
+    we.SPLIT_HOURS.append(SPLIT)
+
+    spanning = we.mop_vs_buoy(frame, ["detection_rate"])
+    check("a buoy spanning both eras reports pre-era hours",
+          int(spanning["pre_hours"].iloc[0]) == 400,
+          f"{int(spanning['pre_hours'].iloc[0])}")
+
+    post_only = frame.copy()
+    post_only.loc[post_only["hour"] < SPLIT, "WVHT"] = np.nan
+    late = we.mop_vs_buoy(post_only, ["detection_rate"])
+    check("a buoy that starts after the split reports none",
+          int(late["pre_hours"].iloc[0]) == 0)
+    check("and its matched hours are all post-era",
+          int(late["n"].iloc[0]) == 400, f"n={int(late['n'].iloc[0])}")
+
+
 def check_the_recensoring_check_tells_the_two_apart():
     print("\nthe check that would show A did nothing")
     rng = np.random.default_rng(5)
@@ -439,6 +479,7 @@ def main():
     check_detected_is_read_not_guessed()
     check_the_mirror_is_globbable_and_read_only()
     check_a_workspace_inside_data_cannot_leak_into_the_mirror()
+    check_a_buoy_that_only_covers_one_era_is_flagged()
     check_the_recensoring_check_tells_the_two_apart()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
