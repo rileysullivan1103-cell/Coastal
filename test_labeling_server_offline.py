@@ -281,6 +281,47 @@ def check_the_http_round_trip():
             server.server_close()
 
 
+def check_a_csv_backup_imports_as_readily_as_json():
+    """The rebuild's own backup is a CSV, and that is what gets imported.
+
+    Telling someone to convert recovered labels to JSON first would be a step
+    that exists only because the reader was narrow -- and the rebuild had
+    already lost 27 labels once by the time this was written.
+    """
+    import csv as csvmod
+    with tempfile.TemporaryDirectory() as folder:
+        use(folder)
+
+        backup = os.path.join(folder, "labels_20260916T000000Z.csv")
+        with open(backup, "w", newline="") as handle:
+            writer = csvmod.DictWriter(
+                handle, fieldnames=["frame_id", "rip_present", "notes",
+                                    "labeled_at", "box_labels"])
+            writer.writeheader()
+            writer.writerow({"frame_id": "F001", "rip_present": "yes",
+                             "notes": "recovered", "labeled_at": "",
+                             "box_labels": '{"0": true}'})
+            writer.writerow({"frame_id": "F002", "rip_present": "doubt",
+                             "notes": "", "labeled_at": "", "box_labels": ""})
+            # An unlabelled row in the backup must not import as a verdict.
+            writer.writerow({"frame_id": "F003", "rip_present": "",
+                             "notes": "", "labeled_at": "", "box_labels": ""})
+
+        applied, skipped, problems = ls.import_labels(backup)
+        check("the two verdicts in the CSV are imported", applied == 2,
+              f"{applied} applied, {problems}")
+        rows, _ = ls.read_rows()
+        by_id = {r["frame_id"]: r for r in rows}
+        check("with their verdicts", by_id["F001"]["rip_present"] == "yes"
+              and by_id["F002"]["rip_present"] == "doubt")
+        check("and their notes", by_id["F001"]["notes"] == "recovered")
+        check("and their box marks",
+              json.loads(by_id["F001"][ls.BOX_COLUMN]) == {"0": True})
+        check("the blank row did not import as a verdict",
+              by_id["F003"]["rip_present"] == "", by_id["F003"]["rip_present"])
+        check("nothing was reported as a problem", not problems, str(problems))
+
+
 def main():
     print("labelling server offline checks\n")
     check_a_save_is_on_disk_before_it_answers()
@@ -289,6 +330,7 @@ def main():
     check_box_labels_round_trip()
     check_resume_reads_the_disk_not_the_browser()
     check_import_merges_without_destroying_newer_work()
+    check_a_csv_backup_imports_as_readily_as_json()
     check_the_http_round_trip()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))

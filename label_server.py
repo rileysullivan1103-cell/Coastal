@@ -150,8 +150,18 @@ def import_labels(path, overwrite=False):
     an import is a recovery, and a recovery that silently replaces newer work
     with older is not one.
     """
-    with open(path) as fh:
-        payload = json.load(fh)
+    # A CSV as readily as JSON: the rebuild's own backup of labels.csv is the
+    # most likely thing anyone imports, and telling someone to convert their
+    # recovered labels to JSON first is a step that exists only because the
+    # reader was narrow.
+    if os.path.splitext(path)[1].lower() == ".csv":
+        with open(path, newline="") as fh:
+            payload = [row for row in csv.DictReader(fh)
+                       if (row.get("rip_present") or "").strip()]
+    else:
+        with open(path) as fh:
+            payload = json.load(fh)
+
     if isinstance(payload, dict):
         entries = [dict(value, frame_id=key) if isinstance(value, dict)
                    else {"frame_id": key, "rip_present": value}

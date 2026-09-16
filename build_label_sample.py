@@ -453,6 +453,30 @@ def still_url(row, service, cache):
 BOX_OFFSET_TOLERANCE_S = 60.0
 
 
+def back_up_labels():
+    """Copy labels.csv aside before a rebuild overwrites it. Returns the path.
+
+    carry_labels moves verdicts onto frames the new sample still draws, but a
+    rebuild whose POOL changed can redraw almost none of them: filtering
+    Walton to rip_current carried 0 of 27, because the nine strata were drawn
+    from a pool 19% smaller and the draw landed elsewhere. The old file was
+    overwritten in the same run, so those labels were gone -- and the message
+    printed at the time said they were "still in the previous labels.csv if
+    you kept a copy", which was not true of a file this function had not yet
+    existed to keep.
+    """
+    if not os.path.exists(LABEL_CSV):
+        return None
+    table = ad.read_csv(LABEL_CSV)
+    if table is None or table.empty:
+        return None
+    stamp = pd.Timestamp.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    target = f"{OUT_DIR}/labels_{stamp}.csv"
+    with open(LABEL_CSV, "rb") as source, open(target, "wb") as sink:
+        sink.write(source.read())
+    return target
+
+
 def carry_labels():
     """Verdicts already entered, by frame_id, so a rebuild does not lose them.
 
@@ -699,11 +723,16 @@ def main():
         return 0
 
     carried = carry_labels()
+    backup = None
     if os.path.exists(LABEL_CSV) and not args.force:
         sys.exit(f"\n{LABEL_CSV} already exists. Labelling it again from scratch "
                  "would discard the labels in it.\nPass --force if that is what you want.")
 
     os.makedirs(IMAGE_DIR, exist_ok=True)
+    if carried:
+        backup = back_up_labels()
+        if backup:
+            print(f"\n  backed up {len(carried)} existing label(s) to {backup}")
     service = stills_service(args.camera)
 
     print(f"\n  resolving image urls for {len(sample)} rows")
@@ -779,8 +808,10 @@ def main():
               "onto frames that survived the rebuild")
         if kept < len(carried):
             print(f"  {len(carried) - kept} label(s) were on frames this "
-                  "sample no longer draws; they are\n    still in the previous "
-                  "labels.csv if you kept a copy")
+                  "sample no longer draws")
+            if backup:
+                print(f"    they are in {backup}, and can be merged with:")
+                print(f"    python label_server.py --import {backup}")
 
     # How common each stratum is in the whole record, not in the sample. The
     # sample deliberately over-represents high confidence and the boosters, so
