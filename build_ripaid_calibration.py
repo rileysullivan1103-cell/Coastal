@@ -76,6 +76,25 @@ def clean_strata(frames):
     return positives, negatives, report
 
 
+def resolve_image(image_dir, file_name):
+    """Where this frame's image actually is, or None.
+
+    A CVAT COCO export names frames either "clm_s_01_....png" or
+    "default/clm_s_01_....png" depending on how it was produced, and unpacks
+    them under images/default/. So --images can reasonably be pointed at either
+    images/ or images/default/ and only one of the four combinations lines up.
+    Rather than make that a guess with a silent wrong answer at the end of it,
+    both spellings are tried and the one on disk wins.
+    """
+    if not image_dir:
+        return None
+    for candidate in (file_name, os.path.basename(file_name)):
+        full = os.path.join(image_dir, candidate)
+        if os.path.isfile(full):
+            return full
+    return None
+
+
 def with_images(pool, image_dir):
     """Only frames whose image is actually on disk.
 
@@ -86,7 +105,7 @@ def with_images(pool, image_dir):
     if not image_dir:
         return pool, 0
     exists = pool["file_name"].map(
-        lambda name: os.path.isfile(os.path.join(image_dir, name)))
+        lambda name: resolve_image(image_dir, name) is not None)
     return pool[exists], int((~exists).sum())
 
 
@@ -110,8 +129,11 @@ def write_sample(sample, image_dir, out_dir=OUT_DIR, key_dir=KEY_DIR):
         frame_id = f"cal_{position:03d}"
         image = f"{frame_id}{extension}"
         if image_dir:
-            shutil.copyfile(os.path.join(image_dir, row.file_name),
-                            os.path.join(out_dir, "images", image))
+            source = resolve_image(image_dir, row.file_name)
+            if source is None:
+                sys.exit(f"  {row.file_name} vanished between the check and "
+                         "the copy; re-run.")
+            shutil.copyfile(source, os.path.join(out_dir, "images", image))
         rows.append({"frame_id": frame_id, "image": image,
                      # The ONLY thing the page may show. Not the camera, not
                      # the timestamp: a labeller who learns that clm_c05 in
@@ -185,6 +207,12 @@ def main():
     if args.images:
         positives, missing_pos = with_images(positives, args.images)
         negatives, missing_neg = with_images(negatives, args.images)
+        if not len(positives) and not len(negatives):
+            sys.exit(f"  NONE of the frames were found under {args.images}/.\n"
+                     "  A CVAT export unpacks images under images/default/, so "
+                     "try both:\n"
+                     f"    --images {args.images.rstrip('/')}/default\n"
+                     f"    --images {os.path.dirname(args.images.rstrip('/')) or '.'}")
         if missing_pos or missing_neg:
             print(f"  {missing_pos + missing_neg} frame(s) have no image in "
                   f"{args.images}/ and were removed BEFORE the draw")

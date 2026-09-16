@@ -144,9 +144,44 @@ def test_probe_patterns():
         check(f"{names[0][:34]} -> {want}", got == want, f"got {got}")
 
 
+def test_cvat_subset_prefix():
+    """A CVAT export records "default/<name>.png", not "<name>.png".
+
+    FILENAME is anchored, so matching the full string drops every frame and
+    leaves an empty table -- which then raised KeyError('timestamp') from the
+    sort rather than saying what went wrong. Both halves are checked.
+    """
+    print("a CVAT export with a subset folder in the file name")
+    plain = {"images": [{"id": 1, "file_name": "clm_s_01_2011-05-21-11-00.png"}],
+             "annotations": [{"id": 1, "image_id": 1, "category_id": 1,
+                              "area": 10.0}],
+             "categories": [{"id": 1, "name": rip.RIP_LABEL}]}
+    prefixed = dict(plain, images=[
+        {"id": 1, "file_name": "default/clm_s_01_2011-05-21-11-00.png"}])
+
+    bare = rip.build_frames(plain)
+    nested = rip.build_frames(prefixed)
+    check("the bare name parses", len(bare) == 1)
+    check("and so does the prefixed one", len(nested) == 1)
+    check("both land on the same camera and timestamp",
+          bare["camera"].iloc[0] == nested["camera"].iloc[0]
+          and bare["timestamp"].iloc[0] == nested["timestamp"].iloc[0])
+    check("the FULL name is kept, since it locates the file on disk",
+          nested["file_name"].iloc[0] == "default/clm_s_01_2011-05-21-11-00.png")
+
+    unmatchable = dict(plain, images=[{"id": 1, "file_name": "nope.png"}])
+    try:
+        rip.build_frames(unmatchable)
+        check("a wholly unparseable export exits", False, "it returned")
+    except SystemExit as exc:
+        check("a wholly unparseable export exits with a readable reason",
+              "pattern" in str(exc), str(exc).replace("\n", " ")[:70])
+
+
 def main():
     for test in (test_axial_mean, test_observed_zeros, test_doubt_only_frames,
-                 test_hourly, test_unparsed_names_are_reported, test_probe_patterns):
+                 test_hourly, test_unparsed_names_are_reported,
+                 test_cvat_subset_prefix, test_probe_patterns):
         test()
         print()
     if FAILURES:

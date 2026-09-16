@@ -116,7 +116,13 @@ def build_frames(payload):
 
     rows, unparsed = [], []
     for image in payload["images"]:
-        match = FILENAME.match(image["file_name"])
+        # Matched on the BASENAME. A CVAT COCO export names frames
+        # "default/clm_s_01_2011-05-21-11-00.png" -- the subset folder is part
+        # of the recorded name -- and the pattern is anchored, so matching the
+        # full string drops every frame in the export and leaves an empty
+        # table. The full name is still what gets stored, because it is what
+        # locates the file on disk.
+        match = FILENAME.match(os.path.basename(image["file_name"]))
         if not match:
             unparsed.append(image["file_name"])
             continue
@@ -147,9 +153,16 @@ def build_frames(payload):
         print("  If these are a different naming scheme, say so — dropping them "
               "silently would bias the frame count.")
 
-    frame = pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
+    # Checked BEFORE the sort: an empty frame has no timestamp column, so
+    # sorting it raises KeyError('timestamp') and buries the actual problem,
+    # which is that nothing matched the naming pattern.
+    frame = pd.DataFrame(rows)
     if frame.empty:
-        sys.exit("No frames parsed. Check the file_name format.")
+        sys.exit(f"No frames parsed from {len(payload['images'])} image "
+                 "entries. Every file_name failed the\n  "
+                 "<site>_<cam>_<YYYY-MM-DD-HH-MM> pattern — check the first "
+                 "few listed above.")
+    frame = frame.sort_values("timestamp").reset_index(drop=True)
     return frame
 
 
