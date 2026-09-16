@@ -152,6 +152,23 @@ def main():
                  "labelled.\n  Rebuilding would discard them. Pass --force if "
                  "that is what you want.")
 
+    if not os.path.exists(args.annotations):
+        sys.exit(f"{args.annotations} does not exist.\n"
+                 "  RipAID is not in this repo and nothing here can fetch it "
+                 "— see probe_rip_dataset.py.\n"
+                 "  Download https://zenodo.org/records/15082427 and pass its "
+                 "COCO export:\n"
+                 "    python build_ripaid_calibration.py "
+                 "/path/to/instances_default.json --images /path/to/images\n"
+                 "  To find it if it is already on disk:\n"
+                 "    find ~ -name 'instances_default.json' -not -path '*/.*' "
+                 "2>/dev/null")
+    if args.images and not os.path.isdir(args.images):
+        sys.exit(f"--images {args.images} is not a directory.\n"
+                 "  Point it at the folder holding the RipAID frame images. "
+                 "Omit it entirely\n  to write the CSV without copying images "
+                 "(the page will show blanks).")
+
     frames = lr.build_frames(lr.load(args.annotations))
     positives, negatives, report = clean_strata(frames)
 

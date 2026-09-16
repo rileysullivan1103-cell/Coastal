@@ -54,6 +54,18 @@ import load_ripaid as lr
 import solar
 
 VERDICTS = {"yes", "no", "doubt", "unusable"}
+
+# Printed wherever the export is missing. Nothing in this project can reach
+# Zenodo (see probe_rip_dataset.py), so "file not found" here is never a bug to
+# fix in code -- it means the download has not happened, and the message has to
+# say so rather than raising a bare FileNotFoundError.
+ZENODO = """  RipAID is not in this repo and nothing here can fetch it — see
+  probe_rip_dataset.py. Download the record from
+  https://zenodo.org/records/15082427 and pass the COCO export:
+    --annotations /path/to/instances_default.json
+  To find it if it is already on disk somewhere:
+    find ~ -name 'instances_default.json' -not -path '*/.*' 2>/dev/null"""
+
 MIN_FRAMES = 120          # per camera, below which a rotation is not attempted
 MIN_BIN = 20              # frames per azimuth bin, below which the bin is thin
 BIN_DEG = 30
@@ -456,8 +468,15 @@ def main():
                        if os.path.exists(p)]
             path = guesses[0] if guesses else None
         if path is None:
-            print("\n  PART 2 skipped: no RipAID export found. Pass "
-                  "--annotations instances_default.json")
+            print("\n  PART 2 skipped: no RipAID export found.")
+            print(ZENODO)
+            return 0
+        if not os.path.exists(path):
+            # Checked here rather than left to load(), which raises a bare
+            # FileNotFoundError that says nothing about where the file comes
+            # from or that this project cannot download it.
+            print(f"\n  PART 2 skipped: {path} does not exist.")
+            print(ZENODO)
             return 0
         report_part2(lr.build_frames(lr.load(path)), args)
     return 0
