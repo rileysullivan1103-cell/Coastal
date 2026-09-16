@@ -262,6 +262,54 @@ def check_the_timing_audit_finds_a_stale_still():
                "cam_2026_03_01_12_03_00.jpg")))
 
 
+def check_the_class_audit_names_a_person_detector():
+    """A COCO class list must be called what it is, not smoothed over.
+
+    Boxes sitting squarely on people on the beach are not misaligned boxes.
+    They are correctly placed boxes around correctly detected objects of the
+    wrong kind, and the payload says so in the class name. If this reads
+    'person' the rip record is not a rip record, which is a finding about the
+    whole project rather than about the overlay.
+    """
+    import io
+    import contextlib
+
+    people = [{"classes": [("person", 0.81), ("person", 0.62)]},
+              {"classes": [("surfboard", 0.55)]}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        dx.audit_classes(people, "nonexistent-camera-slug")
+    text = buffer.getvalue()
+    check("a COCO class list is called out, not smoothed over",
+          "THE BOXES ARE NOT RIPS" in text, text.strip()[-160:])
+    check("the offending class names are printed",
+          "person" in text and "surfboard" in text)
+
+    rips = [{"classes": [("rip_current", 0.7)]}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        dx.audit_classes(rips, "nonexistent-camera-slug")
+    text = buffer.getvalue()
+    check("a rip-like class list is reported as sound",
+          "the product is what it claims" in text, text.strip()[-120:])
+    check("and is not flagged as an object detector",
+          "NOT RIPS" not in text)
+
+    mixed = [{"classes": [("rip_current", 0.7), ("person", 0.9)]}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        dx.audit_classes(mixed, "nonexistent-camera-slug")
+    check("a mixed list asks for filtering rather than picking a side",
+          "MIXED" in buffer.getvalue())
+
+    unknown = [{"classes": [("wibble", 0.5)]}]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        dx.audit_classes(unknown, "nonexistent-camera-slug")
+    check("an unfamiliar class is neither cleared nor condemned",
+          "unfamiliar" in buffer.getvalue())
+
+
 def main():
     print("box coordinate diagnosis offline checks\n")
     check_the_letterbox_inverse_returns_the_box()
@@ -272,6 +320,7 @@ def main():
     check_the_sheet_embeds_computed_rectangles()
     check_the_audit_calls_source_pixels_source_pixels()
     check_the_timing_audit_finds_a_stale_still()
+    check_the_class_audit_names_a_person_detector()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0

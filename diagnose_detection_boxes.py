@@ -273,6 +273,71 @@ def stamp_from_name(name):
         return None
 
 
+def audit_classes(samples, slug):
+    """What the detector says these boxes ARE.
+
+    Asked because boxes landing squarely on people standing on the beach is not
+    a misalignment: it is a correctly placed box around a correctly detected
+    object of the wrong kind. The class name is carried in the payload, so this
+    does not need to be inferred from where the boxes sit.
+
+    The host serving the annotated frames is
+    stage-webcoos-object-detector-api..., under /outputs/yolo/v8n/ -- v8n is
+    YOLOv8-nano, whose stock COCO weights detect eighty everyday classes with
+    'person' first among them and no rip current anywhere. If the class names
+    below are COCO names, this product is a general object detector and the
+    whole rip record is a record of something else. That is worth knowing
+    before another number is computed from it.
+    """
+    from collections import Counter
+    counts = Counter()
+    for sample in samples:
+        for name, _ in sample["classes"]:
+            counts[name] += 1
+
+    print(f"\n  classes in the sampled payloads")
+    if not counts:
+        print("    no class names in the sample")
+    for name, count in counts.most_common(12):
+        print(f"    {name:<28} {count:>6}")
+
+    # The sample is 30 frames; the whole record is the real answer.
+    frame = ad.read_csv(f"{ad.DATA_DIR}/rip_detection/rip_{slug}.csv")
+    if frame is not None and "score_classes" in frame.columns:
+        whole = Counter()
+        for value in frame["score_classes"].dropna():
+            for name in str(value).split(","):
+                if name.strip():
+                    whole[name.strip()] += 1
+        print(f"\n  classes across the whole rip record ({len(frame)} frames)")
+        for name, count in whole.most_common(12):
+            print(f"    {name:<28} {count:>6}  {count / max(len(frame), 1):>6.1%}")
+        counts = whole
+
+    rip_like = {n for n in counts if "rip" in n.lower() or "current" in n.lower()}
+    coco_like = {n for n in counts
+                 if n.lower() in {"person", "car", "boat", "bird", "dog",
+                                  "surfboard", "umbrella", "kite", "bench",
+                                  "truck", "backpack", "chair", "frisbee"}}
+    print()
+    if coco_like and not rip_like:
+        print(f"    THE BOXES ARE NOT RIPS. Every class here is a COCO object "
+              f"class ({', '.join(sorted(coco_like))}),\n    and no class "
+              "mentions a rip or a current. This product is a general object\n"
+              "    detector, not a rip detector, and every result computed "
+              "from it is about\n    something other than rip currents.")
+    elif rip_like and coco_like:
+        print(f"    MIXED: rip-like classes ({', '.join(sorted(rip_like))}) "
+              f"alongside object classes\n    ({', '.join(sorted(coco_like))}). "
+              "The record needs filtering by class before use.")
+    elif rip_like:
+        print(f"    classes are rip-like ({', '.join(sorted(rip_like))}); the "
+              "product is what it claims.")
+    else:
+        print("    class names are unfamiliar; read them above and decide.")
+    return counts
+
+
 def audit_image_timing(samples):
     """How far each labelled still is from the detection it carries boxes for.
 
@@ -566,6 +631,7 @@ def main():
     print(f"  {len(samples)} frames with boxes "
           f"({sum(1 for s in samples if s['still'])} have a local still)")
     audit(samples, args.model_side)
+    audit_classes(samples, slug)
     audit_image_timing(samples)
 
     if not args.no_annotated:
