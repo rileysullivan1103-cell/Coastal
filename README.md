@@ -1555,17 +1555,40 @@ it. Across a fortnight of fog that is a two-week gap, so the camera's real
 motion over that fortnight gets booked as measurement noise and the floor
 inflates until nothing can be resolved.
 
-**A masked band loses its short axis.** Measured on synthetic texture with a
-known (+2, +5) px displacement: a 200-row band recovers (2.00, 5.00), a 120-row
-band recovers (2.00, 5.00), and a 72-row band recovers **(0.28, 4.99)** — the
-horizontal exact and the vertical gone, at ordinary confidence. At a beach
-camera the land *is* a strip along the bottom of the frame, so this is the
-normal case. Below `THIN_BAND_PX` the run says so. Getting even that far needs
-two details: crop to the **binary** mask's bounding box, not the outer end of
-its feathered ramp (or the ramp and the Hann window between them leave too few
-rows at full weight), and **keep** the Hann window rather than flattening it,
-because the band runs into the frame edge where rows have no counterpart under
-vertical motion.
+**A masked band caps its range, it does not lose its axis** — and the earlier
+version of this note had that backwards, which is worth recording because the
+wrong version would have had us throw away true vertical agreement.
+
+The band the mask leaves at a beach camera is a strip along the bottom of the
+frame, so this is the normal case, not a corner one. The claim here used to be
+that phase correlation across such a strip returns ~0 *at ordinary confidence*
+— a silent lie, the worst failure a stability check can have. That reading came
+from cropping to the **feathered** mask's bounding box, which hands the
+correlator a ramp instead of an edge. Cropping to the **binary** box instead
+(and keeping the Hann window, since the band runs into the frame edge) removed
+it, and it does not reproduce at any band height down to 16 rows.
+
+What is actually left is narrower and self-announcing. Shifting a band across
+its short axis destroys overlap, so confidence falls as the displacement grows.
+Swept on synthetic texture, `dx` held at +5:
+
+| true `dy` | 72-row band | 300-row band |
+| --------- | ----------- | ------------ |
+| 2 px      | +1.99, conf 297 | +2.00, conf 959 |
+| 10 px     | +9.98, conf 152 | +10.00, conf 819 |
+| 20 px     | +19.95, conf 64 | +20.00, conf 599 |
+| 30 px     | +29.90, conf 21 | +30.00, conf 459 |
+| 34 px     | +33.86, conf 11 | +34.00, conf 415 |
+| 40 px     | **−33.79, conf 6** | +40.00, conf 364 |
+
+The thin band reads every displacement it can see correctly, to a hundredth of
+a pixel, out to about half its height — the search is clamped there. Past that
+the answer is wrong, but confidence has already fallen through `MIN_CONFIDENCE`
+(8) by the time it is, so the frame is rejected rather than believed. The cost
+is **range, not truth**: a gap in route 2 along a thin axis may mean a step too
+big for that axis to see, not a camera that held still. `THIN_BAND_PX` now
+marks that ceiling rather than a blind spot, and the run prints the ceiling in
+pixels for the mask actually declared.
 
 ### The survey is the decisive test, and it is run early
 

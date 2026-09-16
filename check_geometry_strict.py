@@ -64,7 +64,7 @@ DEFAULT_HOUR_UTC = 17
 CELL = 128              # survey cell, px
 MIN_CLUSTER = 3         # cells that must agree before a common vector exists
 AGREE_PX = 3.0          # how close "agree" is, px
-THIN_BAND_PX = 128      # below this a masked band loses its short axis
+THIN_BAND_PX = 128      # below this a band caps how far it can measure
 
 # Feature route.
 MIN_MATCHES = 20        # raw correspondences before a fit is even attempted
@@ -168,25 +168,49 @@ def describe_mask(mask, spec, shape):
         print("  WARNING: over 85% of the frame. This is probably not a land "
               "mask;\n  check that the water was actually excluded.")
 
-    # A THIN BAND CANNOT BE REGISTERED ALONG ITS THIN AXIS. Measured on
-    # synthetic texture with a known (+2, +5) px displacement: a 200-row band
-    # recovers (2.00, 5.00), a 120-row band recovers (2.00, 5.00), and a
-    # 72-row band recovers (0.28, 4.99) -- the horizontal exactly right and
-    # the vertical GONE, reported with ordinary-looking confidence. At a beach
-    # camera the land is a strip along the bottom of the frame, so this is the
-    # normal case rather than a corner one, and a run that does not say so
-    # will report a camera creeping downhill as perfectly stable.
+    # A THIN BAND CAPS HOW FAR IT CAN MEASURE ACROSS ITSELF, which is a
+    # smaller problem than the one this warning used to claim and is worth
+    # stating precisely, because the earlier claim would have had us discard
+    # true vertical agreement as untrustworthy.
+    #
+    # Shifting a band by dy across its short axis throws away dy/height of the
+    # overlap, so confidence falls as the displacement grows. Swept on
+    # synthetic texture, a 72-row band against a 300-row one, dx held at +5:
+    #
+    #     true dy      72-row             300-row
+    #        2 px   +1.99 conf 297     +2.00 conf 959
+    #       10 px   +9.98 conf 152    +10.00 conf 819
+    #       20 px  +19.95 conf  64    +20.00 conf 599
+    #       30 px  +29.90 conf  21    +30.00 conf 459
+    #       34 px  +33.86 conf  11    +34.00 conf 415
+    #       40 px  -33.79 conf   6    +40.00 conf 364
+    #
+    # The thin band reads every displacement it can see CORRECTLY, to a
+    # hundredth of a pixel, right up to about half its height -- the limit of
+    # the search, since `reach` is clamped there. Past that the answer is
+    # wrong, and confidence has already collapsed through MIN_CONFIDENCE (8)
+    # by the time it is: the wrong answer at 40 px carries confidence 6 and is
+    # rejected. So the failure announces itself rather than posing as zero.
+    #
+    # What a thin band therefore costs is RANGE, not truth: it cannot see a
+    # jump bigger than half its short axis, and near that ceiling it runs out
+    # of confidence and drops out of the record. A camera that steps 60 px
+    # down would leave a gap in route 2 rather than a row of stable-looking
+    # zeros. Read a thin axis as measuring small motion well and large motion
+    # not at all.
     box = mask_box(mask.astype(float))
     if box:
         top, bottom, left, right = box
         for name, extent in (("rows", bottom - top), ("columns", right - left)):
             if extent < THIN_BAND_PX:
-                print(f"  WARNING: the mask spans only {extent} {name}. Phase "
-                      "correlation loses\n  displacement along a thin axis "
-                      f"below about {THIN_BAND_PX} px and reports it as "
-                      "zero,\n  so route 2 is unreliable in that direction. "
-                      "The homography route is not\n  affected — treat any "
-                      "agreement between them along this axis with suspicion.")
+                print(f"  NOTE: the mask spans only {extent} {name}, so route "
+                      f"2 can measure\n  displacement across that axis only "
+                      f"out to about {extent // 2} px. Inside that range it "
+                      "is\n  accurate; beyond it confidence collapses and "
+                      "the frame drops out rather\n  than reading as stable, "
+                      "so a gap in route 2 along this axis may mean a\n  step "
+                      "too big to see, not a camera that held still. The "
+                      "homography route\n  has no such ceiling.")
     return share
 
 
@@ -903,7 +927,20 @@ def main():
     print(f"A. FRAME GEOMETRY INVENTORY  {slug}")
     print("=" * 74)
     print(f"{len(paths)} frames on disk, {dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}")
-    groups = geo.frame_sizes(paths, dates)
+    groups, unreadable = geo.frame_sizes(paths, dates)
+    if unreadable:
+        # A file that will not open is a dud download, not an epoch. Drop it
+        # here and renumber the size groups onto the shortened record, rather
+        # than re-scanning (which would print the inventory a second time).
+        drop = set(unreadable)
+        keep = [i for i in range(len(paths)) if i not in drop]
+        renumber = {old: new for new, old in enumerate(keep)}
+        paths = [paths[i] for i in keep]
+        dates = [dates[i] for i in keep]
+        groups = {size: [renumber[i] for i in indices]
+                  for size, indices in groups.items()}
+    if not groups:
+        sys.exit("no readable frames in the sample")
 
     gaps = sampled_gaps(dates, args.every)
     if gaps:

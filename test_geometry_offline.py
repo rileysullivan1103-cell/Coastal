@@ -1645,15 +1645,29 @@ def test_a_changed_frame_size_is_reported():
             path = os.path.join(tmp, f"f{index:02d}.jpg")
             Image.fromarray(np.zeros(shape, dtype=np.uint8)).save(path)
             paths.append(path)
-        groups = g.frame_sizes(paths, dates)
+        groups, unreadable = g.frame_sizes(paths, dates)
         check("both sizes are found", len(groups) == 2, sorted(groups))
         check("and each carries its frames",
               sorted(len(v) for v in groups.values()) == [3, 3],
               {k: len(v) for k, v in groups.items()})
+        check("nothing is filed as unreadable", unreadable == [], unreadable)
 
-        same = g.frame_sizes(paths[:3], dates[:3])
+        same, _ = g.frame_sizes(paths[:3], dates[:3])
         check("a single-resolution record reports one size", len(same) == 1,
               sorted(same))
+
+        # A FILE THAT WILL NOT OPEN IS NOT A SECOND FRAME SIZE. One corrupt
+        # download at Corolla printed under the "2 DIFFERENT FRAME SIZES"
+        # banner -- the loudest claim this module makes, made falsely, about a
+        # single dud JPEG.
+        dud = os.path.join(tmp, "dud.jpg")
+        with open(dud, "w") as fh:
+            fh.write("this is not a JPEG")
+        one, bad = g.frame_sizes(paths[:3] + [dud], dates[:4])
+        check("a corrupt file is not counted as a frame size", len(one) == 1,
+              sorted(one))
+        check("...it is reported separately, so it is not an epoch boundary",
+              bad == [3], bad)
     finally:
         shutil.rmtree(tmp)
 

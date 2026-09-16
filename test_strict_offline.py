@@ -132,33 +132,61 @@ def test_masking_finds_the_land_where_not_masking_finds_the_water():
           else f"dx={unmasked[1]:.2f} conf={unmasked[2]:.0f}")
 
 
-def test_a_thin_land_band_loses_its_short_axis_and_says_so():
-    """Not a bug to fix, a limit to declare.
+def test_a_thin_land_band_caps_its_range_rather_than_lying():
+    """The limit is range, not truth, and it announces itself.
 
-    A beach camera's land is a strip along the bottom of the frame. Phase
-    correlation over a strip recovers displacement along the strip and loses
-    it ACROSS the strip, returning ~0 with ordinary confidence -- which is
-    indistinguishable from a camera that did not move. Measured here so the
-    threshold in the code is a number from data rather than a guess.
+    This test used to assert that a 72-row band recovers ~0 across its short
+    axis "with ordinary confidence" -- a silent lie, the worst failure a
+    stability check can have. That reading came from cropping to the FEATHERED
+    mask's bounding box, which fed the correlator a ramp instead of an edge;
+    once masked_phase was fixed to crop to the binary box, it stopped
+    reproducing at any band height down to 16 rows.
+
+    What is left is real and much narrower: shifting a band across its short
+    axis destroys overlap, so a thin band can only see displacements out to
+    about half its height, and past that confidence has already fallen through
+    MIN_CONFIDENCE. The frame drops out of the record instead of posing as
+    stable. That distinction decides how a gap in route 2 gets read, so it is
+    measured here rather than assumed.
     """
-    big = texture((400, 480), 7)
-    outcomes = {}
-    for height in (72, 200):
-        first = big[100:100 + height, 100:400]
-        second = big[98:98 + height, 95:395]        # +2 down, +5 right
-        got = strict.geo.phase_shift(first, second, max_shift=40)
-        outcomes[height] = got
-    thin, thick = outcomes[72], outcomes[200]
-    check("a 200-row band recovers both axes",
-          abs(thick[0] - 2) < 0.2 and abs(thick[1] - 5) < 0.2,
-          f"dy={thick[0]:.2f} dx={thick[1]:.2f}")
-    check("a 72-row band keeps the long axis",
-          abs(thin[1] - 5) < 0.2, f"dx={thin[1]:.2f}")
-    check("...and LOSES the short one, at ordinary confidence",
-          abs(thin[0] - 2) > 1.0 and thin[2] > strict.MIN_CONFIDENCE,
-          f"dy={thin[0]:.2f} (truth 2.0), conf={thin[2]:.0f}")
-    check("the threshold in the code sits above the failing width",
-          72 < strict.THIN_BAND_PX <= 200, f"{strict.THIN_BAND_PX} px")
+    big = texture((600, 480), 7)
+    thin_h, thick_h = 72, 300
+
+    def band(height, top, dy):
+        first = big[top:top + height, 100:400]
+        second = big[top - dy:top - dy + height, 95:395]    # +dy down, +5 right
+        return strict.geo.phase_shift(first, second,
+                                      max_shift=min(60, height // 2))
+
+    small_thin = band(thin_h, 300, 2)
+    small_thick = band(thick_h, 200, 2)
+    check("a thin band reads a small shift as exactly as a deep one",
+          abs(small_thin[0] - 2) < 0.1 and abs(small_thin[1] - 5) < 0.1,
+          f"72 rows: dy={small_thin[0]:.2f} dx={small_thin[1]:.2f} "
+          f"(300 rows: dy={small_thick[0]:.2f})")
+
+    # Inside the ceiling -- half the band -- it stays right.
+    inside = band(thin_h, 300, 30)
+    check("...and stays right out to nearly half its height",
+          abs(inside[0] - 30) < 0.5 and inside[2] > strict.MIN_CONFIDENCE,
+          f"dy={inside[0]:.2f} (truth 30) conf={inside[2]:.0f}")
+
+    # Past it the answer IS wrong -- and that is the case that matters.
+    beyond = band(thin_h, 300, 40)
+    check("past the ceiling the answer is wrong",
+          abs(beyond[0] - 40) > 5, f"dy={beyond[0]:.2f} (truth 40)")
+    check("...but confidence has already collapsed, so it is REJECTED "
+          "rather than believed",
+          beyond[2] < strict.MIN_CONFIDENCE,
+          f"conf={beyond[2]:.0f} < {strict.MIN_CONFIDENCE} threshold")
+
+    deep = band(thick_h, 200, 40)
+    check("a deep band has no such ceiling at the same displacement",
+          abs(deep[0] - 40) < 0.5 and deep[2] > strict.MIN_CONFIDENCE,
+          f"dy={deep[0]:.2f} conf={deep[2]:.0f}")
+    check("the threshold in the code is at least twice the shift we care about",
+          strict.THIN_BAND_PX >= 2 * strict.AGREE_PX * 10,
+          f"{strict.THIN_BAND_PX} px, ceiling {strict.THIN_BAND_PX // 2} px")
 
 
 def test_a_thin_mask_is_warned_about(capsys=None):

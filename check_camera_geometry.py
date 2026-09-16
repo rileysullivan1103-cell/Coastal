@@ -332,16 +332,25 @@ def frame_sizes(paths, dates):
     with every other, and the disagreement is the answer rather than an
     obstacle to it. The header carries the size, so this costs no decoding.
 
-    Returns a dict of (width, height) -> list of indices.
+    A FILE THAT WILL NOT OPEN IS NOT A FRAME SIZE. Counting the unreadable
+    ones as a group of their own made a single corrupt download at Corolla
+    print as "2 DIFFERENT FRAME SIZES" under the epoch-boundary banner, which
+    is the loudest thing this module says and was saying something false. They
+    are counted and named on their own line instead, and returned separately
+    so the caller can drop them rather than treat them as an epoch.
+
+    Returns (groups, unreadable): a dict of (width, height) -> list of
+    indices, and the list of indices whose file did not open.
     """
     from PIL import Image
-    groups = {}
+    groups, unreadable = {}, []
     for index, path in enumerate(paths):
         try:
             with Image.open(path) as img:
                 size = img.size
         except Exception:
-            size = None
+            unreadable.append(index)
+            continue
         groups.setdefault(size, []).append(index)
     if len(groups) > 1:
         print("\n" + "!" * 74)
@@ -351,13 +360,19 @@ def frame_sizes(paths, dates):
         print("across it and no pixel metric pools across it.")
     for size, indices in sorted(groups.items(),
                                 key=lambda kv: -len(kv[1])):
-        name = f"{size[0]}x{size[1]}" if size else "unreadable"
+        name = f"{size[0]}x{size[1]}"
         span = (f"{dates[indices[0]]:%Y-%m-%d} to "
                 f"{dates[indices[-1]]:%Y-%m-%d}")
         print(f"  {name:>12}  {len(indices):>4} frames  {span}")
     if len(groups) > 1:
         print("!" * 74)
-    return groups
+    if unreadable:
+        span = (f"{dates[unreadable[0]]:%Y-%m-%d} to "
+                f"{dates[unreadable[-1]]:%Y-%m-%d}")
+        print(f"  {len(unreadable)} files did not open ({span}) -- corrupt or "
+              f"truncated downloads,")
+        print("  not a frame size and not an epoch boundary; they are dropped.")
+    return groups, unreadable
 
 
 def load_gray(path, downsample=1):
@@ -1995,7 +2010,7 @@ def main():
         print("  of the archive, including its noise floor, which the dropped "
               "frames no")
         print("  longer raise")
-    frame_sizes(paths, dates)
+    frame_sizes(paths, dates)[0]
 
     # Fog is the obstacle, not geometry. Walton's contact sheet showed every
     # frame that failed to register against its neighbour is a whiteout, and
