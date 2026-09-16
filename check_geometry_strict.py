@@ -1391,7 +1391,69 @@ def draw_grid_preview(path, out_path, step=0.05, label_every=2):
     return out_path
 
 
-def water_frequency(paths, shape, warm=25, downsample=4):
+def frame_water(array, sea_rows, warm=25, min_spread=20):
+    """(wet, usable): which pixels look like water, and whether to believe it.
+
+    THE FIRST VERSION OF THIS TEST WAS CONFOUNDED AND SAID SO LOUDLY WITHOUT
+    ANYONE NOTICING. Run against the deliberately over-cautious Sailfish mask
+    -- one that sits entirely on dry sand in the frame it was drawn from -- it
+    reported 76% of that mask "wet in a quarter of frames", and put the
+    intrusion at row 0.997: the dune fence at the bottom of the frame. Water
+    does not reach the dune line. Grey frames do.
+
+    A fixed R-B threshold asks "is this pixel warm?", but the answer depends
+    on the light as much as on the ground. At dusk, under heavy overcast, in
+    rain, in fog, or whenever the camera drops to a monochrome night mode, the
+    WHOLE frame goes grey -- dry sand, dune grass and ocean alike -- and every
+    pixel reads as water. Roughly a fifth of a four-year record is like that,
+    and a fifth is more than the "quarter of frames" bar, so those frames
+    alone can paint the entire mask wet.
+
+    Two changes fix it, and both are measurements rather than thresholds
+    picked to make the answer come out:
+
+    1. A FRAME WITH NO COLOUR IN IT CANNOT ANSWER THIS QUESTION. If the
+       spread of R-B across the whole frame (p90 minus p10) is under
+       `min_spread` levels, nothing in it is distinguishable from anything
+       else, and it is skipped rather than counted as all-water.
+
+    2. THE THRESHOLD IS ANCHORED TO WATER THE FRAME ITSELF SHOWS. `sea_rows`
+       is a band seaward of the mask, which is ocean by construction. Its
+       median R-B is what water looks like in THIS frame's light, and the
+       split is set above it rather than at a fixed level, so an overcast
+       afternoon is not read as a flooded beach.
+    """
+    warmth = array[..., 0].astype(np.int16) - array[..., 2].astype(np.int16)
+    low, high = np.percentile(warmth, [10, 90])
+    if high - low < min_spread:
+        return None, False
+    if sea_rows is not None:
+        top, bottom = sea_rows
+        band = warmth[top:bottom]
+        if band.size:
+            # Half way between what water looks like here and what the warmest
+            # tenth of the frame looks like -- which on a beach is dry sand.
+            level = float(np.median(band))
+            return warmth < (level + high) / 2.0, True
+    return warmth < warm, True
+
+
+def sea_band(mask, shape):
+    """Rows that are ocean by construction: seaward of the mask, below the sky.
+
+    The top quarter of a beach camera's frame is sky, and sky is as cool as
+    water, so including it would drag the reference down. Returns None when
+    the mask reaches so high that no such band exists.
+    """
+    rows = np.where(mask.any(axis=1))[0]
+    if not len(rows):
+        return None
+    top = int(0.30 * shape[0])
+    bottom = int(rows[0] * shape[0] / mask.shape[0])
+    return (top, bottom) if bottom - top >= 8 else None
+
+
+def water_frequency(paths, mask, warm=25, downsample=4, min_spread=20):
     """How often each pixel looked like water, across every frame given.
 
     A mask drawn on ONE frame is a hypothesis about every other frame. The
@@ -1401,28 +1463,31 @@ def water_frequency(paths, shape, warm=25, downsample=4):
 
     The discriminator is colour, not motion, because the sampling here is
     daily and consecutive samples are a day apart -- there is no short
-    timescale left in which water moves and sand does not. Dry sand is warm
-    (R - B strongly positive); water, foam and wet sand are not. `warm` is
-    that threshold in levels.
+    timescale left in which water moves and sand does not. See `frame_water`
+    for why it is not a fixed threshold.
 
-    It reads whitewater and wet sand as water, which is the conservative
-    direction, and it also reads a fog whiteout as water, which is not a mask
-    fault -- so the per-frame shares are reported rather than averaged into a
-    verdict. Returns (frequency, per_frame, size) where `frequency` is the
-    share of frames in which each pixel looked like water.
+    Returns (frequency, per_frame, size, skipped): the share of USABLE frames
+    in which each pixel looked like water, the per-frame maps, the downsampled
+    shape, and how many frames carried no colour to judge with.
     """
     from PIL import Image
-    total, count, per_frame = None, 0, []
+    total, count, per_frame, skipped, kept = None, 0, [], 0, []
+    band = None
     for path in paths:
         try:
             with Image.open(path) as img:
                 rgb = img.convert("RGB")
                 if downsample > 1:
                     rgb = rgb.reduce(downsample)
-                array = np.asarray(rgb).astype(np.int16)
+                array = np.asarray(rgb)
         except Exception:
             continue
-        wet = (array[..., 0] - array[..., 2]) < warm
+        if band is None:
+            band = sea_band(mask, array.shape)
+        wet, usable = frame_water(array, band, warm, min_spread)
+        if not usable:
+            skipped += 1
+            continue
         if total is None:
             total = np.zeros(wet.shape, dtype=np.float64)
         elif wet.shape != total.shape:
@@ -1430,9 +1495,10 @@ def water_frequency(paths, shape, warm=25, downsample=4):
         total += wet
         count += 1
         per_frame.append(wet)
+        kept.append(path)
     if not count:
-        return None, [], None
-    return total / count, per_frame, total.shape
+        return None, [], None, skipped
+    return total / count, per_frame, total.shape, skipped
 
 
 def measured_edge(frequency, often=0.25, margin=0.03, slug="<camera>"):
@@ -1511,10 +1577,10 @@ def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
     print("MASK AUDIT  -- the mask was drawn on one frame; this is every frame")
     print("=" * 74)
     from PIL import Image
-    frequency, frames, shape = water_frequency(paths, mask.shape, warm,
-                                               downsample)
+    frequency, frames, shape, skipped = water_frequency(paths, mask, warm,
+                                                        downsample)
     if frequency is None:
-        print("  no readable frames to audit against")
+        print("  no frame in the record carries enough colour to judge with")
         return None
     small = np.asarray(Image.fromarray(mask.astype(np.uint8) * 255)
                        .resize((shape[1], shape[0]))) > 127
@@ -1523,10 +1589,18 @@ def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
         print("  the mask is empty at audit resolution")
         return None
 
-    print(f"  {len(frames)} frames, {downsample}x downsampled, "
-          f"'water' = R-B below {warm} levels")
-    print(f"  (foam, wet sand and a fog whiteout all read as water here; "
-          f"that is\n   deliberate -- it is the direction that fails safe)")
+    print(f"  {len(frames)} frames judged, {downsample}x downsampled")
+    if skipped:
+        share = skipped / (skipped + len(frames))
+        print(f"  {skipped} frames ({share:.0%}) carried no colour to judge "
+              f"with and were SKIPPED:\n  night, fog, rain or heavy overcast "
+              f"turns sand and ocean the same grey. They are\n  not evidence "
+              f"of water in the mask; counting them as such is what the first\n"
+              f"  version of this audit did, and it painted a mask that sits "
+              f"on dry sand\n  76% wet.")
+    print("  'water' is set per frame from a band seaward of the mask, so the "
+          "light\n  does not decide the answer. Foam and wet sand still read "
+          "as water, which\n  is the direction that fails safe.")
 
     often_wet = (frequency >= often) & small
     share = often_wet.sum() / inside

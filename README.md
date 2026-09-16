@@ -1613,6 +1613,38 @@ drawn at the calmest moment (boundary at row 0.55) is caught with **15.6% of
 its area reading as water in a quarter of the frames**; the same mask pushed to
 row 0.70 takes none. Both pass a single-frame look.
 
+**The first version of this audit was confounded, and said so loudly without
+anyone noticing.** Run against the deliberately over-cautious Sailfish mask —
+one sitting entirely on dry sand in the frame it was drawn from — it reported
+**76.6% of that mask "wet in a quarter of frames"**, with the intrusion
+reaching row **0.997**: the dune fence at the bottom of the frame. Water does
+not reach the dune line.
+
+The cause is not fog alone. A four-year beach record is roughly a third dim —
+dusk, overcast, rain, a camera dropping to monochrome — and on those frames dry
+sand's `R - B` falls under any fixed threshold, so sand reads as water. Once
+the dim frames have eaten most of the "quarter of frames" budget, a pixel needs
+only a few percent of the remainder to clear the bar, and essentially every
+pixel does. Reproduced on a synthetic record with that lighting mix: a mask on
+dry sand in *every* frame scores **100% often-wet, 90th percentile 100%, reach
+0.998** — against Sailfish's 76.6% / 99.5% / 0.997.
+
+A clean fixture does **not** reproduce this, which is why the first attempt at
+a regression test passed while the real run was nonsense. Two fixes, both
+measurements rather than thresholds tuned to taste:
+
+1. **A frame with no colour in it cannot answer the question.** If `R - B`
+   spans under 20 levels across the whole frame, nothing in it is
+   distinguishable from anything else, and it is skipped and counted as
+   skipped — not counted as all-water.
+2. **The threshold is anchored to water the frame itself shows.** A band
+   seaward of the mask is ocean by construction; its median `R - B` is what
+   water looks like in *this* frame's light, and the split sits above it. An
+   overcast afternoon is no longer read as a flooded beach.
+
+On the same synthetic mix the fixed test scores the dry-sand mask **0.0%** and
+still catches a mask drawn on the waterline at **9.1%**.
+
 The audit also fits the edge rather than leaving it to judgement. For each
 column it takes the most landward row that looked like water in at least a
 quarter of the frames, fits a line through those, and prints a paste-ready

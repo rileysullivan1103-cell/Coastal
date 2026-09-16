@@ -202,6 +202,87 @@ def test_the_mask_audit_catches_a_tide_one_frame_could_not_show():
         shutil.rmtree(folder)
 
 
+def test_the_audit_is_not_fooled_by_the_light():
+    """The confound that made the first audit useless, kept as a regression.
+
+    Run against the deliberately over-cautious Sailfish mask -- one sitting
+    entirely on dry sand in the frame it was drawn from -- the first version
+    reported 76.6% of it "wet in a quarter of frames" and put the intrusion at
+    row 0.997, the dune fence. Water does not reach the dune line.
+
+    The cause is not fog alone. A four-year beach record is roughly a third
+    dim: dusk, overcast, rain, a camera dropping to monochrome. On those
+    frames dry sand's R-B falls under any fixed threshold, so sand reads as
+    water. Once the dim frames eat most of the "quarter of frames" budget, a
+    pixel needs only a few percent of the rest to clear the bar, and
+    essentially every pixel does.
+
+    The fixture below is that population, not a clean one: a clean fixture
+    does NOT reproduce the failure, which is why the first attempt at this
+    test passed while the real run was nonsense.
+    """
+    height, width = 400, 600
+
+    def scene(warmth, bright):
+        frame = np.zeros((height, width, 3), dtype=float)
+        for x in range(width):
+            edge = int((0.60 - 0.20 * x / (width - 1)) * height)
+            frame[:edge, x] = (70, 95, 110)                       # ocean
+            frame[edge:, x] = (140 + 65 * warmth, 140 + 40 * warmth, 140)
+        return np.clip(frame * bright, 0, 255).astype(np.uint8)
+
+    rng = np.random.default_rng(3)
+    frames = []
+    for _ in range(400):
+        roll = rng.random()
+        frames.append(scene(0.02, 0.5) if roll < 0.13 else      # no colour
+                      scene(0.35, 0.7) if roll < 0.35 else      # weak colour
+                      scene(1.00, 1.0))                         # clear
+
+    def build(top):
+        mask = np.zeros((height, width), dtype=bool)
+        for x in range(width):
+            mask[int((top - 0.20 * x / (width - 1)) * height):, x] = True
+        return mask
+
+    def old_way(mask):
+        """Fixed threshold, every frame counted -- the version that failed."""
+        total = np.zeros((height, width))
+        for frame in frames:
+            total += (frame[..., 0].astype(int)
+                      - frame[..., 2].astype(int)) < 25
+        frequency = total / len(frames)
+        return ((frequency >= 0.25) & mask).sum() / mask.sum()
+
+    def new_way(mask):
+        band = strict.sea_band(mask, (height, width))
+        total, kept = np.zeros((height, width)), 0
+        for frame in frames:
+            wet, usable = strict.frame_water(frame, band)
+            if usable:
+                total += wet
+                kept += 1
+        return ((total / kept >= 0.25) & mask).sum() / mask.sum(), kept
+
+    # 0.70 is a tenth of the frame landward of the shoreline: dry sand in
+    # every frame of this record, by construction.
+    safe = build(0.70)
+    check("the OLD test called a mask that never touches water almost all wet",
+          old_way(safe) > 0.5, f"{old_way(safe):.1%} of a dry-sand mask")
+    share, kept = new_way(safe)
+    check("...the fixed test does not",
+          share < 0.01, f"{share:.1%} of the same mask, {kept} frames judged")
+
+    # 0.55 sits ON the shoreline, so it really does take water.
+    wet_mask = build(0.55)
+    share_wet, _ = new_way(wet_mask)
+    check("...and it still catches a mask that DOES take water",
+          share_wet > 0.05, f"{share_wet:.1%} of a waterline mask")
+    check("...telling the two apart, which is the whole job",
+          share_wet > share * 5 + 0.04,
+          f"{share:.1%} safe vs {share_wet:.1%} at the waterline")
+
+
 def test_the_audit_measures_the_edge_instead_of_guessing_it():
     """The seaward edge was the one number in the file that was pure judgement.
 
