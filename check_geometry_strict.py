@@ -125,11 +125,39 @@ MASKS = {
                 "a 0.03 margin; the watermark box is from "
                 "currituck_sailfish-2024-06-02-165953Z.jpg",
     },
-    # "beachfront-from-hampton-inn-corolla-nc": {
-    #     "keep": [[(0.0, 0.62), (1.0, 0.55), (1.0, 1.0), (0.0, 1.0)]],
-    #     "drop": [],
-    #     "note": "drawn by hand from <frame>; dune line and buildings only",
-    # },
+    "beachfront-from-hampton-inn-corolla-nc": {
+        # THE SHORELINE IS FITTED, NOT EYEBALLED, as at Sailfish: the sand/
+        # water boundary across 1,309 of 1,469 usable columns of the grid
+        # preview gives y = 0.513 - 0.019x, scatter 0.010 of the frame height.
+        # This camera looks straight out to sea, so its shoreline is almost
+        # level -- slope -0.019 against Sailfish's -0.195. Reading that off by
+        # eye as "level" would have been right here and badly wrong there,
+        # which is the reason to fit it either way.
+        #
+        # THE 0.06 MARGIN IS PROVISIONAL AND IS EXPECTED TO BE WRONG. At
+        # Sailfish a 0.04 margin guessed from one frame put the edge INSIDE
+        # habitual water at the right-hand end, and the record's real water
+        # line sat 0.05 to 0.08 landward of that single frame's shoreline.
+        # One frame cannot show a tide. --mask-audit over the 1,618 frames
+        # measures it; adopt what it measures and record the fit here.
+        "keep": [[(0.0, 0.573), (1.0, 0.554), (1.0, 1.0), (0.0, 1.0)]],
+        # THE "Hampton Inn" WATERMARK IS BURNED INTO THE SENSOR, NOT THE
+        # SCENE -- same operator, same hazard as Sailfish. Measured at
+        # x 0.030-0.162, y 0.919-0.959. It is bright, sharp and perfectly
+        # stationary, so a feature detector weights it heavily and it votes
+        # for "no motion" in exactly the frames where the answer matters.
+        "drop": [[(0.020, 0.908), (0.175, 0.908),
+                  (0.175, 0.970), (0.020, 0.970)]],
+        "note": "shoreline FITTED from the fractional grid preview of "
+                "currituck_hampton_inn-2024-06-16-170015Z.jpg "
+                "(y = 0.513 - 0.019x, scatter 0.010, 1309 of 1469 columns) "
+                "plus a PROVISIONAL 0.06 margin, NOT YET MEASURED by "
+                "--mask-audit; the watermark box is measured from the same "
+                "frame at x 0.030-0.162, y 0.919-0.959. The bottom of this "
+                "frame is dune grass, which moves in wind: it is land, so it "
+                "stays in the mask, and the survey's agreement test is what "
+                "decides whether it tracks.",
+    },
 }
 
 

@@ -1744,6 +1744,18 @@ The `drop` box is sized to the text and no larger. The first draft blacked out
 the whole bottom-left corner, which was the same mistake as the 0.10 margin in
 miniature — more land given up for nothing.
 
+**Hampton is the second camera on this beach, and it is masked separately.**
+Its shoreline was fitted the same way — `y = 0.513 - 0.019x`, scatter 0.010 of
+the frame height over 1,309 of 1,469 usable columns — and it is almost level,
+against Sailfish's `-0.195`. This camera looks straight out to sea; Sailfish
+looks along the beach. Reading "level" off by eye would have been right at one
+and badly wrong at the other, which is the argument for fitting it at both.
+The `Hampton Inn` caption is the same burned-in sensor watermark as Sailfish's,
+measured at x 0.030–0.162, y 0.919–0.959, and dropped. **Its 0.06 margin is
+provisional and is expected to be wrong** — Sailfish's guessed margins missed
+in both directions before the audit measured one — so the mask is declared to
+be audited, not to be trusted.
+
 ### The survey is the decisive test, and it is run early
 
 Tile the land into non-overlapping cells and register each independently. A
