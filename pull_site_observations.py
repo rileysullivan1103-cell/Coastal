@@ -83,17 +83,29 @@ def slugify(text):
 # walks up to 25 neighbouring cells looking for water, so one call from the
 # caller's point of view is 25 requests from Open-Meteo's, and a throttle
 # wrapped around the walk paces nothing at all.
+#
+# The intervals are measured, not guessed. The Northeast run bought 48 ERA5
+# cells before the HOURLY ceiling stopped it, which puts one cell at about
+# 104 units against 5,000 an hour -- roughly 48 cells an hour, one every 75
+# seconds. A ten-second interval allows 360 an hour, so pacing for the minute
+# limit walked straight into the hour limit. Marine costs less per request
+# (two variables, not four) but fetch_marine spends several requests per cell
+# walking seaward, so its interval is set by requests rather than cells.
 OPEN_METEO_MIN_INTERVAL = {
-    "archive-api.open-meteo.com": 10.0,
-    "marine-api.open-meteo.com": 5.0,
+    "archive-api.open-meteo.com": 75.0,
+    "marine-api.open-meteo.com": 40.0,
 }
 _LAST_OPEN_METEO_CALL = {}
-# A minutely 429 names its own remedy -- "try again in one minute" -- so it is
-# worth waiting out rather than reporting as a refusal. The hourly and daily
-# limits are not: those are measured in hours, and the circuit breaker giving
-# up on the host is the honest outcome.
+# A minutely or hourly 429 names its own remedy and is worth waiting out: an
+# hour of sleeping in an overnight run is cheaper than losing the host and
+# every cell after it. The DAILY limit is not -- "try again tomorrow" cannot
+# be waited out inside a run, so it stays a refusal and the breaker gives up,
+# which is the honest outcome and leaves the cache holding everything bought
+# so far.
 MINUTELY_WAIT_SECONDS = 62
 MINUTELY_RETRIES = 2
+HOURLY_WAIT_SECONDS = 3660
+HOURLY_RETRIES = 3
 
 
 def _pace(url):
@@ -109,8 +121,15 @@ def _pace(url):
     _LAST_OPEN_METEO_CALL[host] = time.time()
 
 
-def _is_minutely_limit(status, detail):
-    return status == 429 and "minut" in str(detail).lower()
+def _limit_kind(status, detail):
+    """Which Open-Meteo ceiling a 429 is about, or None if it is not one."""
+    if status != 429:
+        return None
+    text = str(detail).lower()
+    for kind in ("minut", "hour", "dai"):
+        if kind in text:
+            return {"minut": "minutely", "hour": "hourly", "dai": "daily"}[kind]
+    return None
 
 
 def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
@@ -125,7 +144,7 @@ def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
               "wind_speed_unit": "ms"}
     if models:
         params["models"] = models
-    for attempt in range(MINUTELY_RETRIES + 1):
+    for attempt in range(max(MINUTELY_RETRIES, HOURLY_RETRIES) + 1):
         _pace(url)
         try:
             resp = requests.get(url, params=params, timeout=TIMEOUT)
@@ -138,12 +157,15 @@ def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
             detail = str(resp.json().get("reason", ""))[:160]
         except ValueError:
             detail = resp.text[:160]
-        if (_is_minutely_limit(resp.status_code, detail)
-                and attempt < MINUTELY_RETRIES):
-            print(f"      minutely limit reached; waiting "
-                  f"{MINUTELY_WAIT_SECONDS}s and asking again "
-                  f"(attempt {attempt + 1}/{MINUTELY_RETRIES})")
-            time.sleep(MINUTELY_WAIT_SECONDS)
+        kind = _limit_kind(resp.status_code, detail)
+        waits = {"minutely": (MINUTELY_WAIT_SECONDS, MINUTELY_RETRIES),
+                 "hourly": (HOURLY_WAIT_SECONDS, HOURLY_RETRIES)}.get(kind)
+        if waits and attempt < waits[1]:
+            seconds, allowed = waits
+            print(f"      {kind} limit reached on "
+                  f"{urlsplit(url).netloc}; waiting {seconds // 60} min and "
+                  f"asking again (attempt {attempt + 1}/{allowed})")
+            time.sleep(seconds)
             continue
         return None, f"HTTP {resp.status_code}: {detail}"
 
