@@ -57,6 +57,9 @@ def fmt_rate(hits, n, low, high):
     return f"{hits / n:6.1%}  [{low:5.1%}, {high:5.1%}]"
 
 
+VERDICTS = {"yes", "no", "doubt", "unusable", ""}
+
+
 def load_labels(path):
     frame = pd.read_csv(path)
     for column in ("rip_present", "stratum", "confidence", "booster"):
@@ -65,10 +68,19 @@ def load_labels(path):
                      "build_label_sample.py?")
     frame["rip_present"] = frame["rip_present"].fillna("").astype(str).str.strip().str.lower()
     frame["booster"] = frame["booster"].fillna("").astype(str)
-    bad = set(frame["rip_present"]) - {"yes", "no", "doubt", ""}
+    bad = set(frame["rip_present"]) - VERDICTS
     if bad:
         sys.exit(f"unexpected verdicts in {path}: {sorted(bad)}")
-    return frame
+
+    # UNUSABLE IS NOT A FOURTH SHADE OF DOUBT. Doubt means the image is
+    # readable and the answer is genuinely unclear, so it belongs inside the
+    # bracket: counted as no in one estimate and as yes in the other. Unusable
+    # means the frame cannot be judged at all -- lens water, total dark, a test
+    # card -- and there is no answer in it to bracket. Those frames leave the
+    # denominator entirely, the way a broken instrument reading does.
+    unusable = int((frame["rip_present"] == "unusable").sum())
+    frame = frame[frame["rip_present"] != "unusable"].copy()
+    return frame, unusable
 
 
 def precision_rows(frame, min_n):
@@ -142,15 +154,19 @@ def main():
 
     if not os.path.exists(args.labels):
         sys.exit(f"{args.labels} does not exist — run build_label_sample.py first.")
-    frame = load_labels(args.labels)
+    frame, unusable = load_labels(args.labels)
 
     total = len(frame)
     done = int((frame["rip_present"] != "").sum())
     print(f"\n{'=' * 74}")
     print("DETECTOR PRECISION BY STRATUM")
     print("=" * 74)
-    print(f"  {done} of {total} rows labelled"
+    print(f"  {done} of {total} judgeable rows labelled"
           + ("" if done == total else "  — the rest are ignored, not counted as 'no'"))
+    if unusable:
+        print(f"  {unusable} row(s) marked unusable and removed from every "
+              "denominator:\n    a frame that cannot be judged carries no "
+              "answer to bracket, unlike doubt")
     if done == 0:
         print("\n  Nothing labelled yet. Run: python label_server.py")
         return 0

@@ -635,6 +635,79 @@ def check_the_repair_backfills_the_class():
             bls.LABEL_CSV = original
 
 
+def check_unusable_leaves_the_denominator_entirely():
+    """Unusable is not a fourth shade of doubt, and must not be counted as one.
+
+    Doubt means the image is readable and the answer is genuinely unclear, so
+    it belongs inside the bracket -- no in one estimate, yes in the other.
+    Unusable means the frame cannot be judged at all, and there is no answer in
+    it to bracket. Counting one as the other would move precision in whichever
+    direction the unreadable frames happened to fall.
+
+    Built so the answer is known by hand: 6 yes and 4 no among the judgeable
+    rows is 60%, and adding 10 unusable rows must leave it at 60% rather than
+    dragging it to 6/20 or lifting it to 16/20.
+    """
+    import io
+    import contextlib
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "labels.csv")
+        rows = []
+        for i in range(10):
+            rows.append({"frame_id": f"J{i}", "stratum": "high / H1 low",
+                         "confidence": "high", "booster": "",
+                         "rip_present": "yes" if i < 6 else "no"})
+        for i in range(10):
+            rows.append({"frame_id": f"U{i}", "stratum": "high / H1 low",
+                         "confidence": "high", "booster": "",
+                         "rip_present": "unusable"})
+        pd.DataFrame(rows).to_csv(path, index=False)
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            frame, unusable = ap.load_labels(path)
+        check("unusable is accepted rather than rejected as a bad verdict",
+              unusable == 10, str(unusable))
+        check("and the rows are gone from the frame", len(frame) == 10,
+              str(len(frame)))
+        check("no unusable verdict survives into the analysis",
+              "unusable" not in set(frame["rip_present"]))
+
+        result = ap.precision_rows(frame, min_n=5).iloc[0]
+        check("precision is 6 of 10, not 6 of 20",
+              abs(result["precision"] - 0.6) < 1e-9, f"{result['precision']:.3f}")
+        check("the denominator is the judgeable rows",
+              result["n_strict"] == 10, str(result["n_strict"]))
+        check("and unusable was not counted as doubt",
+              result["doubt"] == 0, str(result["doubt"]))
+        check("so the doubt-as-yes estimate is also 60%",
+              abs(result["precision_doubt_as_yes"] - 0.6) < 1e-9,
+              f"{result['precision_doubt_as_yes']:.3f}")
+
+        # A genuine doubt still brackets, which is the contrast.
+        rows.append({"frame_id": "D1", "stratum": "high / H1 low",
+                     "confidence": "high", "booster": "",
+                     "rip_present": "doubt"})
+        pd.DataFrame(rows).to_csv(path, index=False)
+        frame, _ = ap.load_labels(path)
+        result = ap.precision_rows(frame, min_n=5).iloc[0]
+        check("a doubt is bracketed rather than dropped",
+              abs(result["precision"] - 0.6) < 1e-9
+              and abs(result["precision_doubt_as_yes"] - 7 / 11) < 1e-9,
+              f"{result['precision']:.3f} .. {result['precision_doubt_as_yes']:.3f}")
+
+        bad = os.path.join(folder, "bad.csv")
+        pd.DataFrame([{"frame_id": "X", "stratum": "s", "confidence": "high",
+                       "booster": "", "rip_present": "maybe"}]).to_csv(
+                           bad, index=False)
+        try:
+            ap.load_labels(bad)
+            check("a genuinely unknown verdict is still refused", False)
+        except SystemExit:
+            check("a genuinely unknown verdict is still refused", True)
+
+
 def main():
     print("labelling pipeline offline checks\n")
     check_weighting_beats_the_sample()
@@ -654,6 +727,7 @@ def main():
     check_the_class_filter_separates_two_models()
     check_a_rebuild_carries_labels_forward()
     check_the_repair_backfills_the_class()
+    check_unusable_leaves_the_denominator_entirely()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
 
