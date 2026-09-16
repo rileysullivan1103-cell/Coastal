@@ -230,10 +230,54 @@ def test_gate_cost():
           set(cost) == set(s.REQUIREMENTS))
 
 
+def test_a_torn_asset_cache_is_refetched_not_fatal():
+    """Three pipelines share data/webcoos_assets_all.json.
+
+    The water-quality pull, the rip pull and the geometry checks all resolve
+    their camera through it, and all three are things you would start at the
+    same time. A half-written cache used to kill every later run, including
+    the one that would have replaced it.
+    """
+    print("a torn asset cache is refetched, not fatal")
+    import json as _json
+    import shutil
+    import scan_cameras as scan
+    original = scan.ASSETS_ALL
+    folder = tempfile.mkdtemp()
+    scan.ASSETS_ALL = os.path.join(folder, "assets.json")
+    try:
+        with open(scan.ASSETS_ALL, "w") as fh:
+            fh.write('[{"data": {"common": {"label": "hal')   # truncated
+        os.environ.pop("WEBCOOS_TOKEN", None)
+        raised = None
+        try:
+            scan.fetch_assets()
+        except SystemExit as exc:
+            raised = exc          # no token and no fallback: the right failure
+        except Exception as exc:  # a JSON error here is the bug
+            raised = exc
+        ok = isinstance(raised, SystemExit)
+        check("a torn asset cache is refetched, not raised through", ok,
+              f"got {type(raised).__name__}")
+
+        # And a good cache still round-trips through the atomic write.
+        payload = [{"data": {"common": {"label": "Test Camera"}}}]
+        temporary = f"{scan.ASSETS_ALL}.{os.getpid()}.tmp"
+        with open(temporary, "w") as fh:
+            _json.dump(payload, fh)
+        os.replace(temporary, scan.ASSETS_ALL)
+        check("an intact cache is read back unchanged",
+              scan.fetch_assets() == payload)
+    finally:
+        scan.ASSETS_ALL = original
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def main():
     for test in (test_coordinate_order, test_nearest, test_load_cameras,
                  test_as_float, test_missing_sources,
-                 test_qualify_by_weather_source, test_gate_cost):
+                 test_qualify_by_weather_source, test_gate_cost,
+                 test_a_torn_asset_cache_is_refetched_not_fatal):
         test()
         print()
     if FAILURES:

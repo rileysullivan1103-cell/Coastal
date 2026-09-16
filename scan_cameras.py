@@ -162,8 +162,16 @@ def extent_around(lat, lon, km):
 def fetch_assets(refresh=False):
     """Every WebCOOS asset, following pagination. Cached to ASSETS_ALL."""
     if not refresh and os.path.exists(ASSETS_ALL):
-        with open(ASSETS_ALL) as fh:
-            return json.load(fh)
+        try:
+            with open(ASSETS_ALL) as fh:
+                return json.load(fh)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as problem:
+            # A half-written cache must not be terminal. Before the atomic
+            # write below it was possible to leave one behind, and then EVERY
+            # later run died on it -- including the run that would have
+            # replaced it.
+            print(f"  {ASSETS_ALL} is unreadable ({type(problem).__name__}); "
+                  "fetching a fresh copy")
 
     token = os.environ.get("WEBCOOS_TOKEN")
     if not token:
@@ -194,9 +202,20 @@ def fetch_assets(refresh=False):
         print(f"  warning: endpoint reports {expected} assets but {len(assets)} "
               "were collected — pagination may have stopped early")
 
+    # WRITTEN ATOMICALLY, because every pipeline in this repo resolves its
+    # camera through this one file. The water-quality pull, the rip pull and
+    # the geometry checks are all things you would reasonably start at the
+    # same time, and on a cold cache all three fetch and all three write here.
+    # A plain open(w) truncates first, so a concurrent reader could see an
+    # empty or half-written catalogue -- surfacing not as a file error but as
+    # "No camera matching 'Sailfish'", which reads as a missing camera.
+    # os.replace is atomic on POSIX: a reader sees the old complete file or
+    # the new complete file, never a partial one.
     os.makedirs(os.path.dirname(ASSETS_ALL), exist_ok=True)
-    with open(ASSETS_ALL, "w") as fh:
+    temporary = f"{ASSETS_ALL}.{os.getpid()}.tmp"
+    with open(temporary, "w") as fh:
         json.dump(assets, fh)
+    os.replace(temporary, ASSETS_ALL)
     print(f"  saved {ASSETS_ALL}")
     return assets
 
