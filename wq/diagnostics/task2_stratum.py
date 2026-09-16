@@ -19,11 +19,13 @@ every analyte/predictor cell, which is the whole reason its p-values are
 believable; reimplementing it here would be the easiest way to lose that.
 """
 
+import argparse
+
 import numpy as np
 import pandas as pd
 
 from . import common
-from .. import config, report
+from .. import config, manifest, report
 
 STRATUM = "outfall_type"
 SMALL = 20
@@ -34,73 +36,74 @@ SMALL = 20
 LARGE = 100
 
 
-def build_merged(coefficients=None, sites=None, analyte=None):
+def build_merged(coefficients=None, sites=None, analyte=None,
+                 stratum=STRATUM):
     """The frame wq.report.report_by_stratum hands to the significance test:
     headline coefficients with the site's stratum label attached."""
     coefficients = (common.load_coefficients() if coefficients is None
                     else coefficients)
     sites = common.load_sites() if sites is None else sites
     head = common.headline(coefficients)
-    merged = head.merge(sites[["station_id", STRATUM]], on="station_id",
+    merged = head.merge(sites[["station_id", stratum]], on="station_id",
                         how="left")
     if analyte is not None:
         merged = merged[merged["analyte"] == analyte]
     return merged
 
 
-def level_sizes(merged):
+def level_sizes(merged, stratum=STRATUM):
     """Stations per level, counted the way the shuffle counts them: one vote
     per station, not one per coefficient row."""
-    frame = merged[["station_id", STRATUM]].dropna().drop_duplicates()
-    return frame[STRATUM].value_counts()
+    frame = merged[["station_id", stratum]].dropna().drop_duplicates()
+    return frame[stratum].value_counts()
 
 
-def run_variant(merged, label, column="rho_ctrl"):
+def run_variant(merged, label, column="rho_ctrl", stratum=STRATUM):
     """One row of the same summary D2 prints, for one relabelling."""
-    usable = merged.dropna(subset=[STRATUM])
-    if usable[STRATUM].nunique() < 2:
-        return {"variant": label, "levels": int(usable[STRATUM].nunique()),
+    usable = merged.dropna(subset=[stratum])
+    if usable[stratum].nunique() < 2:
+        return {"variant": label, "levels": int(usable[stratum].nunique()),
                 "cells": 0, "sites": int(usable["station_id"].nunique()),
                 "smallest_level": np.nan, "iqr_ratio": np.nan,
                 "chance_ratio": np.nan, "p": np.nan,
                 "note": "fewer than two levels left; nothing to test"}
-    table = pd.DataFrame({"stratum": [STRATUM]})
+    table = pd.DataFrame({"stratum": [stratum]})
     out = report._stratum_significance(merged, table, column).iloc[0].to_dict()
     out["variant"] = label
-    out["levels"] = int(usable[STRATUM].nunique())
+    out["levels"] = int(usable[stratum].nunique())
     out["note"] = ""
     return out
 
 
-def variants(merged):
+def variants(merged, stratum=STRATUM):
     """Baseline, small levels excluded, small levels merged, and each level
     dropped in turn."""
-    sizes = level_sizes(merged)
+    sizes = level_sizes(merged, stratum)
     small = [level for level, count in sizes.items() if count < SMALL]
     yield "baseline (as D2 ran it)", merged
 
     excluded = merged.copy()
-    excluded.loc[excluded[STRATUM].isin(small), STRATUM] = np.nan
+    excluded.loc[excluded[stratum].isin(small), stratum] = np.nan
     yield f"(a) levels under {SMALL} stations EXCLUDED", excluded
 
     lumped = merged.copy()
-    lumped.loc[lumped[STRATUM].isin(small), STRATUM] = "other"
+    lumped.loc[lumped[stratum].isin(small), stratum] = "other"
     yield f"(a) levels under {SMALL} stations MERGED into 'other'", lumped
 
     big = [level for level, count in sizes.items() if count < LARGE]
     trimmed = merged.copy()
-    trimmed.loc[trimmed[STRATUM].isin(big), STRATUM] = np.nan
+    trimmed.loc[trimmed[stratum].isin(big), stratum] = np.nan
     kept = [level for level, count in sizes.items() if count >= LARGE]
     yield (f"(a+) only levels with >= {LARGE} stations "
            f"({', '.join(kept) if kept else 'none'})"), trimmed
 
     for level in sizes.index:
         dropped = merged.copy()
-        dropped.loc[dropped[STRATUM] == level, STRATUM] = np.nan
+        dropped.loc[dropped[stratum] == level, stratum] = np.nan
         yield f"(b) leave-one-out: without {level}", dropped
 
 
-def small_level_stations(merged, sites):
+def small_level_stations(merged, sites, stratum=STRATUM):
     """Task 2c. Who is in the small levels, and what do they share?
 
     The shuffle controls for the SIZE of a small level and for nothing else.
@@ -109,9 +112,9 @@ def small_level_stations(merged, sites):
     the null cannot redraw it away -- which is the failure mode
     _stratum_significance's own docstring describes.
     """
-    sizes = level_sizes(merged)
+    sizes = level_sizes(merged, stratum)
     small = [level for level, count in sizes.items() if count < SMALL * 5]
-    roster = (merged[merged[STRATUM].isin(small)][["station_id", STRATUM]]
+    roster = (merged[merged[stratum].isin(small)][["station_id", stratum]]
               .drop_duplicates())
     columns = [c for c in ("station_id", "station_name", "organization",
                            "state", "region", "lat", "lon", "outfall_permit",
@@ -122,14 +125,14 @@ def small_level_stations(merged, sites):
     fitted = (merged.groupby("station_id")["analyte"].nunique()
               .rename("analytes_fitted").reset_index())
     detail = detail.merge(fitted, on="station_id", how="left")
-    return detail.sort_values([STRATUM, "organization", "station_id"])
+    return detail.sort_values([stratum, "organization", "station_id"])
 
 
-def shared_attributes(detail):
+def shared_attributes(detail, stratum=STRATUM):
     """For each small level: how concentrated is it in one org, state, county
     prefix or tide gauge? 1.00 means every station in the level shares it."""
     rows = []
-    for level, group in detail.groupby(STRATUM):
+    for level, group in detail.groupby(stratum):
         record = {"level": level, "stations": len(group)}
         for column in ("organization", "state", "region", "tide_station",
                        "outfall_permit"):
@@ -150,30 +153,51 @@ def shared_attributes(detail):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stratum", default=STRATUM,
+                        help="which pre-registered grouping to stress-test "
+                             f"(default {STRATUM})")
+    args = parser.parse_args()
+    stratum = args.stratum
+
     coefficients = common.load_coefficients()
     sites = common.load_sites()
+    if stratum not in sites.columns:
+        raise SystemExit(
+            f"{stratum} is not a column of stations_stratified.csv. "
+            f"Groupings available: "
+            f"{', '.join(c for c in sites.columns if c in config.STRATIFY_ON)}")
+    registered = manifest.active_strata(manifest.require_manifest())
+    if stratum not in registered:
+        print(f"  NOTE: {stratum} is not in the manifest's active strata "
+              f"({', '.join(registered)}).\n  It was either never registered "
+              "as a grouping or dropped by the coverage rule, so D2 did not "
+              "break\n  the distribution out by it and neither did the "
+              "pre-registered pass.")
 
     print("!" * 78)
-    print("TASK 2  EXPLORATORY / POST HOC. NOT PRE-REGISTERED.")
+    print(f"TASK 2  EXPLORATORY / POST HOC on {stratum.upper()}. "
+          "NOT PRE-REGISTERED.")
     print("  Everything below re-asks a question D2 already answered under the")
     print("  registered specification. A variant that narrows the spread is a")
     print("  hypothesis for Phase 2, not a result of this pass.")
     print("!" * 78)
 
-    merged = build_merged(coefficients, sites)
-    sizes = level_sizes(merged)
-    print(f"\nstations per {STRATUM} level (fitted stations only):")
+    merged = build_merged(coefficients, sites, stratum=stratum)
+    sizes = level_sizes(merged, stratum)
+    print(f"\nstations per {stratum} level (fitted stations only):")
     print(sizes.to_string())
     print(f"\n  levels under {SMALL} stations: "
           f"{[l for l, c in sizes.items() if c < SMALL]}")
     if len([l for l, c in sizes.items() if c < SMALL]) < 2:
-        print("  only one level is that small, so MERGING it into 'other' is "
-              "a rename:\n  the merged variant must come out identical to the "
-              "baseline, and does.")
+        print("  fewer than two levels are that small, so MERGING them into "
+              "'other' is a\n  rename: the merged variant must come out "
+              "identical to the baseline.")
     print(f"  {config.STRATUM_PERMUTATIONS} permutations per variant, "
           "seeded as the pipeline seeds them")
 
-    results = [run_variant(frame, label) for label, frame in variants(merged)]
+    results = [run_variant(frame, label, stratum=stratum)
+               for label, frame in variants(merged, stratum)]
     pooled = pd.DataFrame(results)
     pooled.insert(0, "analyte", "ALL (pooled)")
     order = ["analyte", "variant", "levels", "cells", "sites",
@@ -183,13 +207,15 @@ def main():
 
     per_analyte = []
     for analyte in sorted(merged["analyte"].unique()):
-        part = build_merged(coefficients, sites, analyte=analyte)
+        part = build_merged(coefficients, sites, analyte=analyte,
+                            stratum=stratum)
         if part["station_id"].nunique() < 10:
             print(f"\n  {analyte}: only "
                   f"{part['station_id'].nunique()} fitted station(s) — "
                   "not tested")
             continue
-        rows = [run_variant(frame, label) for label, frame in variants(part)]
+        rows = [run_variant(frame, label, stratum=stratum)
+                for label, frame in variants(part, stratum)]
         frame = pd.DataFrame(rows)
         frame.insert(0, "analyte", analyte)
         per_analyte.append(frame)
@@ -200,22 +226,27 @@ def main():
     else:
         per_analyte = pd.DataFrame(columns=order)
 
-    detail = small_level_stations(merged, sites)
+    detail = small_level_stations(merged, sites, stratum)
     print(f"\n(c) STATIONS IN THE SMALL LEVELS "
           f"(every level under {SMALL * 5} stations):")
-    print(detail.to_string(index=False))
+    print(detail.to_string(index=False) if not detail.empty
+          else "    (no level is that small)")
 
-    shared = shared_attributes(detail)
-    print("\n(c) what those stations share — the shuffle controls for level")
-    print("    SIZE and for nothing in this table:")
-    print(shared.to_string(index=False))
+    shared = shared_attributes(detail, stratum) if not detail.empty \
+        else pd.DataFrame()
+    if not shared.empty:
+        print("\n(c) what those stations share — the shuffle controls for "
+              "level\n    SIZE and for nothing in this table:")
+        print(shared.to_string(index=False))
 
     combined = pd.concat([pooled[order], per_analyte[order]],
                          ignore_index=True)
+    combined.insert(0, "stratum", stratum)
     print("\nwrote:")
-    common.write(combined, "task2_outfall_variants.csv")
-    common.write(detail, "task2_small_level_stations.csv")
-    common.write(shared, "task2_small_level_shared.csv")
+    common.write(combined, f"task2_{stratum}_variants.csv")
+    if not detail.empty:
+        common.write(detail, f"task2_{stratum}_small_level_stations.csv")
+        common.write(shared, f"task2_{stratum}_small_level_shared.csv")
 
 
 if __name__ == "__main__":

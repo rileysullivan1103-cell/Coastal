@@ -17,14 +17,15 @@ cd ~/Coastal-wq
 ```sh
 python -m wq.diagnostics.task0_reconcile
 python -m wq.diagnostics.task1_rain
-python -m wq.diagnostics.task2_outfall
+python -m wq.diagnostics.task2_stratum                     # default: outfall_type
+python -m wq.diagnostics.task2_stratum --stratum region
 python -m wq.diagnostics.task3_null                       # 200 permutations, seed 0
 python -m wq.diagnostics.task3_null --permutations 500 --seed 7
 python -m wq.diagnostics.task3_null --permutations 20 --limit 300   # timing probe
 ```
 
 Runtimes on the machine this was written on: task0 ~5s, task1 ~10s,
-task2 ~40s (400 permutations per variant, 31 variants), task3 ~10s at 200
+task2 ~40s per stratum (400 permutations per variant), task3 ~10s at 200
 permutations.
 
 ## What each one does
@@ -33,7 +34,7 @@ permutations.
 | --- | --- | --- |
 | `task0_reconcile.py` | Closes the gap between `coefficients.csv` (32,857 rows) and D5's test count (24,596) | `task0_reconciliation.csv`, `task0_untested_by_predictor.csv`, `task0_by_analyte.csv` |
 | `task1_rain.py` | Rain vs bacteria per analyte and window, with sign, raw significance, BH and magnitude side by side; broken out by `outfall_type`; looks for the three prior small-sample beaches | `task1_rain_by_analyte.csv`, `task1_rain_by_outfall_type.csv`, `task1_negative_by_outfall_type.csv`, `task1_prior_sites_lookup.csv` |
-| `task2_outfall.py` | **EXPLORATORY / post hoc.** Stress-tests D2's `outfall_type` result: small levels excluded, small levels merged, leave-one-level-out, large-levels-only, pooled and per analyte | `task2_outfall_variants.csv`, `task2_small_level_stations.csv`, `task2_small_level_shared.csv` |
+| `task2_stratum.py` | **EXPLORATORY / post hoc.** Stress-tests any pre-registered grouping (`--stratum`, default `outfall_type`): small levels excluded, small levels merged, leave-one-level-out, large-levels-only, pooled and per analyte | `task2_<stratum>_variants.csv`, `task2_<stratum>_small_level_stations.csv`, `task2_<stratum>_small_level_shared.csv` |
 | `task3_null.py` | A permutation null for D6's addressable-site count: the outcome is shuffled within calendar-month blocks and the max-of-k `\|rho_ctrl\|` is recomputed | `task3_null_summary.csv`, `task3_null_per_pair.csv`, `task3_ecoli_detail.csv` |
 
 `common.py` holds the loaders and the definitions the scripts share
@@ -48,6 +49,10 @@ off `wq/fit.py` and `wq/report.py` rather than restating them.
 * **BH is global.** `report_multiple_testing` runs one Benjamini-Hochberg
   step-up over all 24,596 headline tests. `common.bh_significant` reproduces
   that set, not a friendlier per-analyte one.
+* **Task 2 takes `--stratum`.** It stress-tests whichever registered grouping
+  you name; the outputs are named after it, so runs on different strata do not
+  overwrite each other. It warns if the stratum is not in the manifest's active
+  strata.
 * **Task 2 reuses the pipeline's test.** `report._stratum_significance` is
   imported, not reimplemented, so a variant differs from D2 only in the labels
   it is handed. That function shuffles the stratum label once per *site* and
