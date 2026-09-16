@@ -338,7 +338,8 @@ def rank_the_yes(walton):
 # step 4 — what the candidates do to precision, and whether they can
 # ---------------------------------------------------------------------------
 
-def precision_scenarios(walton, candidates, recall_strict, recall_doubt):
+def precision_scenarios(walton, candidates, recall_strict, recall_doubt,
+                        screenable=None):
     print(f"\n{'-' * 78}\n(4) PRECISION UNDER EACH READING, AND THE CAPACITY "
           f"CHECK\n{'-' * 78}")
     fired = walton[walton["confidence"].isin(FIRED)]
@@ -377,22 +378,38 @@ def precision_scenarios(walton, candidates, recall_strict, recall_doubt):
               f"{total / n:>11.2%}")
 
     print(f"\n  THE CAPACITY CHECK")
+    # "Screened and came up short" and "nothing to screen" are different
+    # findings and must not print the same verdict. An empty notes column
+    # makes the pool zero for a reason that says nothing about the rips.
+    untestable = screenable is not None and screenable == 0
     for name, recall in (("strict 19%", recall_strict),
                          ("doubt-as-yes 54%", recall_doubt)):
         if not recall:
             continue
         implied = found / recall
         missed = implied - found
-        verdict = ("the candidates CAN hold them"
-                   if len(pool) >= missed else
-                   "*** THE CANDIDATES CANNOT HOLD THEM ***")
+        if untestable:
+            verdict = "UNTESTABLE — no frame carried a note to screen"
+        elif len(pool) >= missed:
+            verdict = "the candidates CAN hold them"
+        else:
+            verdict = "*** THE CANDIDATES CANNOT HOLD THEM ***"
         print(f"    at {name}: {found} found implies {implied:.1f} real, so "
               f"{missed:.1f} missed;\n      {len(pool)} candidates — {verdict}")
-    print("\n  A shortfall here does not disprove the forward correction, but "
-          "it means\n  the missed rips are NOT in the frames whose notes hedge "
-          "— so either the\n  recall does not transfer from RipAID's cameras, "
-          "or they were missed\n  without the labeller noticing enough to "
-          "write anything.")
+    if untestable:
+        print("\n  THE CHECK DID NOT RUN. Every under-called frame has an "
+              "empty notes\n  field, so the candidate pool is zero because "
+              "there was nothing to read,\n  not because the frames were "
+              "read and cleared. This neither supports\n  nor refutes the "
+              "forward correction — it says the only evidence that\n  could "
+              "have tested it was never written down. Re-labelling with the "
+              "notes\n  field filled is what would make this answerable.")
+    else:
+        print("\n  A shortfall here does not disprove the forward correction, "
+              "but it means\n  the missed rips are NOT in the frames whose "
+              "notes hedge — so either the\n  recall does not transfer from "
+              "RipAID's cameras, or they were missed\n  without the labeller "
+              "noticing enough to write anything.")
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +435,10 @@ def main():
     walton = pd.read_csv(args.labels)
     walton["rip_present"] = (walton["rip_present"].fillna("")
                              .astype(str).str.strip().str.lower())
+    # Normalised ONCE, here. An unfilled notes column read back through
+    # str() becomes the four characters "nan", which is not a note and which
+    # this report duly printed as one. Same trap, fourth time in this project.
+    walton["notes"] = notes_of(walton)
     print()
     coverage(walton, "Walton labels")
 
@@ -427,6 +448,7 @@ def main():
         calibration = pd.read_csv(args.calibration)
         calibration["rip_present"] = (calibration["rip_present"].fillna("")
                                       .astype(str).str.strip().str.lower())
+        calibration["notes"] = notes_of(calibration)
         coverage(calibration, "calibration labels")
         truth = pd.read_csv(args.truth)
         merged = truth.merge(
@@ -454,11 +476,12 @@ def main():
     if merged is not None:
         miss_profile(annotator_severity(merged, args.ripaid))
 
-    candidates, under, _ = flag_walton(walton)
+    candidates, under, with_note = flag_walton(walton)
     rank_the_yes(walton)
     precision_scenarios(walton, candidates,
                         recall_strict if recall_strict else 0.19,
-                        recall_doubt if recall_doubt else 0.54)
+                        recall_doubt if recall_doubt else 0.54,
+                        screenable=len(with_note))
 
     print(f"\n{'=' * 78}\nWHAT THIS IS AND IS NOT\n{'=' * 78}")
     print("  Nothing here is a relabelling. The candidates are frames whose own")

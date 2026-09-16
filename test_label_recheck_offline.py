@@ -190,6 +190,61 @@ def check_the_y_verdict_follows_the_number():
     check("and the two do not print the same conclusion", strong != weak)
 
 
+def check_an_empty_notes_column_is_untestable_not_refuted():
+    """"Screened and short" and "nothing to screen" must not read the same.
+
+    A label set with no notes gives a candidate pool of zero for a reason that
+    says nothing about the rips. Printing the same alarm as a real shortfall
+    would read as a refutation of the forward correction when nothing was
+    tested at all.
+    """
+    print("\nan empty notes column")
+    blank = walton_fixture().assign(notes="")
+    with contextlib.redirect_stdout(io.StringIO()):
+        candidates, under, with_note = lr.flag_walton(blank)
+    check("no notes means no candidates", len(candidates) == 0)
+    check("and nothing is screenable", len(with_note) == 0)
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        lr.precision_scenarios(blank, candidates, 0.19, 0.54,
+                               screenable=len(with_note))
+    text = buffer.getvalue()
+    check("the verdict reads UNTESTABLE", "UNTESTABLE" in text)
+    check("and NOT as a refutation",
+          "CANNOT HOLD THEM" not in text, text[text.find("at strict"):][:90])
+    check("it says the evidence was never written down",
+          "never written down" in text)
+
+    # The same pool size with notes PRESENT must still read as a shortfall.
+    noted = walton_fixture().assign(notes="boat wake")
+    with contextlib.redirect_stdout(io.StringIO()):
+        candidates2, _, with_note2 = lr.flag_walton(noted)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        lr.precision_scenarios(noted, candidates2, 0.19, 0.54,
+                               screenable=len(with_note2))
+    check("notes present but no cues still reads as a real shortfall",
+          "CANNOT HOLD THEM" in buffer.getvalue()
+          and "UNTESTABLE" not in buffer.getvalue(),
+          f"{len(candidates2)} candidates from {len(with_note2)} notes")
+
+
+def check_nan_notes_never_reach_the_page():
+    """An unfilled notes column read through str() becomes "nan"."""
+    print("\na notes column full of NaN")
+    frame = walton_fixture()
+    frame["notes"] = np.nan
+    text = lr.notes_of(frame)
+    check("notes_of turns NaN into empty, not into 'nan'",
+          set(text) == {""}, str(sorted(set(text))[:3]))
+    check("and an empty note matches no cue",
+          lr.cues_in("")[0] == set())
+    check("while the literal string 'nan' would have matched nothing either,"
+          " so the bug was silent",
+          lr.cues_in("nan")[0] == set())
+
+
 def check_mann_whitney():
     print("\nthe rank test, against hand-checkable cases")
     u, p = lr.mann_whitney([1, 2, 3], [4, 5, 6])
@@ -228,6 +283,8 @@ def main():
     check_the_candidate_count()
     check_the_capacity_check()
     check_the_y_verdict_follows_the_number()
+    check_an_empty_notes_column_is_untestable_not_refuted()
+    check_nan_notes_never_reach_the_page()
     check_mann_whitney()
     check_it_touches_nothing()
     print("\n" + ("ALL PASS" if not FAILURES
