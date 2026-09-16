@@ -106,7 +106,8 @@ def _write(frame, name):
 
 def stage_stations(args):
     print("\n=== STATIONS ===")
-    pull.pull_stations(args.states, refresh=args.refresh, probe=args.probe)
+    pull.pull_stations(args.states, refresh=args.refresh, probe=args.probe,
+                       allow_failed=args.allow_failed_states)
 
 
 def stage_spatial(args):
@@ -281,7 +282,8 @@ def stage_manifest(args):
 
 def stage_results(args):
     print("\n=== RESULTS ===")
-    pull.pull_results(args.states, refresh=args.refresh, probe=args.probe)
+    pull.pull_results(args.states, refresh=args.refresh, probe=args.probe,
+                      allow_failed=args.allow_failed_states)
 
 
 def stage_ckan(args):
@@ -421,6 +423,9 @@ def main():
     parser.add_argument("--all", action="store_true",
                         help="every stage in order")
     parser.add_argument("--states", help="comma-separated, e.g. CA,FL")
+    parser.add_argument("--allow-failed-states", action="store_true",
+                        help="continue after a state or chunk fails, instead "
+                             "of stopping")
     parser.add_argument("--refresh", action="store_true",
                         help="re-pull chunks already on disk")
     parser.add_argument("--probe", action="store_true",

@@ -105,6 +105,38 @@ COASTAL_STATES = {
 FIPS_TO_STATE = {v: k for k, v in COASTAL_STATES.items()}
 
 
+# A state whose request FAILED is fatal; a state that was never asked for is
+# not. That distinction is the whole lesson of the California incident: the
+# run asked for CA, CA errored, the error was downgraded to a printed warning,
+# and every table downstream described a coast with no Pacific in it and said
+# nothing. A failure is the pull not doing what it was told. A chunk that was
+# never requested is somebody choosing a scope, which is a different thing and
+# stays a warning.
+#
+# Attempting every state before stopping is deliberate: the cache fills, so a
+# re-run retries only what broke, and you learn about all the failures at once
+# instead of one per run.
+def _fail_on_failures(failed, what, allow_failed=False):
+    if not failed:
+        return
+    listed = ", ".join(failed[:20]) + (" ..." if len(failed) > 20 else "")
+    if allow_failed:
+        print(f"\n  PROCEEDING WITHOUT {len(failed)} {what}: {listed}")
+        print("  --allow-failed-states was given, so this is on the record as "
+              "a choice.\n  Everything downstream describes the rest and "
+              "must say so.")
+        return
+    sys.exit(
+        f"\n{len(failed)} {what} failed and were not written: {listed}\n"
+        "Nothing downstream is written from a partial pull, because a study "
+        "missing a coast\nlooks exactly like a study of a smaller country. "
+        "Every chunk that DID land is cached,\nso re-running the same "
+        "command retries only what failed.\n"
+        "If the failure is permanent and you mean to continue without it, "
+        "say so:\n"
+        "    --allow-failed-states")
+
+
 class PullFailed(RuntimeError):
     """One request did not come back. Carries the host, because the two
     reasons this happens -- the service is down, and this machine is not
@@ -283,7 +315,8 @@ def normalize_stations(stations):
     return out[~zeroed & out["lat"].notna() & out["lon"].notna()]
 
 
-def pull_stations(states=None, refresh=False, probe=False):
+def pull_stations(states=None, refresh=False, probe=False,
+                  allow_failed=False):
     """Coastal recreational stations, one cached CSV per state."""
     states = states or sorted(COASTAL_STATES)
     frames, failed = [], []
@@ -316,10 +349,7 @@ def pull_stations(states=None, refresh=False, probe=False):
         frames.append(raw)
         time.sleep(config.REQUEST_PAUSE)
 
-    if failed:
-        print(f"\n  {len(failed)} state(s) failed and were not written: "
-              f"{', '.join(failed)}\n  Re-run to retry only those — the rest "
-              "are cached.")
+    _fail_on_failures(failed, 'state(s)', allow_failed)
 
     # stations.csv is the study's station table, not a report on this
     # invocation, so it is rebuilt from EVERY cached chunk rather than from
@@ -365,7 +395,8 @@ def pull_stations(states=None, refresh=False, probe=False):
     return out
 
 
-def pull_results(states=None, years=None, refresh=False, probe=False):
+def pull_results(states=None, years=None, refresh=False, probe=False,
+                 allow_failed=False):
     """Bacteria results, one cached CSV per (state, year).
 
     Chunked this finely because the national pull is long enough that
@@ -416,10 +447,7 @@ def pull_results(states=None, years=None, refresh=False, probe=False):
     print(f"\n{pulled} chunks pulled, "
           f"{total - pulled - len(failures)} already on disk, "
           f"{len(failures)} failed")
-    if failures:
-        print(f"  failed: {', '.join(failures[:10])}"
-              f"{' ...' if len(failures) > 10 else ''}")
-        print("  Re-run the same command to retry only those.")
+    _fail_on_failures(failures, 'chunk(s)', allow_failed)
     return load_raw_results(states, years)
 
 
@@ -483,6 +511,10 @@ def main():
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--probe", action="store_true",
                         help="print the real column names and stop")
+    parser.add_argument("--allow-failed-states", action="store_true",
+                        help="continue after a state or chunk fails, instead "
+                             "of stopping. Says on the record that the study "
+                             "is missing what failed.")
     args = parser.parse_args()
 
     states = None
@@ -495,9 +527,11 @@ def main():
     if not any((args.stations, args.results, args.ckan)):
         parser.error("give at least one of --stations --results --ckan")
     if args.stations:
-        pull_stations(states, refresh=args.refresh, probe=args.probe)
+        pull_stations(states, refresh=args.refresh, probe=args.probe,
+                      allow_failed=args.allow_failed_states)
     if args.results:
-        pull_results(states, refresh=args.refresh, probe=args.probe)
+        pull_results(states, refresh=args.refresh, probe=args.probe,
+                     allow_failed=args.allow_failed_states)
     if args.ckan:
         pull_ca_ckan()
 
