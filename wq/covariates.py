@@ -141,16 +141,24 @@ _MISSING = []
 # cells and then reads the 429 as a refusal: that is how the Northeast run
 # lost ERA5 at site 183 with its daily budget still largely unspent. Spacing
 # the calls costs an hour of waiting and buys the whole region.
-OPEN_METEO_MIN_INTERVAL = {
+#
+# CO-OPS is here for a different reason: it is the one host this pipeline
+# shares with the camera pipeline in scan_cameras.py, and the two are often
+# run at the same time. The throttle is per PROCESS -- _LAST_CALL is a module
+# dict -- so two runs cannot coordinate, and together they can push a host
+# into refusing what either alone would not. A second between calls costs
+# nothing across a few dozen cached gauges and keeps the breaker out of it.
+HOST_MIN_INTERVAL = {
     "archive-api.open-meteo.com": 15.0,
     "marine-api.open-meteo.com": 15.0,
+    "api.tidesandcurrents.noaa.gov": 1.0,
 }
 _LAST_CALL = {}
 
 
 def _throttle(host):
     """Hold a host to its minimum spacing. No-op for hosts without one."""
-    wait = OPEN_METEO_MIN_INTERVAL.get(host)
+    wait = HOST_MIN_INTERVAL.get(host)
     if wait:
         last = _LAST_CALL.get(host)
         if last is not None:
@@ -409,6 +417,7 @@ def coops_for(station_id, product, start, end):
 
     def build():
         _host_check(host)
+        _throttle(host)
         try:
             frame = obs.pull_coops_series(station_id, product, start, end)
         except requests.RequestException as exc:
@@ -439,6 +448,7 @@ def coops_datums(station_ids):
         def build(station=station):
             host = urlsplit(COOPS_DATUMS_URL).netloc
             _host_check(host)
+            _throttle(host)
             try:
                 resp = scan.get_with_retry(
                     COOPS_DATUMS_URL.format(station=station))
