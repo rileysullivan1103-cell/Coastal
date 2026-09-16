@@ -1511,6 +1511,43 @@ def water_frequency(paths, mask, warm=25, downsample=4, min_spread=20):
     return total / count, per_frame, total.shape, skipped
 
 
+# A shoreline fitted across columns is smooth: the good Sailfish fit scattered
+# 0.006 of the frame height. Past this the residuals are not a shoreline, and
+# the line through them is not an edge.
+TIGHT_SCATTER = 0.02
+
+# A reach is only a reach if a row is wet across some of its width. One pixel
+# is a speck.
+DENSE = 0.10
+
+
+def intrusion_reach(often_wet, small, density=DENSE):
+    """How far into the land habitual water actually reaches.
+
+    The first version took the deepest row holding ANY often-wet pixel. That
+    is a maximum over tens of thousands of pixels, so one speck of shadow at
+    the foot of the dune fence sets it -- and it did: Sailfish reported
+    "water reaches row 0.997" from 1,871 scattered pixels in 97,399, on a
+    mask whose typical frame is 2.5% wet, and it kept reporting it after the
+    vegetation exclusion because vegetation was never what set it. A statistic
+    a single pixel can move is not a measurement of a shoreline.
+
+    So: the deepest row where at least `density` of that row's masked width is
+    habitually wet, returned alongside the deepest single wet pixel and how
+    many pixels share its row, so the extreme stays visible instead of hidden.
+    """
+    width = small.sum(axis=1)
+    wet = (often_wet & small).sum(axis=1)
+    deep = np.where(wet > 0)[0]
+    if not len(deep):
+        return None, None, 0
+    extreme = int(deep[-1])
+    speck = int(wet[extreme])
+    dense = np.where((width > 0) & (wet >= density * np.maximum(width, 1)))[0]
+    band = int(dense[-1]) if len(dense) else None
+    return band, extreme, speck
+
+
 def measured_edge(frequency, often=0.25, margin=0.03, slug="<camera>"):
     """Where water actually reaches, fitted from the record rather than drawn.
 
@@ -1558,11 +1595,38 @@ def measured_edge(frequency, often=0.25, margin=0.03, slug="<camera>"):
         keep = nearer
         slope, intercept = np.polyfit(columns[keep], rows[keep], 1)
     scatter = float(np.std(rows[keep] - (slope * columns[keep] + intercept)))
+    rejected = len(columns) - int(keep.sum())
     print(f"\n  WHERE WATER ACTUALLY REACHES, over the whole record:")
     print(f"    y = {intercept:.3f} {slope:+.3f} x   "
           f"(scatter {scatter:.3f} of the frame, {keep.sum()} of "
           f"{len(columns)} columns)")
     print(f"    left edge {intercept:.3f}, right edge {intercept + slope:.3f}")
+    result = {"slope": float(slope), "intercept": float(intercept),
+              "scatter": scatter, "rejected": rejected}
+    # A FIT IS NOT A MEASUREMENT UNTIL IT IS TIGHT. The first Sailfish audit
+    # fitted y = 0.665 -0.163 x at scatter 0.006 over 526 of 672 columns, and
+    # that line was worth pasting. The re-run against the mask built from it
+    # fitted y = 0.690 +0.008 x at scatter 0.172 over 672 of 672 -- 29x the
+    # scatter, slope collapsed to nothing, and not one column rejected,
+    # because two standard deviations of that much scatter covers the whole
+    # set. It printed with exactly the same confidence as the good one.
+    # Adopting it would have flattened the edge and thrown away the right-hand
+    # half of the beach. So: refuse.
+    if scatter > TIGHT_SCATTER:
+        result["tight"] = False
+        print(f"\n  THIS IS NOT AN EDGE, and no polygon is offered from it.")
+        print(f"    the residuals scatter {scatter:.3f} of the frame height, "
+              f"over the {TIGHT_SCATTER:.2f} a\n    shoreline holds, and the "
+              f"robust loop rejected {rejected} of {len(columns)} columns: "
+              f"with the\n    scatter that wide, two standard deviations "
+              f"covers everything, nothing is\n    excluded, and the line is "
+              f"fitted to the noise it was supposed to drop.")
+        print("    This is what a GOOD mask looks like from in here. The "
+              "habitual water is\n    already outside it; what is left inside "
+              "are scattered specks, and a line\n    through specks is a line "
+              "through nothing. KEEP THE DECLARED EDGE.")
+        return result
+    result["tight"] = True
     left, right = intercept + margin, intercept + slope + margin
     print(f"\n  the same line with a {margin:.2f} margin, ready to paste:")
     print(f'    "{slug}": {{')
@@ -1572,8 +1636,7 @@ def measured_edge(frequency, often=0.25, margin=0.03, slug="<camera>"):
     print("  Compare it with what is declared. A declared edge well landward "
           "of this one\n  is land being thrown away; one seaward of it is "
           "water being registered.")
-    return {"slope": float(slope), "intercept": float(intercept),
-            "scatter": scatter}
+    return result
 
 
 def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
@@ -1619,11 +1682,24 @@ def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
     print(f"    {often_wet.sum():,} of {inside:,}  ({share:.2%} of the mask)")
 
     if often_wet.any():
-        reach = np.where(often_wet.any(axis=1))[0][-1] / shape[0]
-        edge = np.where(small.any(axis=1))[0][0] / shape[0]
-        print(f"    the mask's seaward edge is row {edge:.3f}; water reaches "
-              f"row {reach:.3f},\n    so the intrusion runs "
-              f"{reach - edge:.3f} of the frame height INTO the land.")
+        rows = max(shape[0] - 1, 1)
+        edge = np.where(small.any(axis=1))[0][0] / rows
+        band, extreme, speck = intrusion_reach(often_wet, small)
+        print(f"    the mask's seaward edge is row {edge:.3f}.")
+        if band is None:
+            print(f"    NO row of the mask is {DENSE:.0%} habitually wet "
+                  f"across its width. The deepest\n    wet pixel sits at row "
+                  f"{extreme / rows:.3f}, but only {speck} pixels share that "
+                  f"row -- that is a\n    speck of shadow, not a waterline. "
+                  f"There is no intrusion to measure.")
+        else:
+            print(f"    habitual water reaches row {band / rows:.3f} across "
+                  f"{DENSE:.0%} of the row's width, so\n    the intrusion "
+                  f"runs {band / rows - edge:.3f} of the frame height INTO "
+                  f"the land.")
+            print(f"    (deepest single wet pixel: row {extreme / rows:.3f}, "
+                  f"{speck} in that row. That is an\n    extreme, not a "
+                  f"reach; the earlier audit reported it as one.)")
 
     # The per-frame share is what names the dates worth looking at.
     shares = np.array([(wet & small).sum() / inside for wet in frames])

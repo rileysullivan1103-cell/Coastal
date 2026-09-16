@@ -1663,6 +1663,30 @@ catch an ocean that runs about −40. Green separates them: vegetation is the on
 thing in the scene whose green channel leads both others, while water, foam, wet
 sand and dry sand all have green between red and blue.
 
+**But vegetation was not what set that 0.997, and the guard did not move it.**
+The intrusion line was a *maximum*: the deepest row holding any often-wet pixel,
+taken over 1,871 scattered specks in 97,399 mask pixels, on a mask whose typical
+frame reads 2.5% wet. One pixel of shadow at the foot of the frame sets it, and
+no improvement to the discriminator can move a maximum. The reach is now the
+deepest row that is **at least 10% habitually wet across its own masked width**,
+with the deepest single pixel still printed beside it and labelled an extreme.
+On a well-placed mask there is no such row, and the audit now says so instead of
+naming the dune fence. This is the same discipline as the confidence rule: *a
+statistic that a single pixel can move is not a measurement.*
+
+**A fit is not a measurement until it is tight.** The first Sailfish audit fitted
+`y = 0.665 - 0.163x` at scatter 0.006 over 526 of 672 columns — a real shoreline,
+worth pasting. The re-run against the mask built *from that line* fitted
+`y = 0.690 + 0.008x` at scatter **0.172** over **672 of 672** columns: 29× the
+scatter, the slope collapsed to nothing, and not one column rejected, because two
+standard deviations of that much scatter covers the whole set. It printed with
+exactly the same confidence as the good fit, and pasting it would have flattened
+the edge and thrown away the right-hand half of the beach. That is what success
+looks like from inside the fit — the habitual water is already outside the mask,
+what is left are specks, and a line through specks is a line through nothing. The
+audit now **refuses to offer a polygon** when the scatter exceeds 0.02 of the
+frame height, and says to keep the declared edge.
+
 ### Masks are declared by hand, and the burned-in overlay is cut back out
 
 Every `MASKS` entry records who drew it and from which frame. The Sailfish
@@ -1684,6 +1708,10 @@ The declared edge is now that measured line plus 0.03, which lands at 38.1% of
 the frame — within 0.1 points of the over-cautious first draft, but for a
 measured reason and with the right slope. **A single frame cannot show a tide,**
 and neither guess was going to.
+
+The re-run against that edge closed the loop: habitually-wet pixels inside the
+mask fell from **7.69% to 1.92%**, and the median frame's wet share from 4.0% to
+**2.5%**. The edge is final at 38.1% of the frame, 73 survey cells of 128 px.
 
 The `drop` polygon is not cosmetic. **The "Sailfish" watermark is burned into
 the sensor, not the scene** — measured at x 0.033–0.104, y 0.927–0.956. It is

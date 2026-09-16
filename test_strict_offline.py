@@ -376,6 +376,98 @@ def test_the_audit_measures_the_edge_instead_of_guessing_it():
         shutil.rmtree(folder)
 
 
+def test_a_fit_through_specks_is_refused():
+    """A fit is not a measurement until it is tight.
+
+    The first Sailfish audit fitted y = 0.665 -0.163 x, scatter 0.006, over
+    526 of 672 columns -- a real shoreline, worth pasting. The re-run against
+    the mask built FROM that line fitted y = 0.690 +0.008 x, scatter 0.172,
+    over 672 of 672: twenty-nine times the scatter, the slope collapsed to
+    nothing, and not one column rejected, because two standard deviations of
+    that much scatter covers the whole set. It printed with exactly the same
+    confidence as the good fit. Pasting it would have flattened the edge and
+    thrown away the right-hand half of the beach.
+
+    So the audit has to be able to say "this is not an edge".
+    """
+    import contextlib
+    import io as stringio
+
+    rng = np.random.default_rng(11)
+    height, width = 200, 300
+
+    # A real edge: habitual water up to a sloping line, nothing above it.
+    real = np.zeros((height, width))
+    for x in range(width):
+        real[:int((0.60 - 0.20 * x / (width - 1)) * height), x] = 1.0
+    buffer = stringio.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        good = strict.measured_edge(real, slug="t")
+    check("a real edge is still called tight", good["tight"] is True,
+          f"scatter {good['scatter']:.4f}")
+    check("...and still prints a polygon to paste",
+          '"keep": [[(0.0,' in buffer.getvalue(), "no polygon printed")
+
+    # Specks: a well-placed mask leaves a few scattered wet pixels and no
+    # edge at all. The deepest one per column is then pure noise.
+    dust = np.zeros((height, width))
+    rows = rng.integers(0, height, size=width * 3)
+    cols = rng.integers(0, width, size=width * 3)
+    dust[rows, cols] = 1.0
+    buffer = stringio.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        bad = strict.measured_edge(dust, slug="t")
+    check("a fit through specks is not called tight", bad["tight"] is False,
+          f"scatter {bad['scatter']:.3f}")
+    check("...and NO polygon is offered from it",
+          '"keep": [[(0.0,' not in buffer.getvalue(),
+          "it printed a paste-ready polygon anyway")
+    check("...and the refusal says the declared edge should be kept",
+          "KEEP THE DECLARED EDGE" in buffer.getvalue(),
+          "the refusal does not say what to do instead")
+    check("...and the scatter that condemned it is an order worse",
+          bad["scatter"] > good["scatter"] * 10,
+          f"{bad['scatter']:.3f} vs {good['scatter']:.4f}")
+    check("...and how many columns the robust loop rejected is reported",
+          isinstance(bad["rejected"], int), f"{bad['rejected']}")
+
+
+def test_one_speck_of_shadow_is_not_a_reach():
+    """The intrusion line was a maximum over a hundred thousand pixels.
+
+    Sailfish kept reporting "water reaches row 0.997" -- the dune fence --
+    after the vegetation guard was added specifically to remove it. The guard
+    was not the problem. The STATISTIC was: the deepest row holding ANY
+    often-wet pixel, out of 1,871 scattered specks in 97,399, on a mask whose
+    typical frame reads 2.5% wet. One pixel of shadow at the foot of the frame
+    sets it, and no amount of fixing the discriminator can move a maximum.
+    """
+    height, width = 100, 200
+    small = np.zeros((height, width), bool)
+    small[40:] = True                      # the mask: rows 40 down
+
+    # A real waterline: rows 40-49 wet right across, plus one stray speck at
+    # the very bottom of the frame.
+    wet = np.zeros((height, width), bool)
+    wet[40:50] = True
+    wet[99, 7] = True
+
+    band, extreme, speck = strict.intrusion_reach(wet, small)
+    check("the reach follows the wet BAND, not the deepest pixel",
+          band == 49, f"band row {band}")
+    check("...the deepest pixel is still reported, as an extreme",
+          extreme == 99 and speck == 1, f"row {extreme}, {speck} pixels")
+
+    # A well-placed mask: specks only, no band anywhere.
+    only_specks = np.zeros((height, width), bool)
+    only_specks[45, 3] = True
+    only_specks[99, 180] = True
+    band, extreme, speck = strict.intrusion_reach(only_specks, small)
+    check("specks alone give NO reach at all", band is None, f"band {band}")
+    check("...while still naming where the deepest speck sat",
+          extreme == 99 and speck == 1, f"row {extreme}, {speck} pixels")
+
+
 def test_the_declared_masks_are_usable_as_declared():
     """A mask that builds to nothing is worse than no mask: it runs."""
     for slug, spec in strict.MASKS.items():
