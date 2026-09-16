@@ -446,7 +446,9 @@ def main():
     parser.add_argument("--labels", default=brc.LABEL_CSV)
     parser.add_argument("--truth", default=brc.TRUTH_CSV)
     parser.add_argument("--annotations", default=None,
-                        help="RipAID COCO export, for part 2")
+                        help="RipAID input for part 2: a COCO export "
+                             "(instances_default.json) or a YOLO-OBB dataset "
+                             "root / labels directory")
     parser.add_argument("--part", type=int, choices=[1, 2], default=None,
                         help="run only one part (default: both)")
     parser.add_argument("--bearing-step", type=int, default=5)
@@ -464,7 +466,8 @@ def main():
         if path is None:
             guesses = [p for p in ("instances_default.json",
                                    "data/ripaid/instances_default.json",
-                                   "ripaid/instances_default.json")
+                                   "ripaid/instances_default.json",
+                                   "data/ripaid/labels", "ripaid/labels")
                        if os.path.exists(p)]
             path = guesses[0] if guesses else None
         if path is None:
@@ -478,7 +481,7 @@ def main():
             print(f"\n  PART 2 skipped: {path} does not exist.")
             print(ZENODO)
             return 0
-        report_part2(lr.build_frames(lr.load(path)), args)
+        report_part2(lr.frames_from(path), args)
     return 0
 
 

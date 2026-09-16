@@ -7,6 +7,9 @@ averaging rip orientations as if they were arrows rather than lines.
     python test_ripaid_offline.py
 """
 
+import contextlib
+import io
+import math
 import json
 import os
 import sys
@@ -178,10 +181,181 @@ def test_cvat_subset_prefix():
               "pattern" in str(exc), str(exc).replace("\n", " ")[:70])
 
 
+# The label files carry six decimal places -- that is what RipAID ships -- so
+# a box recovered from them is exact only to that. Measured: area within 2e-7,
+# orientation within 1.2e-5 degrees. The tolerances below are the data's own
+# precision, not a fudge; the exact-coordinate case is checked separately at
+# machine precision to show the arithmetic itself is not the source of either.
+AREA_TOL = 1e-6
+ANGLE_TOL = 1e-3
+
+
+def _obb(cx, cy, w, h, deg):
+    """A rotated box as eight normalised numbers, for the fixtures below.
+
+    Rounded to six places exactly as the real files are, so the fixtures share
+    their precision limit rather than testing against numbers no file has.
+    """
+    a = math.radians(deg)
+    c, s = math.cos(a), math.sin(a)
+    out = []
+    for dx, dy in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2),
+                   (-w / 2, h / 2)):
+        out += [cx + dx * c - dy * s, cy + dx * s + dy * c]
+    return " ".join(f"{v:.6f}" for v in out)
+
+
+def test_obb_geometry():
+    """Area and orientation from four corners, against hand arithmetic."""
+    print("oriented-box geometry")
+    points = [(0.0, 0.0), (0.4, 0.0), (0.4, 0.1), (0.0, 0.1)]
+    check("an axis-aligned box's area is width x height, exactly",
+          abs(rip.obb_area(points) - 0.04) < 1e-15,
+          f"err {abs(rip.obb_area(points) - 0.04):.2e}")
+    exact_turned = [(0.5, 0.5 - 0.2), (0.5 + 0.2, 0.5), (0.5, 0.5 + 0.2),
+                    (0.5 - 0.2, 0.5)]
+    check("and a diamond's is half its bounding square, exactly",
+          abs(rip.obb_area(exact_turned) - 0.08) < 1e-15,
+          f"err {abs(rip.obb_area(exact_turned) - 0.08):.2e}")
+
+    # The SAME box turned 45 degrees has the SAME area. The axis-aligned
+    # bound of it does not, which is why the shoelace is used.
+    turned = [tuple(float(v) for v in pair) for pair in
+              zip(*[iter([float(x) for x in _obb(0.5, 0.5, 0.4, 0.1, 45).split()])] * 2)]
+    check("and rotating it does not change the area",
+          abs(rip.obb_area(turned) - 0.04) < AREA_TOL,
+          f"{rip.obb_area(turned):.6f}")
+
+    for planted in (0.0, 30.0, 95.0, 179.0):
+        pts = [tuple(float(v) for v in pair) for pair in
+               zip(*[iter([float(x) for x in
+                           _obb(0.5, 0.5, 0.4, 0.1, planted).split()])] * 2)]
+        got = rip.obb_angle_deg(pts)
+        check(f"orientation {planted:5.0f} recovered",
+              abs(got - planted) < ANGLE_TOL,
+              f"{got:.4f}")
+
+    # An orientation is a line, so 190 degrees IS 10 degrees.
+    pts = [tuple(float(v) for v in pair) for pair in
+           zip(*[iter([float(x) for x in _obb(0.5, 0.5, 0.4, 0.1, 190).split()])] * 2)]
+    check("190 degrees folds onto 10",
+          abs(rip.obb_angle_deg(pts) - 10.0) < ANGLE_TOL,
+          f"{rip.obb_angle_deg(pts):.4f}")
+
+    # The long axis, not the short one: a box wider than tall must report
+    # along its width even when the corner order starts on the short edge.
+    tall = [tuple(float(v) for v in pair) for pair in
+            zip(*[iter([float(x) for x in _obb(0.5, 0.5, 0.1, 0.4, 0).split()])] * 2)]
+    check("a tall box reports its long axis, at 90 degrees",
+          abs(rip.obb_angle_deg(tall) - 90.0) < ANGLE_TOL,
+          f"{rip.obb_angle_deg(tall):.4f}")
+
+
+def test_yolo_obb_reader():
+    """A YOLO-OBB export with a known composition, read back."""
+    print("reading a YOLO-OBB export")
+    with tempfile.TemporaryDirectory() as folder:
+        labels = os.path.join(folder, "labels")
+        images = os.path.join(folder, "images")
+        os.makedirs(labels)
+        os.makedirs(images)
+
+        def write(stem, lines):
+            with open(os.path.join(labels, stem + ".txt"), "w") as fh:
+                fh.write("\n".join(lines) + ("\n" if lines else ""))
+            open(os.path.join(images, stem + ".png"), "wb").write(b"x")
+
+        write("clm_s_01_2012-03-20-10-00",
+              ["0 " + _obb(0.5, 0.5, 0.4, 0.1, 30)])
+        write("clm_s_01_2012-03-20-11-00",
+              ["0 " + _obb(0.5, 0.5, 0.2, 0.1, 30),
+               "0 " + _obb(0.2, 0.2, 0.4, 0.1, 30),
+               "1 " + _obb(0.8, 0.8, 0.1, 0.1, 0)])
+        write("snb_s_02_2013-07-01-09-00", ["2 " + _obb(0.5, 0.5, 0.3, 0.1, 0)])
+        write("snb_s_02_2013-07-01-10-00", [])          # a real negative
+        write("DJI_0005_8460_jpg.rf.abc", ["0 " + _obb(0.5, 0.5, 0.2, 0.1, 0)])
+        write("PHOTO-2023-03-21-09-18-10_jpg.rf.def",
+              ["0 " + _obb(0.5, 0.5, 0.2, 0.1, 0)])
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            frame = rip.build_frames_yolo(folder)
+        text = buffer.getvalue()
+
+    check("only the fixed-camera frames survive", len(frame) == 4, str(len(frame)))
+    check("and the drone and phone frames are reported, not silently dropped",
+          "DJI_0005" in text and "2 of 6" in text, text.split("\n")[-6][:60])
+
+    by_stem = {os.path.splitext(n)[0]: r for n, r in
+               zip(frame["file_name"], frame.to_dict("records"))}
+    one = by_stem["clm_s_01_2012-03-20-10-00"]
+    check("a single rip is counted once and detected",
+          one["n_rip"] == 1 and one["detected"] is True)
+    check("its area is width x height", abs(one["area_max"] - 0.04) < AREA_TOL,
+          f"{one['area_max']:.6f}")
+    check("and its orientation is the planted 30 degrees",
+          abs(one["rotation_axial"] - 30.0) < ANGLE_TOL,
+          f"{one['rotation_axial']:.4f}")
+
+    two = by_stem["clm_s_01_2012-03-20-11-00"]
+    check("two rips and a doubt are counted separately",
+          (two["n_rip"], two["n_doubt"], two["n_sediment"]) == (2, 1, 0),
+          str((two["n_rip"], two["n_doubt"], two["n_sediment"])))
+    check("area_max takes the LARGER rip, not the first",
+          abs(two["area_max"] - 0.04) < AREA_TOL, f"{two['area_max']:.6f}")
+    check("area_sum adds them", abs(two["area_sum"] - 0.06) < AREA_TOL,
+          f"{two['area_sum']:.6f}")
+
+    sediment = by_stem["snb_s_02_2013-07-01-09-00"]
+    check("a sediment-only frame is NOT a detection",
+          sediment["detected"] is False and sediment["n_sediment"] == 1)
+    check("and carries no rip area", sediment["area_max"] == 0.0)
+
+    empty = by_stem["snb_s_02_2013-07-01-10-00"]
+    check("an empty label file is an observed zero, not a gap",
+          empty["detected"] is False
+          and (empty["n_rip"], empty["n_doubt"], empty["n_sediment"]) == (0, 0, 0))
+
+    check("the site is taken from the camera name",
+          set(frame["site"]) == {"clm", "snb"}, str(sorted(set(frame["site"]))))
+    check("file_name resolves to the real image on disk",
+          all(str(n).endswith(".png") for n in frame["file_name"]),
+          str(list(frame["file_name"])[:2]))
+
+
+def test_yolo_class_mapping_is_checked():
+    """The mapping is recovered from counts, so a mismatch must be announced."""
+    print("the class index mapping")
+    check("index 0 is the rip class", rip.YOLO_CLASSES[0] == rip.RIP_LABEL)
+    check("index 1 is doubt", rip.YOLO_CLASSES[1] == rip.DOUBT_LABEL)
+    check("index 2 is sediment", rip.YOLO_CLASSES[2] == "sediment")
+
+    from collections import Counter
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exact = rip.verify_classes(Counter(rip.PUBLISHED_INSTANCES))
+    check("counts matching the README report an exact match", exact)
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        off = rip.verify_classes(Counter({rip.RIP_LABEL: 7}))
+    check("counts that do not are reported as not matching", not off)
+    check("and the mismatch says what the README expected",
+          "4103" in buffer.getvalue(), buffer.getvalue().strip()[:60])
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        unknown = rip.verify_classes(Counter({"class_9": 4}))
+    check("an index this loader does not know about is flagged",
+          not unknown and "UNKNOWN" in buffer.getvalue())
+
+
 def main():
     for test in (test_axial_mean, test_observed_zeros, test_doubt_only_frames,
                  test_hourly, test_unparsed_names_are_reported,
-                 test_cvat_subset_prefix, test_probe_patterns):
+                 test_cvat_subset_prefix, test_obb_geometry,
+                 test_yolo_obb_reader, test_yolo_class_mapping_is_checked,
+                 test_probe_patterns):
         test()
         print()
     if FAILURES:

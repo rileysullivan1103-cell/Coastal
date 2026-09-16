@@ -62,7 +62,14 @@ def clean_strata(frames):
     go, and how many went is printed rather than absorbed.
     """
     doubt = frames["n_doubt"] > 0
-    clean = frames[~doubt]
+    # RipAID v2.0.0 added `sediment` -- "a sediment plume that might relate to
+    # a rip current". Like doubt it is neither: a frame carrying one is not a
+    # clean positive, and one carrying nothing else is not a person having
+    # looked and seen no rip. v1.0.0 has no such column, hence the default.
+    sediment = (frames["n_sediment"] > 0 if "n_sediment" in frames.columns
+                else pd.Series(False, index=frames.index))
+    murky = doubt | sediment
+    clean = frames[~murky]
     positives = clean[clean["n_rip"] > 0]
     negatives = clean[clean["n_rip"] == 0]
     report = {
@@ -70,6 +77,8 @@ def clean_strata(frames):
         "doubt_frames": int(doubt.sum()),
         "doubt_with_rip": int((doubt & (frames["n_rip"] > 0)).sum()),
         "doubt_only": int((doubt & (frames["n_rip"] == 0)).sum()),
+        "sediment_frames": int(sediment.sum()),
+        "murky": int(murky.sum()),
         "positives": len(positives),
         "negatives": len(negatives),
     }
@@ -157,7 +166,9 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("annotations", help="RipAID COCO export (instances_default.json)")
+    parser.add_argument("annotations",
+                        help="RipAID COCO export (instances_default.json) or a "
+                             "YOLO-OBB dataset root / labels directory")
     parser.add_argument("--images", default=None,
                         help="directory holding the RipAID image files")
     parser.add_argument("--n", type=int, default=30,
@@ -191,7 +202,7 @@ def main():
                  "Omit it entirely\n  to write the CSV without copying images "
                  "(the page will show blanks).")
 
-    frames = lr.build_frames(lr.load(args.annotations))
+    frames = lr.frames_from(args.annotations)
     positives, negatives, report = clean_strata(frames)
 
     print(f"\n{'=' * 74}\nBLINDED CALIBRATION SAMPLE\n{'=' * 74}")
@@ -201,6 +212,11 @@ def main():
           "than one without")
     print(f"    {report['doubt_only']} with nothing else — a person looked and "
           "could not say,\n      which is not a negative")
+    if report.get("sediment_frames"):
+        print(f"  {report['sediment_frames']} carry a sediment plume, also "
+              "excluded: a plume that MIGHT\n    relate to a rip is neither a "
+              "clean positive nor a clean negative")
+    print(f"  {report['murky']} frames excluded in total")
     print(f"  leaves {report['positives']} clean positives and "
           f"{report['negatives']} clean negatives")
 

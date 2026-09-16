@@ -31,6 +31,7 @@ Writes data/ripaid/rip_<site>_hourly.csv, one per site.
 """
 
 import argparse
+import glob
 import json
 import math
 import os
@@ -168,6 +169,214 @@ def build_frames(payload):
                  "few listed above.")
     frame = frame.sort_values("timestamp").reset_index(drop=True)
     return frame
+
+
+# ---------------------------------------------------------------------------
+# YOLO-OBB input (RipAID v2.0.0)
+# ---------------------------------------------------------------------------
+
+# Index -> class, RECOVERED FROM THE DATA, not assumed. The v2.0.0 download
+# ships no data.yaml, so nothing in it states the mapping. What it does ship is
+# an instance count per index, and the README publishes a distinct total per
+# class: rip_current 4103, doubt 1437, sediment 4591. Counting indices over the
+# 6,789 label files returns exactly 4103/1437/4591 for 0/1/2, and because the
+# three totals differ the assignment is forced. verify_classes() re-runs that
+# check on every load rather than trusting this comment.
+YOLO_CLASSES = {0: RIP_LABEL, 1: DOUBT_LABEL, 2: "sediment"}
+PUBLISHED_INSTANCES = {RIP_LABEL: 4103, DOUBT_LABEL: 1437, "sediment": 4591}
+
+SEDIMENT_LABEL = "sediment"
+
+
+def obb_area(points):
+    """Area of the oriented box, by the shoelace formula.
+
+    Not width x height of the enclosing rectangle: these boxes are ROTATED, and
+    the axis-aligned bound of a box at 45 degrees is twice its area. The
+    coordinates are normalised to 0-1, so this is a fraction of the frame, NOT
+    pixels -- see build_frames_yolo for why that is harmless here and where it
+    would not be.
+    """
+    total = 0.0
+    for index in range(len(points)):
+        x1, y1 = points[index]
+        x2, y2 = points[(index + 1) % len(points)]
+        total += x1 * y2 - x2 * y1
+    return abs(total) / 2.0
+
+
+def obb_angle_deg(points):
+    """Orientation of the box's LONG axis, folded onto 0-180 degrees.
+
+    The COCO path reads a `rotation` attribute; YOLO-OBB has no such field and
+    the orientation has to come out of the corner order. Measured along the
+    longer of the two edges meeting at the first corner, because the short edge
+    would report a direction 90 degrees away from the rip's axis. Folded to
+    0-180 for the same reason axial_mean_deg exists: a box at 10 degrees and
+    one at 190 lie along one line.
+    """
+    if len(points) < 3:
+        return None
+    (x0, y0), (x1, y1), (x2, y2) = points[0], points[1], points[2]
+    first = ((x1 - x0), (y1 - y0))
+    second = ((x2 - x1), (y2 - y1))
+    long_edge = first if (first[0] ** 2 + first[1] ** 2) >= \
+        (second[0] ** 2 + second[1] ** 2) else second
+    if long_edge == (0.0, 0.0):
+        return None
+    return math.degrees(math.atan2(long_edge[1], long_edge[0])) % 180.0
+
+
+def read_obb(path):
+    """One label file as [(class_name, [(x, y) x4]), ...]. Empty file -> []."""
+    out = []
+    with open(path) as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) < 9:
+                continue
+            try:
+                index = int(float(parts[0]))
+                values = [float(v) for v in parts[1:9]]
+            except ValueError:
+                continue
+            name = YOLO_CLASSES.get(index, f"class_{index}")
+            out.append((name, list(zip(values[0::2], values[1::2]))))
+    return out
+
+
+def verify_classes(counts):
+    """Say whether the index->class mapping is the one the README implies.
+
+    Printed rather than enforced: a subset of the labels legitimately will not
+    match the published totals, and refusing to load one would be worse than
+    saying the mapping is unconfirmed for it. What must never happen is a
+    silent mismatch, because every rip count downstream rides on index 0.
+    """
+    print("\n  class index -> label, checked against the README's totals:")
+    exact = True
+    for index in sorted(YOLO_CLASSES):
+        name = YOLO_CLASSES[index]
+        seen = counts.get(name, 0)
+        published = PUBLISHED_INSTANCES.get(name)
+        mark = ""
+        if published is not None and seen != published:
+            exact = False
+            mark = f"   <- README says {published}"
+        print(f"    {index} = {name:<12} {seen:>6} instances{mark}")
+    unknown = {k: v for k, v in counts.items() if k.startswith("class_")}
+    if unknown:
+        exact = False
+        print(f"    UNKNOWN INDICES: {unknown} — a class this loader does not "
+              "know about.")
+    if exact:
+        print("    exact match on all three, so the mapping is forced by the "
+              "counts, not assumed.")
+    else:
+        print("    NOT an exact match. That is expected for a subset of the "
+              "labels and\n    alarming for the full set — if this is the "
+              "whole download, the index\n    mapping above is wrong and every "
+              "rip count below with it.")
+    return exact
+
+
+def build_frames_yolo(target):
+    """Frame table from a YOLO-OBB export, same columns as build_frames().
+
+    `target` may be the dataset root, or its labels/ directory.
+
+    ONE DIFFERENCE FROM THE COCO PATH, and it matters only if you forget it:
+    YOLO coordinates are normalised to 0-1, so area_max here is a FRACTION OF
+    THE FRAME and the COCO path's is PIXELS. The two must never be pooled. It
+    is harmless within this project because every area analysis z-scores within
+    a camera, and a camera's resolution is fixed -- so the normalised area is a
+    constant multiple of the pixel area and the z-score is identical. It would
+    not be harmless in anything comparing raw areas.
+    """
+    labels_dir = target
+    if os.path.isdir(os.path.join(target, "labels")):
+        labels_dir = os.path.join(target, "labels")
+    if not os.path.isdir(labels_dir):
+        sys.exit(f"{target} has no labels/ directory and is not one.")
+    images_dir = os.path.join(os.path.dirname(labels_dir.rstrip("/")), "images")
+    by_stem = {}
+    if os.path.isdir(images_dir):
+        for name in os.listdir(images_dir):
+            by_stem.setdefault(os.path.splitext(name)[0], name)
+
+    paths = sorted(glob.glob(os.path.join(labels_dir, "*.txt")))
+    if not paths:
+        sys.exit(f"No .txt label files under {labels_dir}.")
+    print(f"{len(paths)} label files under {labels_dir}")
+
+    counts = Counter()
+    rows, unparsed = [], []
+    for path in paths:
+        stem = os.path.splitext(os.path.basename(path))[0]
+        # Matched on the basename WITH its extension: FILENAME ends in `\.`,
+        # so it requires the dot and a bare stem never matches it. The COCO
+        # path feeds it a file_name that has one; this path has to keep it too.
+        match = FILENAME.match(os.path.basename(path))
+        boxes = read_obb(path)
+        for name, _ in boxes:
+            counts[name] += 1
+        if not match:
+            unparsed.append(stem)
+            continue
+        rips = [pts for name, pts in boxes if name == RIP_LABEL]
+        doubts = [pts for name, pts in boxes if name == DOUBT_LABEL]
+        sediment = [pts for name, pts in boxes if name == SEDIMENT_LABEL]
+        areas = [obb_area(pts) for pts in rips]
+        rows.append({
+            "timestamp": pd.Timestamp(
+                int(match["y"]), int(match["mo"]), int(match["d"]),
+                int(match["h"]), int(match["mi"]), tz="UTC"),
+            "site": match["site"].lower(),
+            "camera": match["camera"].lower(),
+            "file_name": by_stem.get(stem, stem),
+            "n_rip": len(rips),
+            "n_doubt": len(doubts),
+            "n_sediment": len(sediment),
+            # A frame a person annotated with no RIP is an observed zero.
+            # Sediment and doubt are neither rips nor clean negatives.
+            "detected": len(rips) > 0,
+            "area_max": max(areas) if areas else 0.0,
+            "area_sum": sum(areas),
+            "rotation_axial": axial_mean_deg(
+                [obb_angle_deg(pts) for pts in rips]),
+        })
+
+    verify_classes(counts)
+
+    if unparsed:
+        print(f"\n  {len(unparsed)} of {len(paths)} label files are NOT from "
+              "the fixed-camera\n  subset and are dropped — they carry no "
+              "site, camera or timestamp:")
+        for stem in unparsed[:3]:
+            print(f"    {stem}")
+        print("  RipAID v2.0.0 merges drone and smartphone imagery into the "
+              "original\n  fixed-camera set. Those have no viewing bearing and "
+              "no clock, so they\n  cannot join any analysis in this project "
+              "that needs either.")
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        sys.exit("No fixed-camera frames found. Every label file failed the\n"
+                 "  <site>_<cam>_<YYYY-MM-DD-HH-MM> pattern.")
+    frame = frame.sort_values("timestamp").reset_index(drop=True)
+    print(f"\n  {len(frame)} fixed-camera frames kept")
+    return frame
+
+
+def frames_from(path):
+    """Frame table from either input format, dispatched on what `path` is.
+
+    RipAID v1.0.0 shipped a COCO export; v2.0.0 ships YOLO-OBB and a CVAT
+    backup. Callers should not have to care which is on disk.
+    """
+    if os.path.isdir(path):
+        return build_frames_yolo(path)
+    return build_frames(load(path))
 
 
 def summarize(frames):

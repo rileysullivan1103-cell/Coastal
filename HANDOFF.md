@@ -243,13 +243,24 @@ temperature coefficient GROW.
    **BLOCKED: no annotations on disk.** `RipAID_v1.0.0/` holds
    `images/default/` only — 480 PNGs, cameras clm_s_01..05 and snb_s_01..03,
    2011-10 to 2024-09 — a partial extract with no annotation file beside it.
-   **Download RipAID v2.0.0's `yolo-obb.zip`** (6.7 GB, DOI 10.5281/zenodo.
-   18196300). NOT the CVAT backup: that is meant to be restored into CVAT and
-   its internal annotations are in CVAT's own format, while YOLO-OBB is plain
-   per-image TXT — one line per instance, class index plus four normalised
-   corner points — which is directly parseable and keeps both the class and
-   the box orientation. `load_ripaid.py` reads COCO and will need a new reader
-   for it.
+   **RipAID v2.0.0's `yolo-obb` export is the input, and the reader is
+   written.** `load_ripaid.frames_from(path)` takes either a v1.0.0 COCO
+   export or a v2.0.0 YOLO-OBB dataset root, and returns the same frame table,
+   so both calibration scripts accept either unchanged. Take the yolo-obb
+   download, not the CVAT backup: the backup exists to be restored into CVAT
+   and carries CVAT-format annotations, while YOLO-OBB is per-image TXT that
+   parses directly.
+   **The class mapping is recovered from the data, not assumed.** The download
+   ships no data.yaml, so nothing in it states which index is which. Counting
+   instances per index over the 6,789 label files returns 4,103 / 1,437 /
+   4,591 for 0 / 1 / 2, matching the README's published per-class totals
+   exactly; because the three differ, the assignment is forced. `0 =
+   rip_current, 1 = doubt, 2 = sediment`, and `verify_classes()` re-runs that
+   check on every load and says so loudly if it stops matching.
+   **Verified against the download:** 6,789 label files, 1,082 empty (the
+   no-annotation images), 2,815 named `clm_*`/`snb_*` (the SIRENA subset, the
+   only frames with a bearing, a lat/lon and a clock). All three match the
+   README.
 
 1. **Is the midday effect the detector or the water?** Largest surviving effect
    in the project. Sea breeze is out and camera-specific glare is unsupported
@@ -325,8 +336,9 @@ it means v2.0.0 buys no extra rotation power over v1.0.0.
 
 **v2.0.0 adds a third class, `sediment`** — "a sediment plume that might
 relate to a rip current", 4,591 instances across 1,588 images (23.4%). It is
-neither a rip nor a clean negative, so like `doubt` it must be excluded from
-both strata of the calibration draw, not silently bucketed as an object. Label
+neither a rip nor a clean negative, so like `doubt` it is excluded from both
+strata of the calibration draw (`clean_strata` does this; a v1.0.0 table with
+no such column is unaffected). Label
 counts: rip_current 4,103 instances / 3,577 images (52.7%), doubt 1,437 /
 1,259 (18.5%), sediment 4,591 / 1,588 (23.4%), no annotation 1,082 images
 (15.9%). Those are WHOLE-dataset figures; the SIRENA-only split is not given
@@ -361,7 +373,19 @@ the Open-Meteo quota — one at a time. `wq/` writes only `data/wq/**` plus
 so demeaning by hour-by-month removes it by construction. For light columns
 read rho and rho_mo.
 
-**`bbox_area_max` is pixels.** Comparable within a camera, meaningless across.
+**`bbox_area_max` is pixels — EXCEPT on the YOLO-OBB path.** WebCOOS and the
+RipAID COCO export give pixel areas; YOLO coordinates are normalised to 0-1,
+so `load_ripaid.build_frames_yolo` returns a fraction of the frame. Never pool
+the two. It is harmless inside this project because every area analysis
+z-scores within a camera and a camera's resolution is fixed, making the
+normalised area a constant multiple of the pixel area and the z-score
+identical. It would not be harmless in anything comparing raw areas.
+Comparable within a camera, meaningless across, in either unit.
+
+**YOLO-OBB coordinates carry six decimal places.** A box recovered from them
+is exact to about 2e-7 in area and 1.2e-5 degrees in orientation — fine for
+everything here, but the reason the offline tolerances are what they are.
+Tightening them below the file's own precision fails on correct arithmetic.
 
 **Match a still to its detection's timestamp, not its hour.** The labelling
 sample was built twice on the wrong images; the first draw averaged 606s off.

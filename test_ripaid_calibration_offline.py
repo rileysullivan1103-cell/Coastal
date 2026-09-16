@@ -123,6 +123,36 @@ def check_doubt_frames_are_excluded():
           len(positives) + len(negatives) + report["doubt_frames"] == len(frames))
 
 
+def check_sediment_frames_are_excluded_too():
+    """v2.0.0's third class is neither a rip nor a clean negative."""
+    print("\nsediment frames belong in neither stratum either")
+    frames = pd.DataFrame([
+        {"n_rip": 1, "n_doubt": 0, "n_sediment": 0, "file_name": "a.png"},
+        {"n_rip": 0, "n_doubt": 0, "n_sediment": 0, "file_name": "b.png"},
+        {"n_rip": 1, "n_doubt": 0, "n_sediment": 1, "file_name": "c.png"},
+        {"n_rip": 0, "n_doubt": 0, "n_sediment": 1, "file_name": "d.png"},
+        {"n_rip": 0, "n_doubt": 1, "n_sediment": 1, "file_name": "e.png"},
+    ])
+    with contextlib.redirect_stdout(io.StringIO()):
+        positives, negatives, report = brc.clean_strata(frames)
+    check("a rip WITH sediment is not a clean positive", len(positives) == 1,
+          str(list(positives["file_name"])))
+    check("a sediment-only frame is not a clean negative", len(negatives) == 1,
+          str(list(negatives["file_name"])))
+    check("the sediment count is reported", report["sediment_frames"] == 3,
+          str(report["sediment_frames"]))
+    check("doubt and sediment together are counted once",
+          report["murky"] == 3, str(report["murky"]))
+
+    # A v1.0.0 table has no such column and must still work.
+    older = frames.drop(columns=["n_sediment"])
+    with contextlib.redirect_stdout(io.StringIO()):
+        positives, negatives, report = brc.clean_strata(older)
+    check("a table without the column is unaffected",
+          len(positives) == 2 and len(negatives) == 2,
+          f"{len(positives)} pos, {len(negatives)} neg")
+
+
 def check_the_draw_is_balanced_and_shuffled():
     print("\nthe draw")
     spec = [(1, 0)] * 40 + [(0, 0)] * 40
@@ -247,6 +277,7 @@ def main():
     print("RipAID calibration offline checks")
     check_kappa_on_a_hand_built_matrix()
     check_doubt_frames_are_excluded()
+    check_sediment_frames_are_excluded_too()
     check_the_draw_is_balanced_and_shuffled()
     check_the_written_sample_hides_the_answer()
     check_the_rotation_finds_a_planted_bearing()
