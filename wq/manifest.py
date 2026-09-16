@@ -20,12 +20,23 @@ A pre-registration that nothing checks is a comment. This one has teeth:
 
     python -m wq.manifest --show
     python -m wq.manifest --amend fetch_km_NE --why "..." --by "riley"
+    python -m wq.manifest --amend-scope CA --why "..." --by "riley"
 
 AMENDING. A covariate thought of after the fact is not forbidden, it is
 labelled. --amend appends an entry with its own timestamp, marks it
 exploratory, and leaves the registered entry untouched. Everything computed
 against an amended manifest is reported as an exploratory pass; the
 pre-registered result is whatever entry 0 says it is.
+
+AMENDING THE SCOPE. Adding STATIONS is a different move from adding a
+covariate and --amend-scope is a separate entry kind, because nothing about
+it is exploratory: the specification, the predictors, the control and the
+strata are unchanged. What changes is the population those frozen rules are
+applied to, and the entry records the state(s) added and the site count
+before and after. The catch it exists to make visible is that the coverage
+rule above ran ONCE, at registration, against the stations that existed then
+-- so a covariate kept because the first region had it is not re-checked
+against the new one, and the report's coverage table is where that gets read.
 """
 
 import argparse
@@ -230,8 +241,22 @@ def read(path=None):
 
 
 def registered_entry(payload):
-    for entry in _entries(payload):
-        if not entry.get("exploratory"):
+    """The pre-registered entry -- the one require_manifest validates against.
+
+    Matched on kind first. This used to return the first entry that was not
+    flagged exploratory, which was only correct while every non-exploratory
+    entry WAS the registration. A scope amendment is not exploratory (it adds
+    stations, not covariates, and nothing it produces needs an exploratory
+    label) but it is not the registration either, and if one were ever
+    appended ahead of entry 0 the guard would start validating the wrong
+    specification in silence.
+    """
+    entries = _entries(payload)
+    for entry in entries:
+        if entry.get("kind") == "pre-registered":
+            return entry
+    for entry in entries:
+        if not entry.get("exploratory") and "specification" in entry:
             return entry
     return None
 
@@ -306,6 +331,87 @@ def amend(covariates, why, who, path=None):
     return entry
 
 
+def amend_scope(states, why, who, sites=None, path=None):
+    """Record that the study's STATIONS changed after registration.
+
+    This is a different animal from --amend, which adds a covariate and marks
+    everything it touches exploratory. Adding California does not make a
+    covariate exploratory: the specification, the predictors, the control and
+    the strata are all exactly what they were. What changes is the population
+    those frozen rules are applied to, and that has to be on the record for
+    two reasons.
+
+    The honest one: every pre-registered number in the existing report
+    describes 2,854 Northeast stations. After this entry it describes a
+    different set of beaches, and a reader comparing the two runs is entitled
+    to know which is which without diffing CSVs.
+
+    The load-bearing one: the coverage rule in write() ran ONCE, against the
+    stations that existed at registration, and its decisions are frozen in
+    entry 0 -- beach_type dropped at 0.0 coverage, the NHD covariates dropped
+    at 0.0, region and outfall_type kept. Those decisions are NOT re-evaluated
+    for the new stations, which is what pre-registration means and also what
+    makes it dangerous here: a covariate kept because the Northeast had it may
+    be thin or absent in California. This entry records the before and after
+    counts so that gap is measurable rather than assumed, and the report's own
+    coverage table is where it gets checked.
+    """
+    path = path or config.MANIFEST_PATH
+    payload = read(path)
+    if payload is None:
+        sys.exit("no manifest to amend")
+    if not why or not who:
+        sys.exit("--why and --by are both required: a scope change with no "
+                 "reason and no author is indistinguishable from the thing "
+                 "this file exists to prevent")
+    entries = _entries(payload)
+    registered = registered_entry(payload)
+    before = (registered or {}).get("n_sites_at_registration")
+    entry = {
+        "entry": len(entries),
+        "kind": "scope amendment",
+        "exploratory": False,
+        "written_at": _now(),
+        "spec_hash": config.spec_hash(),
+        "added_states": list(states),
+        "n_sites_at_registration": before,
+        "n_sites_after_amendment": None if sites is None else int(len(sites)),
+        "why": why,
+        "added_by": who,
+        "specification_changed": False,
+        "coverage_reevaluated": False,
+        "warning": (
+            "The specification is unchanged and this is NOT an exploratory "
+            "grouping. What changed is the set of stations the frozen rules "
+            "are applied to. Two things follow. (1) Pre-registered results "
+            "from before this entry describe a different population and are "
+            "not interchangeable with results from after it; say which "
+            "population any number describes. (2) The strata coverage rule "
+            "was evaluated once, at registration, against the earlier "
+            "stations, and is NOT re-run here -- a covariate kept then may be "
+            "poorly populated on the added stations, so read the report's "
+            "coverage table before reading its D2."),
+    }
+    entries.append(entry)
+    with open(path, "w") as handle:
+        json.dump({"manifest_version": MANIFEST_VERSION, "entries": entries},
+                  handle, indent=2)
+    print(f"appended scope amendment {entry['entry']} to {path}")
+    print(f"  added    {', '.join(states)}")
+    print(f"  sites    {before} at registration -> "
+          f"{entry['n_sites_after_amendment']} now")
+    print(f"  by       {who} at {entry['written_at']}")
+    print("  The specification did not change, so the registered pass still "
+          "stands;\n  what it describes did.")
+    return entry
+
+
+def scope_amendments(payload=None):
+    """Every scope change on the record, oldest first."""
+    payload = payload if payload is not None else read()
+    return [e for e in _entries(payload) if e.get("kind") == "scope amendment"]
+
+
 def exploratory_covariates(payload=None):
     payload = payload if payload is not None else read()
     out = []
@@ -334,6 +440,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--amend", nargs="+", metavar="COVARIATE")
+    parser.add_argument("--amend-scope", nargs="+", metavar="STATE",
+                        help="record that these states were added to the "
+                             "study after registration")
     parser.add_argument("--why")
     parser.add_argument("--by")
     args = parser.parse_args()
@@ -341,13 +450,21 @@ def main():
     if args.amend:
         amend(args.amend, args.why, args.by)
         return
+    if args.amend_scope:
+        sites = None
+        stations_path = os.path.join(config.DATA_DIR, "stations_stratified.csv")
+        if os.path.exists(stations_path):
+            sites = pd.read_csv(stations_path)
+        amend_scope(args.amend_scope, args.why, args.by, sites=sites)
+        return
     if args.show:
         payload = read()
         if payload is None:
             sys.exit("no manifest yet")
         print(json.dumps(payload, indent=2))
         return
-    parser.error("give --show or --amend. The manifest is WRITTEN by "
+    parser.error("give --show, --amend or --amend-scope. The manifest is "
+                 "WRITTEN by "
                  "wq.run_wq --manifest, which supplies the station table and "
                  "the layer record it needs.")
 

@@ -564,6 +564,39 @@ def report_no_usable_predictor(coefficients):
     return best
 
 
+def report_flat_in_d6(best, nondetects, floor=None):
+    """How much of D6's failure count is a flat outcome rather than a failure.
+
+    D6 counts a pair as having no usable predictor when its strongest |rho|
+    is under the floor. A pair whose outcome never moved lands in that count
+    too, and means something completely different: nothing was measured
+    twice, so no predictor could have cleared any floor. Printed rather than
+    subtracted -- the pre-registered number stays what it is, and a reader who
+    wants the other one can now do the subtraction.
+    """
+    floor = config.USABLE_RHO_FLOOR_LENIENT if floor is None else floor
+    if (best is None or best.empty or nondetects is None or nondetects.empty
+            or "flat_series_flag" not in nondetects.columns):
+        return
+    flat = {(str(r["station_id"]), r["analyte"])
+            for _, r in nondetects.iterrows()
+            if bool(r.get("flat_series_flag"))}
+    if not flat:
+        return
+    keys = [(str(s), a) for s, a in zip(best["station_id"], best["analyte"])]
+    is_flat = pd.Series([k in flat for k in keys], index=best.index)
+    without = ~best["has_usable"].fillna(False)
+    both = int((without & is_flat).sum())
+    total = int(without.sum())
+    print(f"\n  of the {total:,} pair(s) with nothing clearing "
+          f"{floor:.2f}, {both:,} ({both / total:.1%}) sit on a")
+    print("  FLAT SERIES — one value, or the method's floor repeated. Those "
+          "are not")
+    print("  beaches where a prediction failed; they are beaches where the "
+          "outcome")
+    print(f"  never moved. The comparable count is {total - both:,}.")
+
+
 def per_site_table(coefficients, sites, nondetects, strata, column="rho_ctrl"):
     """D4. One row per site and analyte, every coefficient across the columns."""
     wide = coefficients.pivot_table(index=["station_id", "analyte"],
@@ -587,8 +620,12 @@ def per_site_table(coefficients, sites, nondetects, strata, column="rho_ctrl"):
                         on="station_id", how="left")
     if nondetects is not None and not nondetects.empty:
         table = table.merge(
-            nondetects[["station_id", "analyte", "n", "nondetect_fraction",
-                        "nondetect_flag", "n_methods", "mixed_estimators"]],
+            nondetects[[c for c in
+                        ("station_id", "analyte", "n", "nondetect_fraction",
+                         "nondetect_flag", "n_methods", "mixed_estimators",
+                         "flat_series_flag", "constant_series",
+                         "floor_pinned", "modal_share")
+                        if c in nondetects.columns]],
             on=["station_id", "analyte"], how="left")
     best = usable_predictors(coefficients)
     table = table.merge(best[["station_id", "analyte", "best_predictor",
@@ -700,7 +737,38 @@ def report_nondetects(coefficients, nondetects):
         print(f"\n  {mixed} pair(s) mix CFU and MPN results inside one site. "
               "Those are\n  two estimators, not one measurement — treat their "
               "coefficients as\n  provisional.")
+    report_flat_series(subset)
     return subset
+
+
+def report_flat_series(subset):
+    """B3, second half: censoring nobody declared.
+
+    Everything above counts non-detects that were MARKED as such. This counts
+    pairs whose values barely move and sit on the series minimum — a method
+    floor reported as a measurement, with no qualifier to find it by. They are
+    not excluded from anything; they are printed so the counts below can be
+    read with them in hand, because a pair whose outcome never moved is not a
+    beach where prediction failed.
+    """
+    if subset is None or subset.empty or "flat_series_flag" not in subset:
+        return
+    flat = subset[subset["flat_series_flag"].fillna(False)]
+    if flat.empty:
+        print("\n  no fitted pair is a flat series")
+        return
+    constant = int(subset["constant_series"].fillna(False).sum())
+    undeclared = int(subset["flat_undeclared"].fillna(False).sum())
+    print(f"\n  FLAT SERIES (undeclared censoring)")
+    print(f"    pairs on a flat series          {len(flat):,} "
+          f"({len(flat) / len(subset):.1%} of fitted pairs)")
+    print(f"      of those, one value only      {constant:,}")
+    print(f"      not flagged as non-detect     {undeclared:,}")
+    print(f"    threshold                       "
+          f"{config.FLAT_SERIES_SHARE:.0%} of samples on the series minimum")
+    print("    These are NOT excluded. Their n is real and their outcome is")
+    print("    not: whatever coefficient they carry rests on the few samples")
+    print("    that left the floor. Read D6 with the line it prints about them.")
 
 
 def run(coefficients, sites, attrition, nondetects, strata, out_dir=None,
@@ -737,7 +805,8 @@ def run(coefficients, sites, attrition, nondetects, strata, out_dir=None,
                                      exploratory=exploratory)
     signs = report_sign_agreement(headline)
     report_multiple_testing(headline)
-    report_no_usable_predictor(headline)
+    best = report_no_usable_predictor(headline)
+    report_flat_in_d6(best, nondetects)
     sites_table = per_site_table(coefficients, sites, nondetects, strata)
 
     outputs = {

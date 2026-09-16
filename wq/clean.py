@@ -471,10 +471,71 @@ def nondetect_shares(frame):
         n_over_range=("over_range", "sum"),
         n_methods=("method", lambda s: s.where(s.astype(str) != "").nunique()),
         n_estimators=("estimator", lambda s: s[s != "unknown"].nunique()),
+        n_distinct_values=("value", "nunique"),
+        modal_value=("value", _modal_value),
+        modal_count=("value", _modal_count),
+        min_value=("value", "min"),
     ).reset_index()
     out["nondetect_fraction"] = out["n_nondetect"] / out["n"]
     out["nondetect_flag"] = out["nondetect_fraction"] > config.NONDETECT_FLAG_FRACTION
     out["mixed_estimators"] = out["n_estimators"] > 1
+    return _flag_flat_series(out)
+
+
+def _modal_value(series):
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if values.empty:
+        return np.nan
+    return float(values.mode().iloc[0])
+
+
+def _modal_count(series):
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if values.empty:
+        return 0
+    return int((values == values.mode().iloc[0]).sum())
+
+
+def _flag_flat_series(out):
+    """B3, second half: a series that barely moves, and sits on its own floor.
+
+    The non-detect columns above find censoring that was DECLARED -- a
+    qualifier, a detection-condition text, a detection limit. This finds
+    censoring that was not. A station reporting one value for every sample,
+    with no qualifier anywhere, is reporting the method's floor as though it
+    were a measurement, and every downstream number treats it as one.
+
+    Two flags, because they fail differently and only one of them is
+    parameter-free:
+
+      constant_series   one distinct value. A rank correlation is undefined,
+                        so the fit emits a row with a null rho and the pair
+                        counts against D6 as a beach with no usable
+                        predictor. It is not a beach where prediction failed;
+                        it is a beach where nothing was measured twice.
+      floor_pinned      at least FLAT_SERIES_SHARE of the samples sit on the
+                        series minimum. The coefficient here is computed from
+                        whichever handful of samples left the floor, which is
+                        a much smaller study than its n suggests.
+
+    Neither one excludes anything. They are reported beside the coefficient so
+    a reader can subtract them; making either one an exclusion rule would
+    change the pre-registered distribution and belongs in a re-registration,
+    not here.
+    """
+    n = pd.to_numeric(out["n"], errors="coerce").replace(0, np.nan)
+    out["modal_share"] = pd.to_numeric(out["modal_count"], errors="coerce") / n
+    out["constant_series"] = pd.to_numeric(
+        out["n_distinct_values"], errors="coerce").fillna(0) <= 1
+    at_floor = np.isclose(pd.to_numeric(out["modal_value"], errors="coerce"),
+                          pd.to_numeric(out["min_value"], errors="coerce"),
+                          equal_nan=False)
+    out["floor_pinned"] = (out["modal_share"] >= config.FLAT_SERIES_SHARE) & at_floor
+    out["flat_series_flag"] = out["constant_series"] | out["floor_pinned"]
+    # A flat series that was never declared as censored is the case worth
+    # separating: where the qualifier IS present, B3's existing columns
+    # already describe it and the substitution is doing visible work.
+    out["flat_undeclared"] = out["flat_series_flag"] & ~out["nondetect_flag"]
     return out
 
 

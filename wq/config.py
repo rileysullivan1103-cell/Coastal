@@ -215,6 +215,22 @@ SPEC_KEYS = (
 # Not part of the specification
 # ---------------------------------------------------------------------------
 
+# B3 (diagnostic, NOT a specification constant): the share of a site-analyte
+# series that has to sit at one value before it is called flat. Deliberately
+# outside SPEC_KEYS, because nothing here changes which coefficient is
+# computed or which pair enters the headline distribution -- it changes only
+# what the report can SAY about a pair. The moment a flat series is excluded
+# rather than described, this becomes load-bearing and belongs in the
+# pre-registered block with a re-registration to match.
+#
+# The case it exists for: a New Jersey station reporting fecal coliform = 3.0
+# for all 49 of its samples, with no censoring qualifier anywhere on the row.
+# That is an undeclared "<3" -- the method's floor written as a number -- and
+# the non-detect machinery cannot see it, so nondetect_fraction reads 0.00 and
+# the pair enters the headline, contributes no coefficient, and then counts
+# against D6 as a beach where prediction did not work.
+FLAT_SERIES_SHARE = 0.90
+
 REQUEST_PAUSE = 0.5
 GRID_CELL_DEGREES = 0.1  # ERA5 cells are shared between nearby sites
 COVARIATE_JOIN_DAYS = 0  # conditions are matched on the sample's own day

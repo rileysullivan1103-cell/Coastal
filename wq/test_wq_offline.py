@@ -389,6 +389,56 @@ def test_thresholds_file_is_readable_and_cited():
               os.path.abspath(__file__)), "fit.py")).read())
 
 
+def test_flat_series_is_detected_without_a_qualifier():
+    """B3: undeclared censoring. The case is real -- a New Jersey station
+    reported fecal coliform = 3.0 for all 49 of its samples with no qualifier,
+    no detection-condition text and no detection limit, so every non-detect
+    column read zero and the pair entered the headline carrying nothing."""
+    print("\n[flat series]")
+    rows = []
+    # A: constant, undeclared. The incident.
+    rows += [{"station_id": "A", "analyte": "FECAL", "value": 3.0,
+              "nondetect": False, "over_range": False, "method": "m",
+              "estimator": "MPN"} for _ in range(49)]
+    # B: pinned to its floor but not constant -- 46 of 50 on the minimum.
+    rows += [{"station_id": "B", "analyte": "FECAL", "value": 10.0,
+              "nondetect": False, "over_range": False, "method": "m",
+              "estimator": "MPN"} for _ in range(46)]
+    rows += [{"station_id": "B", "analyte": "FECAL", "value": v,
+              "nondetect": False, "over_range": False, "method": "m",
+              "estimator": "MPN"} for v in (20.0, 40.0, 80.0, 160.0)]
+    # C: a real series. Must not be flagged.
+    rows += [{"station_id": "C", "analyte": "FECAL", "value": float(v),
+              "nondetect": False, "over_range": False, "method": "m",
+              "estimator": "MPN"} for v in range(1, 51)]
+    # D: declared non-detects at the floor -- already visible to B3, and the
+    # flag says so via flat_undeclared rather than pretending it is news.
+    rows += [{"station_id": "D", "analyte": "FECAL", "value": 5.0,
+              "nondetect": True, "over_range": False, "method": "m",
+              "estimator": "MPN"} for _ in range(40)]
+    shares = clean.nondetect_shares(pd.DataFrame(rows)).set_index("station_id")
+
+    check("a constant series is flagged",
+          bool(shares.loc["A", "constant_series"]))
+    check("a constant series reads zero non-detects",
+          float(shares.loc["A", "nondetect_fraction"]) == 0.0,
+          "which is why the existing columns could not see it")
+    check("a constant series is flagged as undeclared",
+          bool(shares.loc["A", "flat_undeclared"]))
+    check("a series pinned to its floor is flagged",
+          bool(shares.loc["B", "floor_pinned"])
+          and not bool(shares.loc["B", "constant_series"]),
+          f"modal share {float(shares.loc['B', 'modal_share']):.2f}")
+    check("a series that actually varies is NOT flagged",
+          not bool(shares.loc["C", "flat_series_flag"]))
+    check("a DECLARED non-detect floor is flat but not undeclared",
+          bool(shares.loc["D", "flat_series_flag"])
+          and not bool(shares.loc["D", "flat_undeclared"]))
+    check("the flat threshold is not part of the frozen specification",
+          "FLAT_SERIES_SHARE" not in config.SPEC_KEYS,
+          "it describes a pair, it does not exclude one")
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -403,7 +453,8 @@ def main():
                  test_tidal_range,
                  test_coverage_rule_drops_before_fitting,
                  test_manifest_guard_catches_a_moved_goalpost,
-                 test_thresholds_file_is_readable_and_cited):
+                 test_thresholds_file_is_readable_and_cited,
+                 test_flat_series_is_detected_without_a_qualifier):
         test()
     print()
     if FAILURES:
