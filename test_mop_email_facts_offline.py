@@ -24,12 +24,12 @@ def make_frame():
     frame = pd.DataFrame({
         "time": time,
         "wave_hs_m": 1.5,
-        "wave_sxy": np.nan,
-        "wave_sxx": np.nan,
+        "radiation_stress_sxy": np.nan,
+        "radiation_stress_sxx": np.nan,
         "product": ["hindcast"] * 400 + ["nowcast"] * (HOURS - 400),
         "mop_id": "SC130",
     })
-    frame.loc[USABLE_INDEX, "wave_sxy"] = 0.5
+    frame.loc[USABLE_INDEX, "radiation_stress_sxy"] = 0.5
     return frame
 
 
@@ -58,9 +58,34 @@ class Facts(unittest.TestCase):
         self.assertEqual(table.loc["hindcast", "count"], 400)
         self.assertEqual(table.loc["nowcast", "count"], HOURS - 400)
 
-    def test_camel_case_variable_finds_snake_case_column(self):
-        self.assertEqual(mef.column_for(self.frame, "waveSxy"), "wave_sxy")
+    def test_renamed_variable_resolves_through_the_real_map(self):
+        """waveSxy is written as radiation_stress_sxy, not wave_sxy.
+
+        Matching on letters alone missed this and reported a fully populated
+        column as absent, so the map pull_cdip_mop.py actually uses is the
+        thing under test here.
+        """
+        self.assertEqual(mef.column_for(self.frame, "waveSxy"),
+                         "radiation_stress_sxy")
+        self.assertEqual(mef.column_for(self.frame, "waveSxx"),
+                         "radiation_stress_sxx")
         self.assertEqual(mef.column_for(self.frame, "waveHs"), None)
+
+    def test_every_rename_target_present_is_found(self):
+        """No CDIP name in the map may resolve to nothing when its column is there."""
+        full = self.frame.copy()
+        for target in mef.RENAME.values():
+            full[target] = 1.0
+        for name, target in mef.RENAME.items():
+            self.assertEqual(mef.column_for(full, name), target, name)
+
+    def test_radiation_stress_is_listed_not_filtered_out(self):
+        listed = mef.value_columns(self.frame)
+        self.assertIn("radiation_stress_sxy", listed)
+        self.assertIn("radiation_stress_sxx", listed)
+        self.assertIn("wave_hs_m", listed)
+        for meta in ("time", "product", "mop_id"):
+            self.assertNotIn(meta, listed)
 
     def test_usable_count_and_bracket_match_the_planted_hours(self):
         present, total, first, last = mef.populated(self.frame, "waveSxy")
@@ -82,7 +107,7 @@ class Facts(unittest.TestCase):
         Both mean 'no usable data', but only one of them means CDIP never
         served anything -- and the email says different things about each.
         """
-        without = self.frame.drop(columns=["wave_sxx"])
+        without = self.frame.drop(columns=["radiation_stress_sxx"])
         present, total, _, _ = mef.populated(without, "waveSxx")
         self.assertIsNone(present)
         self.assertEqual(total, HOURS)

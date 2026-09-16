@@ -22,6 +22,8 @@ import os
 
 import pandas as pd
 
+from pull_cdip_mop import RENAME
+
 DODS = ("https://thredds.cdip.ucsd.edu/thredds/dodsC/cdip/model/"
         "MOP_alongshore/")
 # pull_cdip_mop.py requests this many rows per OPeNDAP call, so this is the
@@ -71,12 +73,17 @@ def by_product(frame):
 
 
 def column_for(frame, variable):
-    """Match a CDIP variable name to the snake_case column it was renamed to.
+    """Match a CDIP variable name to the column pull_cdip_mop.py wrote.
 
-    pull_cdip_mop.py renames on write, so waveSxy is wave_sxy in the file.
-    Compare on letters only rather than hardcoding the map, so this keeps
-    working if the rename table changes.
+    The rename is NOT a prefix-preserving transform: waveSxy is written as
+    radiation_stress_sxy, waveSxx as radiation_stress_sxx. An earlier version
+    here matched on letters alone, so it looked for "wavesxy", found nothing,
+    and reported a 100%-populated column as absent. Read the real map instead
+    of inferring one, and keep the letters-only pass only as a fallback for a
+    column this map does not mention.
     """
+    if variable in RENAME and RENAME[variable] in frame.columns:
+        return RENAME[variable]
     want = variable.lower().replace("_", "")
     for column in frame.columns:
         if column.lower().replace("_", "") == want:
@@ -101,8 +108,15 @@ def populated(frame, variable):
     return len(good), len(frame), good["time"].min(), good["time"].max()
 
 
-def wave_columns(frame):
-    return [c for c in frame.columns if c.startswith("wave_")]
+# Everything pull_cdip_mop.py writes that is not a measurement. Listing the
+# exclusions rather than a prefix keeps radiation_stress_sxy in the report;
+# filtering on "wave_" silently dropped it.
+META_COLUMNS = frozenset(["time", "hour", "product", "mop_id",
+                          "shore_normal_deg", "water_depth_m"])
+
+
+def value_columns(frame):
+    return [c for c in frame.columns if c not in META_COLUMNS]
 
 
 def request_url(mop, variable, product="hindcast", chunk=CHUNK):
@@ -152,8 +166,8 @@ def main():
             print(f"  usable hours run {good_first} -> {good_last}")
 
     print()
-    print("populated share, every wave column written:")
-    for column in wave_columns(frame):
+    print("populated share, every column written:")
+    for column in value_columns(frame):
         print(f"  {column:<18} {100 * frame[column].notna().mean():5.1f}%")
 
     for points_path, table in points_tables():
