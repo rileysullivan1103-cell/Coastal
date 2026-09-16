@@ -75,6 +75,9 @@ TARGETS = ["detection_rate", "detections", "bbox_area_max"]
 DESCRIPTIVE = we.DESCRIPTIVE
 SCORE_CAVEAT = we.SCORE_CAVEAT
 FRONT_DEG = 90.0
+# How much closer a peak must sit to one explanation than the other before the
+# difference is called. The sweep's peak is broad, so a few degrees is noise.
+MARGIN_DEG = 10.0
 
 SIGNED_GLARE = "sun_glare_signed"
 BEARING_TERMS = ["sun_in_view", "sun_glare"]
@@ -222,6 +225,56 @@ def attach_geometry(frame, bearing, suffix=""):
                                                     frame["solar_azimuth"],
                                                     bearing)
     return frame
+
+
+def solar_noon_bearing(frame):
+    """The azimuth the sun sits at when it is highest, averaged over days.
+
+    This is the bearing that turns cos(az - b) into a proximity-to-solar-noon
+    index, and it is the direct competitor to the camera's own bearing. At a
+    mid-latitude northern site it is near 180, which at Walton is only 26 deg
+    from the seaward bearing -- close enough that "the peak is within 45 deg of
+    the camera" cannot tell the two apart, and the two are the whole question.
+
+    Computed from the data rather than assumed to be 180, so it stays right for
+    a southern-hemisphere camera or a site inside the tropics.
+    """
+    lit = frame[frame["solar_elevation"] > 0]
+    if lit.empty:
+        return None, 0
+    peak_index = lit.groupby(lit["hour"].dt.floor("D"))["solar_elevation"].idxmax()
+    radians = np.radians(lit.loc[peak_index, "solar_azimuth"].to_numpy(float))
+    # Circular mean: azimuths near 0/360 average to 180 if done arithmetically.
+    mean = math.degrees(math.atan2(float(np.sin(radians).mean()),
+                                   float(np.cos(radians).mean()))) % 360.0
+    return mean, len(peak_index)
+
+
+def fold(angle):
+    """A difference between bearings, folded onto 0-180."""
+    return abs((angle + 180.0) % 360.0 - 180.0)
+
+
+def classify_peak(peak, bearing, noon, margin=None):
+    """Which explanation the sweep's maximum sits closer to.
+
+    A threshold on the gap to the camera cannot work: at this site the camera's
+    bearing and the solar-noon azimuth are ~26 deg apart, so any threshold wide
+    enough to accept a real camera effect also accepts a pure time-of-day one.
+    The two have to be raced against each other, with a margin, because a few
+    degrees between two gaps on a broad peak is noise.
+    """
+    margin = MARGIN_DEG if margin is None else margin
+    if noon is None or peak is None or pd.isna(peak):
+        return "no solar noon", float("nan"), float("nan")
+    to_camera, to_noon = fold(peak - bearing), fold(peak - noon)
+    if to_camera + margin < to_noon:
+        call = "camera / lens"
+    elif to_noon + margin < to_camera:
+        call = "solar noon / time of day"
+    else:
+        call = "cannot separate"
+    return call, to_camera, to_noon
 
 
 def harmonic_check(frame, bearing):
@@ -516,6 +569,17 @@ def main():
           "camera's AXIS (folded onto 0-90); the gap to the\n  bearing itself "
           "is reported beside it and is the weaker claim.")
 
+    noon, noon_days = solar_noon_bearing(observed)
+    if noon is not None:
+        print(f"\n  THE COMPETITOR. Over {noon_days} days the sun is highest "
+              f"at azimuth\n  {noon:.1f} deg. A sweep peak there means the term "
+              "is acting as a\n  proximity-to-solar-noon index -- time of day, "
+              "no camera in it. The\n  camera's bearing is "
+              f"{fold(bearing - noon):.0f} deg away from that, so 'near the "
+              "camera' and\n  'near solar noon' are nearly the same answer "
+              "here and must be compared\n  against each other rather than "
+              "against a threshold.")
+
     bearings = list(range(0, 360, max(1, args.bearing_step)))
     sweep = observed.copy()
     rows = []
@@ -563,25 +627,25 @@ def main():
     verdicts = {}
     for scope, grid in (("all hours", table), ("daylight only", lit_table)):
         print(f"\n  [{scope}]  {'target':<16}{'peak':>6}{'peak dR2':>11}"
-              f"{'at camera':>12}{'at anti':>10}{'gap to axis':>13}"
-              f"{'gap to bearing':>16}")
+              f"{'at camera':>12}{'at noon':>10}{'-> camera':>11}"
+              f"{'-> noon':>9}   verdict")
         for target in TARGETS + [DESCRIPTIVE]:
             if target not in grid.columns:
                 continue
             best = grid.loc[grid[target].idxmax()]
             at_camera = float(np.interp(
                 bearing, grid["bearing"], grid[target], period=360))
-            at_anti = float(np.interp(
-                (bearing + 180.0) % 360.0, grid["bearing"], grid[target],
-                period=360))
-            gap = abs((float(best["bearing"]) - bearing + 180.0) % 360.0 - 180.0)
-            axis_gap = min(gap, 180.0 - gap)
-            if scope == "all hours":
-                verdicts[target] = axis_gap
-            mark = "  <- DESCRIPTIVE" if target == DESCRIPTIVE else ""
+            at_noon = (float(np.interp(noon, grid["bearing"], grid[target],
+                                       period=360))
+                       if noon is not None else float("nan"))
+            call, gap, gap_noon = classify_peak(float(best["bearing"]),
+                                                bearing, noon)
+            if scope == "all hours" and target in TARGETS:
+                verdicts[target] = call
+            mark = "  (descriptive)" if target == DESCRIPTIVE else ""
             print(f"  {'':<12}{target:<16}{int(best['bearing']):>6}"
-                  f"{best[target]:>+11.4f}{at_camera:>+12.4f}{at_anti:>+10.4f}"
-                  f"{axis_gap:>12.0f}°{gap:>15.0f}°{mark}")
+                  f"{best[target]:>+11.4f}{at_camera:>+12.4f}{at_noon:>+10.4f}"
+                  f"{gap:>10.0f}°{gap_noon:>8.0f}°   {call}{mark}")
         # How sharp the peak is. The sun's azimuth does not cover the circle
         # evenly at a mid-latitude site, so neighbouring bearings are
         # correlated in-sample and even a perpendicular one keeps a large
@@ -606,26 +670,26 @@ def main():
     print("WHAT THIS DOES AND DOES NOT SETTLE")
     print("=" * 78)
     real = [t for t in TARGETS if t in verdicts]
-    close = [t for t in real if verdicts[t] <= 45]
-    print(f"  Rotation: {len(close)} of {len(real)} real targets peak within 45"
-          f" deg of the camera's\n  AXIS ({bearing:.0f} / "
-          f"{(bearing + 180.0) % 360.0:.0f}). Read that column, not the "
-          "bearing one: the\n  linear term cannot tell the two ends of the "
-          "axis apart.")
-    print("  Read that against the sharpness rows above. A perpendicular")
-    print("  bearing keeps a large share of the peak here by construction, so")
-    print("  a peak 30 deg from the axis is not meaningfully different from")
-    print("  one on it. Only a sweep with real contrast can localise anything.")
-    if len(close) == len(real) and real:
-        print("\n  All of them. That is the lens story's prediction, and it is")
-        print("  the reading the split in (1) and (2) should agree with.")
-    elif not close:
-        print("  None of them. Whatever the sun terms are carrying, it does not")
-        print("  point at this camera — which is the afternoon/sea-breeze")
-        print("  reading, not the lens one.")
+    tally = {}
+    for target in real:
+        tally[verdicts[target]] = tally.get(verdicts[target], 0) + 1
+    print("  Rotation, on the three real targets: "
+          + ", ".join(f"{count} {call}" for call, count in sorted(tally.items())))
+    if tally.get("camera / lens", 0) == len(real) and real:
+        print("  Every peak sits closer to the camera than to solar noon. That")
+        print("  is the lens story's prediction and nothing else's.")
+    elif tally.get("solar noon / time of day", 0) == len(real) and real:
+        print("  Every peak sits closer to SOLAR NOON than to the camera. The")
+        print("  terms are acting as a time-of-day index and the camera's")
+        print("  bearing is along for the ride, being only "
+              f"{fold(bearing - noon) if noon is not None else 0:.0f} deg away")
+        print("  from it. Do not call this glare.")
     else:
-        print("  A split verdict. Do not pick the targets that agree; report")
-        print("  that the rotation did not resolve it.")
+        print("  The targets disagree, so the rotation did not resolve it. Do")
+        print("  not quote the ones that came out the way you hoped.")
+    print("\n  Read that against the sharpness rows. A broad peak cannot")
+    print("  localise anything whatever its maximum says; a trough far below")
+    print("  the peak means the sweep does have contrast to spend.")
     print("\n  The split in (1) and (2) cannot settle this on its own, because")
     print("  sun-in-front and afternoon are nearly the same hours here. Read it")
     print("  as a consistency check on the rotation, not as independent")

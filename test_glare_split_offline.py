@@ -335,6 +335,64 @@ def check_the_sweep_identifies_an_axis_not_a_direction():
           f"{(planted + 180) % 360:.0f}")
 
 
+def check_the_peak_is_raced_against_solar_noon():
+    """A threshold on 'near the camera' cannot work when noon is 26 deg away.
+
+    Both fixtures use the same machinery and differ only in which bearing the
+    driver was built on, so the verdict is the only thing that can move.
+    """
+    print("\nracing the camera against solar noon")
+    rng = np.random.default_rng(88)
+    frame = scaffold(rng)
+    frame["hour_of_day"] = frame["hour"].dt.hour
+    noon, days = gs.solar_noon_bearing(frame)
+    check("solar noon is found and is near due south at this latitude",
+          noon is not None and abs(noon - 180.0) < 10.0 and days > 300,
+          f"{noon:.1f} deg over {days} days")
+
+    # The classifier on its own, with hand-picked peaks.
+    call, to_cam, to_noon = gs.classify_peak(206.0, BEARING, 180.0)
+    check("a peak exactly on the camera reads as the camera",
+          call == "camera / lens", f"{call} ({to_cam:.0f} vs {to_noon:.0f})")
+    call, _, _ = gs.classify_peak(180.0, BEARING, 180.0)
+    check("a peak exactly on solar noon reads as time of day",
+          call == "solar noon / time of day", call)
+    call, _, _ = gs.classify_peak(193.0, BEARING, 180.0)
+    check("a peak halfway between the two is not called either way",
+          call == "cannot separate", call)
+
+    # End to end: a driver aimed 60 deg off solar noon must read as the camera
+    # when the camera is put there, and as noon when it is built on noon.
+    base, _ = gs.base_columns(frame)
+
+    def peak_for(driver_bearing):
+        planted = solar.glare_index(frame["solar_elevation"],
+                                    frame["solar_azimuth"], driver_bearing)
+        local = plant(frame, planted, 0.55, rng)
+        rows = []
+        for candidate in range(0, 360, 10):
+            gs.attach_geometry(local, float(candidate), suffix="_b")
+            rows.append({"bearing": candidate,
+                         "dR2": gs.bearing_test(local, "detection_rate", base,
+                                                ["sun_in_view_b",
+                                                 "sun_glare_b"],
+                                                True)["dR2"]})
+        grid = pd.DataFrame(rows)
+        return float(grid.loc[grid["dR2"].idxmax(), "bearing"])
+
+    off_noon = peak_for(120.0)
+    call, to_cam, to_noon = gs.classify_peak(off_noon, 120.0, noon)
+    check("a driver built on a bearing far from noon reads as the camera",
+          call == "camera / lens",
+          f"peak {off_noon:.0f}, camera 120, noon {noon:.0f} -> {call}")
+
+    on_noon = peak_for(noon)
+    call, to_cam, to_noon = gs.classify_peak(on_noon, BEARING, noon)
+    check("a driver built on solar noon reads as time of day",
+          call == "solar noon / time of day",
+          f"peak {on_noon:.0f}, camera {BEARING:.0f}, noon {noon:.0f} -> {call}")
+
+
 def main():
     print("glare front/behind split offline checks")
     check_the_f_distribution()
@@ -345,6 +403,7 @@ def main():
     check_a_driver_in_both_groups_is_found_in_both()
     check_the_sweep_finds_the_planted_bearing()
     check_the_sweep_identifies_an_axis_not_a_direction()
+    check_the_peak_is_raced_against_solar_noon()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
