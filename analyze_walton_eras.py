@@ -195,22 +195,32 @@ def post_era_violations(frames, split, floor):
 # a data/ that analyze_drivers can read without data/ being touched
 # ---------------------------------------------------------------------------
 
-def mirror_data(source, destination, replacements):
+def mirror_data(source, destination, replacements, exclude=()):
     """A stand-in data/ directory: real dirs, symlinked files, some replaced.
 
-    glob's `**` does not descend through a symlinked directory, and
-    assemble_rip finds the hourly table with exactly that pattern. So every
-    directory on the path to a replaced file is made real and only its contents
-    are linked; the per-camera payload folders, which hold nothing globbed,
-    stay a single symlink rather than tens of thousands of links.
+    Every directory on the path to a replaced file is made REAL, and only its
+    contents are linked. That is not cosmetic: writing the replacement into a
+    symlinked directory would write it straight into the real data/, which is
+    the one thing this whole mechanism exists to avoid. Directories with
+    nothing replaced inside them stay a single symlink, so the per-camera
+    payload folders cost one link rather than tens of thousands.
+
+    `exclude` is a list of absolute paths to keep out of the mirror. It matters
+    because glob's `**` DOES follow a symlinked directory -- so a workspace
+    living under data/ would be linked back into every variant's mirror, and
+    assemble_rip, globbing for rip_*_hourly.csv, would then find all four
+    variants' tables under the same filename and analyse whichever sorted
+    first. The variant labels would still print correctly over the wrong
+    numbers, which is the worst way for this to fail.
     """
     replacements = {os.path.normpath(k): v for k, v in replacements.items()}
+    exclude = {os.path.abspath(p) for p in exclude}
     real_dirs = set()
     for key in replacements:
         parts = key.split(os.sep)[:-1]
         for depth in range(1, len(parts) + 1):
             real_dirs.add(os.sep.join(parts[:depth]))
-    _mirror(source, destination, "", real_dirs)
+    _mirror(source, destination, "", real_dirs, exclude)
 
     for relative, frame in replacements.items():
         target = os.path.join(destination, relative)
@@ -221,7 +231,7 @@ def mirror_data(source, destination, replacements):
     return destination
 
 
-def _mirror(source, destination, prefix, real_dirs):
+def _mirror(source, destination, prefix, real_dirs, exclude):
     os.makedirs(destination, exist_ok=True)
     if not os.path.isdir(source):
         return
@@ -229,10 +239,16 @@ def _mirror(source, destination, prefix, real_dirs):
         src = os.path.join(source, entry)
         dst = os.path.join(destination, entry)
         relative = os.path.join(prefix, entry) if prefix else entry
-        if os.path.isdir(src) and relative in real_dirs:
-            _mirror(src, dst, relative, real_dirs)
+        absolute = os.path.abspath(src)
+        if absolute in exclude:
+            continue
+        # A directory that CONTAINS an excluded path is still mirrored, as a
+        # real directory, so the rest of its contents survive.
+        contains = any(e.startswith(absolute + os.sep) for e in exclude)
+        if os.path.isdir(src) and (relative in real_dirs or contains):
+            _mirror(src, dst, relative, real_dirs, exclude)
         elif not os.path.lexists(dst):
-            os.symlink(os.path.abspath(src), dst)
+            os.symlink(absolute, dst)
 
 
 @contextlib.contextmanager
@@ -256,9 +272,25 @@ def build_variant(workspace, label, table, slug):
         print(f"  {label}: no hours survive; variant skipped")
         return None
     mirror = os.path.join(folder, "data")
-    mirror_data(ad.DATA_DIR,
-                mirror,
-                {os.path.join("rip_detection", f"rip_{slug}_hourly.csv"): hourly})
+    relative = os.path.join("rip_detection", f"rip_{slug}_hourly.csv")
+    mirror_data(ad.DATA_DIR, mirror, {relative: hourly},
+                exclude=[workspace])
+
+    # The guard, not a formality. assemble_rip picks hits[0] out of a glob, so
+    # a second table under this stem anywhere in the mirror means the variant
+    # label above the numbers stops describing the numbers.
+    found = glob.glob(os.path.join(mirror, "**", f"rip_{slug}_hourly.csv"),
+                      recursive=True)
+    expected = os.path.join(mirror, relative)
+    if found != [expected]:
+        sys.exit(f"  {label}: the mirror holds {len(found)} table(s) named "
+                 f"rip_{slug}_hourly.csv:\n    "
+                 + "\n    ".join(found)
+                 + f"\n  Exactly one was expected, at {expected}. "
+                 "assemble_rip globs for that\n  name and takes the first "
+                 "match, so this run would have labelled one\n  variant's "
+                 "numbers with another variant's name. Move --keep-workspace "
+                 "outside\n  the directory being mirrored.")
     return mirror
 
 

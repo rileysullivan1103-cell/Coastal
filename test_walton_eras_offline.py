@@ -349,6 +349,51 @@ def check_the_mirror_is_globbable_and_read_only():
               )["score_max"].iloc[0]) == 0.51)
 
 
+def check_a_workspace_inside_data_cannot_leak_into_the_mirror():
+    """glob's ** DOES follow a symlinked directory, so this is not theoretical.
+
+    A workspace under data/ gets linked back into every variant's mirror, and
+    each variant writes its table under the SAME filename. assemble_rip globs
+    for that name and takes the first match, so the run would print one
+    variant's label over another variant's numbers.
+    """
+    print("\na workspace living inside data/")
+    with tempfile.TemporaryDirectory() as folder:
+        source = os.path.join(folder, "data")
+        os.makedirs(os.path.join(source, "rip_detection"))
+        pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"], "score_max": [0.51]}
+                     ).to_csv(os.path.join(source, "rip_detection",
+                                           "rip_fix_hourly.csv"), index=False)
+        workspace = os.path.join(source, "era_workspace", "pooled")
+        os.makedirs(workspace)
+        pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"], "score_max": [0.33]}
+                     ).to_csv(os.path.join(workspace, "rip_fix_hourly.csv"),
+                              index=False)
+
+        replacement = pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"],
+                                    "score_max": [0.81]})
+        key = os.path.join("rip_detection", "rip_fix_hourly.csv")
+
+        leaky = we.mirror_data(source, os.path.join(folder, "leaky"),
+                               {key: replacement})
+        found = glob.glob(os.path.join(leaky, "**", "rip_fix_hourly.csv"),
+                          recursive=True)
+        check("without the exclusion the stray table IS reachable",
+              len(found) == 2, f"{len(found)} found")
+
+        safe = we.mirror_data(source, os.path.join(folder, "safe"),
+                              {key: replacement},
+                              exclude=[os.path.join(source, "era_workspace")])
+        found = glob.glob(os.path.join(safe, "**", "rip_fix_hourly.csv"),
+                          recursive=True)
+        check("excluding the workspace leaves exactly one",
+              len(found) == 1, f"{found}")
+        check("and it is the replacement",
+              found and float(pd.read_csv(found[0])["score_max"].iloc[0]) == 0.81)
+        check("the rest of data/ still comes through",
+              os.path.isdir(os.path.join(safe, "rip_detection")))
+
+
 def check_the_recensoring_check_tells_the_two_apart():
     print("\nthe check that would show A did nothing")
     rng = np.random.default_rng(5)
@@ -393,6 +438,7 @@ def main():
     check_the_class_filter_and_the_era_split()
     check_detected_is_read_not_guessed()
     check_the_mirror_is_globbable_and_read_only()
+    check_a_workspace_inside_data_cannot_leak_into_the_mirror()
     check_the_recensoring_check_tells_the_two_apart()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
