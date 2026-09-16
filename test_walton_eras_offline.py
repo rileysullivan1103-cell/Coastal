@@ -394,6 +394,55 @@ def check_a_workspace_inside_data_cannot_leak_into_the_mirror():
               os.path.isdir(os.path.join(safe, "rip_detection")))
 
 
+def check_an_earlier_run_s_workspace_is_skipped():
+    """The leftovers problem: HANDOFF tells people to KEEP data/era_workspace.
+
+    Excluding only the current workspace is not enough, because the next script
+    to mirror data/ inherits the previous run's four variant tables — all under
+    the one filename assemble_rip globs for. A workspace this module builds
+    carries a marker file saying so, and any mirror skips it.
+    """
+    print("\nan earlier run's workspace, left inside data/")
+    with tempfile.TemporaryDirectory() as folder:
+        source = os.path.join(folder, "data")
+        os.makedirs(os.path.join(source, "rip_detection"))
+        pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"], "score_max": [0.51]}
+                     ).to_csv(os.path.join(source, "rip_detection",
+                                           "rip_fix_hourly.csv"), index=False)
+
+        # An earlier run, exactly as build_variant leaves it.
+        stale = os.path.join(source, "era_workspace")
+        os.makedirs(os.path.join(stale, "B_pre"))
+        open(os.path.join(stale, we.WORKSPACE_MARKER), "w").write("x\n")
+        pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"], "score_max": [0.33]}
+                     ).to_csv(os.path.join(stale, "B_pre",
+                                           "rip_fix_hourly.csv"), index=False)
+        # And an unmarked stray, which must NOT be silently skipped.
+        stray = os.path.join(source, "scratch")
+        os.makedirs(stray)
+        pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"], "score_max": [0.22]}
+                     ).to_csv(os.path.join(stray, "rip_fix_hourly.csv"),
+                              index=False)
+
+        check("a marked workspace is recognised",
+              we.is_variant_workspace(stale))
+        check("an unmarked directory is not",
+              not we.is_variant_workspace(stray))
+
+        key = os.path.join("rip_detection", "rip_fix_hourly.csv")
+        replacement = pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"],
+                                    "score_max": [0.81]})
+        mirror = we.mirror_data(source, os.path.join(folder, "mirror"),
+                                {key: replacement})
+        found = sorted(glob.glob(os.path.join(mirror, "**",
+                                              "rip_fix_hourly.csv"),
+                                 recursive=True))
+        check("the marked workspace contributes nothing",
+              not any("era_workspace" in p for p in found), str(found))
+        check("the unmarked stray still shows up, so the guard can catch it",
+              any("scratch" in p for p in found), str(found))
+
+
 def check_a_buoy_that_only_covers_one_era_is_flagged():
     """A cannot test a finding computed on hours it never re-censors.
 
@@ -479,6 +528,7 @@ def main():
     check_detected_is_read_not_guessed()
     check_the_mirror_is_globbable_and_read_only()
     check_a_workspace_inside_data_cannot_leak_into_the_mirror()
+    check_an_earlier_run_s_workspace_is_skipped()
     check_a_buoy_that_only_covers_one_era_is_flagged()
     check_the_recensoring_check_tells_the_two_apart()
     print("\n" + ("ALL PASS" if not FAILURES

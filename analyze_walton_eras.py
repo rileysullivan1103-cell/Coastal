@@ -236,6 +236,18 @@ def mirror_data(source, destination, replacements, exclude=()):
     return destination
 
 
+# Dropped into every workspace this module builds, so a LATER run mirroring
+# data/ can recognise an earlier run's leftovers and step around them. Without
+# it, excluding only the current workspace is not enough: HANDOFF tells people
+# to keep data/era_workspace, and the next script to mirror data/ then finds
+# four stale variant tables under the one filename assemble_rip globs for.
+WORKSPACE_MARKER = ".coastal_variant_workspace"
+
+
+def is_variant_workspace(path):
+    return os.path.isfile(os.path.join(path, WORKSPACE_MARKER))
+
+
 def _mirror(source, destination, prefix, real_dirs, exclude):
     os.makedirs(destination, exist_ok=True)
     if not os.path.isdir(source):
@@ -246,6 +258,8 @@ def _mirror(source, destination, prefix, real_dirs, exclude):
         relative = os.path.join(prefix, entry) if prefix else entry
         absolute = os.path.abspath(src)
         if absolute in exclude:
+            continue
+        if os.path.isdir(src) and is_variant_workspace(src):
             continue
         # A directory that CONTAINS an excluded path is still mirrored, as a
         # real directory, so the rest of its contents survive.
@@ -271,6 +285,13 @@ def build_variant(workspace, label, table, slug):
     """Write one variant's hourly table into its own mirror of data/."""
     folder = os.path.join(workspace, label)
     os.makedirs(folder, exist_ok=True)
+    marker = os.path.join(workspace, WORKSPACE_MARKER)
+    if not os.path.exists(marker):
+        with open(marker, "w") as handle:
+            handle.write("Written by analyze_walton_eras.build_variant.\n"
+                         "Its presence tells a later mirror of data/ to skip "
+                         "this directory:\nthe rip_*_hourly.csv files under it "
+                         "are variant tables, not cameras.\n")
     scratch = os.path.join(folder, f"rip_{slug}_hourly.csv")
     hourly = prd.hourly_summary(table, scratch)
     if hourly is None or hourly.empty:
@@ -294,8 +315,11 @@ def build_variant(workspace, label, table, slug):
                  + f"\n  Exactly one was expected, at {expected}. "
                  "assemble_rip globs for that\n  name and takes the first "
                  "match, so this run would have labelled one\n  variant's "
-                 "numbers with another variant's name. Move --keep-workspace "
-                 "outside\n  the directory being mirrored.")
+                 "numbers with another variant's name.\n"
+                 f"\n  A workspace this tool built carries a {WORKSPACE_MARKER} "
+                 "file and is skipped\n  automatically. A stray table under "
+                 "data/ that has no marker has to go by\n  hand — delete it, "
+                 "or move --keep-workspace outside the mirrored tree.")
     return mirror
 
 
