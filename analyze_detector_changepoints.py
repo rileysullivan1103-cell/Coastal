@@ -282,7 +282,9 @@ def cameras_on_disk():
     found = []
     for path in paths:
         stem = os.path.basename(path)[len("rip_"):-len(".csv")]
-        if stem.endswith("_index"):
+        # rip_<slug>_index.csv and rip_<slug>_hourly.csv sit beside the frame
+        # table and match this glob; neither is a camera.
+        if stem.endswith("_index") or stem.endswith("_hourly"):
             continue
         found.append((by_slug.get(stem, stem), stem, path))
     return found

@@ -99,18 +99,37 @@ def grid_counts(frame, cell):
     return tally, pd.Series(key, index=frame.index)
 
 
+def uniform_spread(cell):
+    """Std deviation of points spread evenly across a cell of this size.
+
+    The number every observed spread has to be read against, and without it
+    the spreads mean nothing. A uniform distribution over a width c has
+    standard deviation c/sqrt(12), so at 64px it is 18.5. Virginia Beach's
+    busiest cell measures 18.1 x 14.2 -- that is simply "no clustering", not a
+    tight cluster, and reading it as one would invent a fixed object at every
+    camera.
+    """
+    return cell / np.sqrt(12.0)
+
+
 def spread_within(frame, cell_key, cells, cell):
     """Std deviation of centroids inside one cell, in pixels.
 
     The diagnostic that separates a fixed object from a favoured channel. A
     rip recurring in the same rough place still wanders; a groyne is in the
-    same pixels every time. Reported against the cell size so a reader can see
-    whether the cluster fills its cell or sits in a corner of it.
+    same pixels every time. Read against uniform_spread(cell), never alone.
     """
     inside = frame[cell_key == cells]
     if len(inside) < 3:
         return float("nan"), float("nan")
     return float(inside["bbox_x"].std()), float(inside["bbox_y"].std())
+
+
+def tightness(sx, sy, cell):
+    """How clustered a cell's centroids are: 1.0 is evenly spread, 0 is a point."""
+    if sx != sx or sy != sy:
+        return float("nan")
+    return float(np.sqrt(max(sx, 1e-9) * max(sy, 1e-9)) / uniform_spread(cell))
 
 
 def condition_coupling(frame, cell_key, cells, conditions):
@@ -164,7 +183,11 @@ def cameras_on_disk():
         by_slug = {}
     for path in sorted(glob.glob(f"{ad.DATA_DIR}/rip_detection/rip_*.csv")):
         stem = os.path.basename(path)[len("rip_"):-len(".csv")]
-        if stem.endswith("_index"):
+        # pull_rip_detection writes rip_<slug>.csv beside rip_<slug>_index.csv
+        # and rip_<slug>_hourly.csv. Only the first is a frame table; the other
+        # two matched this glob and were reported as cameras of their own,
+        # doubling the output with a skip notice for each real camera.
+        if stem.endswith("_index") or stem.endswith("_hourly"):
             continue
         out.append((by_slug.get(stem, stem), stem, path))
     return out
@@ -178,8 +201,12 @@ def report(camera, frame, cell, top, conditions):
     print(f"  {len(tally)} occupied cells; the busiest carries "
           f"{tally.iloc[0] / total:.1%} of them")
 
+    baseline = uniform_spread(cell)
+    print(f"  evenly-spread centroids in a {cell}px cell would have a spread "
+          f"of {baseline:.1f}px,\n  so 'tight' below is 1.00 for no clustering "
+          "and near 0 for a fixed point")
     print(f"\n  {'cell (x,y) px':<20} {'n':>7} {'share':>7} {'score':>6} "
-          f"{'area':>9} {'spread x,y px':>16}")
+          f"{'area':>9} {'spread x,y px':>16} {'tight':>6}")
     rows = []
     for cells, count in tally.head(top).items():
         inside = frame[cell_key == cells]
@@ -188,12 +215,14 @@ def report(camera, frame, cell, top, conditions):
         area = pd.to_numeric(inside.get("bbox_area_max"),
                              errors="coerce").median()
         label = f"{cells[0] * cell},{cells[1] * cell}"
+        tight = tightness(sx, sy, cell)
         print(f"  {label:<20} {count:>7} {count / total:>6.1%} "
-              f"{score:>6.2f} {area:>9.0f} {sx:>7.1f},{sy:>7.1f}")
+              f"{score:>6.2f} {area:>9.0f} {sx:>7.1f},{sy:>7.1f} {tight:>6.2f}")
         rows.append({"camera": camera, "cell_x": cells[0] * cell,
                      "cell_y": cells[1] * cell, "n": int(count),
                      "share": count / total, "median_score": score,
-                     "median_area": area, "spread_x": sx, "spread_y": sy})
+                     "median_area": area, "spread_x": sx, "spread_y": sy,
+                     "tightness": tight})
 
     hottest = tally.index[0]
     share = tally.iloc[0] / total
@@ -213,10 +242,16 @@ def report(camera, frame, cell, top, conditions):
         print(f"    no cell dominates (busiest {share:.1%}); detections are "
               "spread across the scene.")
 
-    if sx == sx and sx < cell / 6 and sy < cell / 6:
-        print(f"    centroids inside it vary by only {sx:.1f} x {sy:.1f} px. "
-              "A rip recurring in a\n    favoured channel still wanders; this "
-              "does not move at all.")
+    tight = tightness(sx, sy, cell)
+    if tight == tight and tight < 0.55:
+        print(f"    centroids inside it vary by {sx:.1f} x {sy:.1f} px, "
+              f"{tight:.0%} of what an evenly\n    spread cell would show. A "
+              "rip recurring in a favoured channel still wanders;\n    this "
+              "does not move.")
+    elif tight == tight and share >= 0.10:
+        print(f"    but its centroids are spread {tight:.0%} as widely as an "
+              "even scatter would be,\n    so it is a busy STRETCH of water "
+              "rather than one fixed object.")
 
     # Only where a cell actually dominates. On a scene with detections spread
     # evenly the "busiest" cell is whichever one noise favoured, and a coupling

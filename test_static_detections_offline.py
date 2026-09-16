@@ -84,6 +84,17 @@ def check_a_pinned_cell_is_found_and_measured():
     sx, sy = sd.spread_within(frame, cell_key, hottest, 64)
     check("the centroids inside it barely move", sx < 1.0 and sy < 1.0,
           f"{sx:.2f} x {sy:.2f} px")
+    check("tightness is near zero for a pinned cluster",
+          sd.tightness(sx, sy, 64) < 0.05, f"{sd.tightness(sx, sy, 64):.3f}")
+    check("and near 1.0 for centroids spread evenly across a cell",
+          0.85 < sd.tightness(18.1, 18.4, 64) < 1.15,
+          f"{sd.tightness(18.1, 18.4, 64):.2f}")
+    check("Virginia Beach's real 18.1 x 14.2 reads as no clustering",
+          sd.tightness(18.1, 14.2, 64) > 0.75,
+          f"{sd.tightness(18.1, 14.2, 64):.2f}")
+    check("Panama City west's real 10.2 x 5.5 reads as pinned",
+          sd.tightness(10.2, 5.5, 64) < 0.55,
+          f"{sd.tightness(10.2, 5.5, 64):.2f}")
 
     coupling = sd.condition_coupling(frame, cell_key, hottest, conditions)
     check("the coupling test ran", coupling is not None)
@@ -102,7 +113,10 @@ def check_a_pinned_cell_is_found_and_measured():
           "ONE CELL CARRIES" in text, text.strip()[:120])
     check("it says what that does to detection_rate",
           "was that feature visible" in text)
-    check("it notes the centroids do not move", "does not move at all" in text)
+    check("it notes the centroids do not move", "does not move" in text)
+    check("and reports tightness against the even-scatter baseline",
+          "tight" in text and "% of what an evenly" in text,
+          text.strip()[-200:])
     check("and that the cell is decoupled from the surf",
           "less coupled to the surf" in text)
     check("rows are returned for the csv", len(rows) == 5 and
