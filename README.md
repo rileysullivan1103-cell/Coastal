@@ -1613,22 +1613,45 @@ drawn at the calmest moment (boundary at row 0.55) is caught with **15.6% of
 its area reading as water in a quarter of the frames**; the same mask pushed to
 row 0.70 takes none. Both pass a single-frame look.
 
+The audit also fits the edge rather than leaving it to judgement. For each
+column it takes the most landward row that looked like water in at least a
+quarter of the frames, fits a line through those, and prints a paste-ready
+polygon. On a synthetic record with a shoreline of `y = 0.60 - 0.20x` and a
+tide swinging ±0.04 of the frame, it recovers `y = 0.625 - 0.200x` — the slope
+exact, the intercept inside the swing. It **proposes**; the mask stays
+hand-declared and logged, because an edge fitted automatically to a record
+containing a fog winter or a beach renourishment would be fitted to that
+instead, and nothing downstream would say so.
+
 ### Masks are declared by hand, and the burned-in overlay is cut back out
 
-Every `MASKS` entry records who drew it and from which frame. The Sailfish mask
-was fitted rather than eyeballed: the sand/water colour boundary across 119
-sampled columns gives a shoreline of `y = 0.615 - 0.198x` with a scatter of
-0.004 of the frame height, and the kept edge is that line pushed **0.10
-landward** as margin for tide, storm swash and seasonal beach width. It leaves
-440 to 730 rows of land.
+Every `MASKS` entry records who drew it and from which frame. The Sailfish
+shoreline was fitted, not eyeballed: the sand/water colour boundary across 178
+columns (84 kept, the rest rejected as canopies and shadow) gives
+`y = 0.615 - 0.195x` with a scatter of 0.003 of the frame height.
+
+**The margin on top of that line was wrong in the first draft, and wrong in the
+direction that looks responsible.** It was set to 0.10 "for tide" — about 150
+rows — which threw away the upper beach where the umbrellas sit: land in every
+frame, and the part of the land with the most texture to register on. Caution
+about the seaward edge is free; caution about the landward edge costs exactly
+the signal the run is trying to measure. No measurement said 0.10. The margin
+is now 0.04 and is marked provisional in the entry itself, pending what
+`--mask-audit` measures.
 
 The `drop` polygon is not cosmetic. **The "Sailfish" watermark is burned into
 the sensor, not the scene** — measured at x 0.033–0.104, y 0.927–0.956. It is
 bright, sharp and perfectly stationary, and it does not move when the camera
-moves. Left in the mask it anchors both routes and reports a camera that has
-turned as a camera that has not: the single most dangerous kind of false
-stability this pipeline can produce, because it raises confidence while
-destroying the measurement.
+moves. On a beach the sand is texture-poor and this is the highest-contrast
+thing in the land region, so SIFT weights it heavily; it votes for "no motion"
+in exactly the frames where the answer matters. Left in, it anchors both routes
+and reports a camera that has turned as a camera that has not: the single most
+dangerous kind of false stability this pipeline can produce, because it raises
+confidence while destroying the measurement.
+
+The `drop` box is sized to the text and no larger. The first draft blacked out
+the whole bottom-left corner, which was the same mistake as the 0.10 margin in
+miniature — more land given up for nothing.
 
 ### The survey is the decisive test, and it is run early
 

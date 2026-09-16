@@ -202,6 +202,62 @@ def test_the_mask_audit_catches_a_tide_one_frame_could_not_show():
         shutil.rmtree(folder)
 
 
+def test_the_audit_measures_the_edge_instead_of_guessing_it():
+    """The seaward edge was the one number in the file that was pure judgement.
+
+    The first Sailfish mask put it 0.10 of the frame landward of the fitted
+    waterline "for tide" -- which is not caution, it is 150 rows of the most
+    textured land on the beach thrown away, and nothing measured said 0.10.
+    This fits the edge to where water actually reached across the record.
+    """
+    import tempfile
+    import shutil
+    import contextlib
+    import io
+    from PIL import Image
+
+    height, width = 400, 600
+    folder = tempfile.mkdtemp()
+    try:
+        paths, dates = [], []
+        for index in range(60):
+            swing = 0.04 * np.sin(index / 3.0)       # tide, +/- 0.04 of frame
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+            for x in range(width):
+                edge = int((0.60 - 0.20 * x / (width - 1) + swing) * height)
+                frame[:edge, x] = (70, 95, 110)
+                frame[edge:, x] = (205, 180, 140)
+            path = os.path.join(folder, f"f{index:03d}.jpg")
+            Image.fromarray(frame).save(path, quality=95)
+            paths.append(path)
+            dates.append(pd.Timestamp("2024-01-01", tz="UTC")
+                         + pd.Timedelta(days=index))
+
+        spec = {"keep": [[(0.0, 0.70), (1.0, 0.50), (1.0, 1.0), (0.0, 1.0)]],
+                "drop": [], "note": "test"}
+        mask = strict.build_mask((height, width), spec)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            got = strict.audit_mask(paths, dates, mask, spec, downsample=2,
+                                    slug="test-camera")
+        edge = got["measured_edge"]
+
+        # The planted shoreline slopes -0.200 across the frame.
+        check("the measured edge recovers the shoreline's slope",
+              abs(edge["slope"] + 0.200) < 0.02, f"{edge['slope']:+.3f}")
+        # Habitual water sits at the shoreline plus most of the tide swing.
+        check("...and its intercept lands inside the tide swing",
+              0.60 <= edge["intercept"] <= 0.645, f"{edge['intercept']:.3f}")
+        check("...fitted tightly enough to be worth pasting",
+              edge["scatter"] < 0.01, f"scatter {edge['scatter']:.4f}")
+        check("the proposal is printed as a polygon, not a lecture",
+              '"keep": [[(0.0,' in buffer.getvalue(),
+              [l.strip() for l in buffer.getvalue().splitlines()
+               if '"keep"' in l][0][:46])
+    finally:
+        shutil.rmtree(folder)
+
+
 def test_the_declared_masks_are_usable_as_declared():
     """A mask that builds to nothing is worse than no mask: it runs."""
     for slug, spec in strict.MASKS.items():

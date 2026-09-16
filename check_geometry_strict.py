@@ -97,28 +97,37 @@ PERSIST = geo.PERSIST
 
 MASKS = {
     "beachfront-from-sailfish-street-beach-access-corolla-nc": {
-        # The shoreline in this frame is a straight line: fitting the
-        # sand/water colour boundary across 83 of 119 sampled columns (the
-        # rest rejected as canopies and tents) gives y = 0.615 - 0.198x, with
-        # a scatter of 0.004 of the frame height about it. The kept edge is
-        # that line pushed 0.10 landward -- a margin for tide, storm swash and
-        # seasonal beach width, none of which one frame can show. It leaves a
-        # land band 0.29 of the frame deep at the left edge and 0.48 at the
-        # right, which at 2688x1520 is 440 to 730 rows: far clear of
-        # THIN_BAND_PX either way.
-        "keep": [[(0.0, 0.71), (1.0, 0.52), (1.0, 1.0), (0.0, 1.0)]],
+        # The shoreline in the reference frame is a straight line. Fitting the
+        # sand/water colour boundary across 178 columns (84 kept; the rest
+        # rejected as canopies, tents and shadow) gives y = 0.615 - 0.195x
+        # with a scatter of 0.003 of the frame height about it.
+        #
+        # THE MARGIN IS 0.04, NOT THE 0.10 IT WAS. The first draft pushed the
+        # edge a tenth of the frame landward of that line "for tide", which
+        # threw away about 150 rows of plainly dry sand -- the upper beach
+        # where the umbrellas sit, which is land in every frame and is the
+        # part with the most texture to register on. A margin is for what one
+        # frame cannot show, and 0.10 was not a margin, it was a guess with no
+        # measurement behind it. 0.04 is a working value pending the audit:
+        # --mask-audit measures where water actually reaches across the whole
+        # record and prints the empirical edge, and that is what this should
+        # be set from.
+        "keep": [[(0.0, 0.655), (1.0, 0.460), (1.0, 1.0), (0.0, 1.0)]],
         # THE "Sailfish" WATERMARK IS BURNED INTO THE SENSOR, NOT THE SCENE.
         # Measured at x 0.033-0.104, y 0.927-0.956. It does not move when the
         # camera moves, so leaving it in hands both routes a bright, sharp,
-        # perfectly stationary feature that anchors the fit and reports a
-        # camera that has turned as a camera that has not. Dropped with room
-        # to spare in case the overlay is repositioned during the record.
-        "drop": [[(0.0, 0.89), (0.16, 0.89), (0.16, 1.0), (0.0, 1.0)]],
+        # perfectly stationary feature -- and on a beach, where the sand is
+        # texture-poor and this is the highest-contrast thing in the land
+        # region, SIFT will weight it heavily. It votes for "no motion" in
+        # exactly the frames where the answer matters. Dropped with a little
+        # padding, but only a little: the first draft blocked out the whole
+        # bottom-left corner, which was more land given up for nothing.
+        "drop": [[(0.02, 0.915), (0.12, 0.915), (0.12, 0.97), (0.02, 0.97)]],
         "note": "drawn by Claude from the fractional grid preview of "
-                "currituck_sailfish-2024-06-02-165953Z.jpg (grid_beachfront-"
-                "from-sailfish-street-beach-access-corolla-nc.jpg); shoreline "
-                "fitted, not eyeballed; NOT YET CONFIRMED BY --mask-audit "
-                "against the archive",
+                "currituck_sailfish-2024-06-02-165953Z.jpg; shoreline fitted "
+                "(y = 0.615 - 0.195x) rather than eyeballed, plus a 0.04 "
+                "margin that is PROVISIONAL until --mask-audit measures the "
+                "real water excursion across the record",
     },
     # "beachfront-from-hampton-inn-corolla-nc": {
     #     "keep": [[(0.0, 0.62), (1.0, 0.55), (1.0, 1.0), (0.0, 1.0)]],
@@ -1073,7 +1082,7 @@ def main():
     # every frame, and only this checks it. It runs before registration so a
     # mask that catches swash is caught before its results are believed.
     if args.mask_audit or args.mask_preview:
-        audit_mask(paths, dates, mask, spec, warm=args.warm)
+        audit_mask(paths, dates, mask, spec, warm=args.warm, slug=slug)
     if args.mask_preview or args.mask_audit:
         return
 
@@ -1426,7 +1435,73 @@ def water_frequency(paths, shape, warm=25, downsample=4):
     return total / count, per_frame, total.shape
 
 
-def audit_mask(paths, dates, mask, spec, warm=25, downsample=4, often=0.25):
+def measured_edge(frequency, often=0.25, margin=0.03, slug="<camera>"):
+    """Where water actually reaches, fitted from the record rather than drawn.
+
+    The mask's seaward edge is the one number in the whole file that is pure
+    judgement, and the first Sailfish draft got it wrong by a tenth of the
+    frame in the cautious direction -- which is not safe, it is 150 rows of
+    the most textured land thrown away. This replaces the judgement with a
+    measurement: for each column, the most landward row that looked like water
+    in at least `often` of the frames, fitted to a line and offset by
+    `margin`.
+
+    It PROPOSES; it does not install. The mask stays hand-declared and
+    logged, because a mask fitted automatically to a record that contains a
+    fog winter or a beach renourishment would be fitted to that instead, and
+    nothing downstream would say so.
+    """
+    height, width = frequency.shape
+    columns, rows = [], []
+    for x in range(width):
+        wet = np.where(frequency[:, x] >= often)[0]
+        if len(wet):
+            columns.append(x / max(width - 1, 1))
+            rows.append(wet[-1] / max(height - 1, 1))
+    if len(columns) < width // 4:
+        print("\n  too few columns carry habitual water to fit an edge; "
+              "either the mask\n  already clears it everywhere, or the record "
+              "is too short to say.")
+        return None
+    columns, rows = np.array(columns), np.array(rows)
+    # Robust fit: drop the columns that sit far off the line -- a pier, a
+    # groyne, a parked truck. A PERFECT fit is the case that breaks this
+    # naively: the residuals are then floating-point dust, two standard
+    # deviations of dust excludes everything, and the next polyfit is handed
+    # an empty vector. So a round that would empty the set ends the loop.
+    keep = np.ones(len(columns), bool)
+    slope, intercept = np.polyfit(columns, rows, 1)
+    for _ in range(5):
+        resid = rows - (slope * columns + intercept)
+        spread = float(np.std(resid[keep]))
+        if spread < 1e-6:
+            break
+        nearer = np.abs(resid) < 2.0 * spread
+        if nearer.sum() < max(4, len(columns) // 10):
+            break
+        keep = nearer
+        slope, intercept = np.polyfit(columns[keep], rows[keep], 1)
+    scatter = float(np.std(rows[keep] - (slope * columns[keep] + intercept)))
+    print(f"\n  WHERE WATER ACTUALLY REACHES, over the whole record:")
+    print(f"    y = {intercept:.3f} {slope:+.3f} x   "
+          f"(scatter {scatter:.3f} of the frame, {keep.sum()} of "
+          f"{len(columns)} columns)")
+    print(f"    left edge {intercept:.3f}, right edge {intercept + slope:.3f}")
+    left, right = intercept + margin, intercept + slope + margin
+    print(f"\n  the same line with a {margin:.2f} margin, ready to paste:")
+    print(f'    "{slug}": {{')
+    print(f'        "keep": [[(0.0, {left:.3f}), (1.0, {right:.3f}), '
+          f'(1.0, 1.0), (0.0, 1.0)]],')
+    print("    }")
+    print("  Compare it with what is declared. A declared edge well landward "
+          "of this one\n  is land being thrown away; one seaward of it is "
+          "water being registered.")
+    return {"slope": float(slope), "intercept": float(intercept),
+            "scatter": scatter}
+
+
+def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
+               often=0.25, slug="<camera>"):
     """Does the declared mask ever contain water, anywhere in the record?
 
     Measurement, not correction: this reports what the mask caught and where.
@@ -1489,9 +1564,11 @@ def audit_mask(paths, dates, mask, spec, warm=25, downsample=4, often=0.25):
         print("\n  NOTE: some frames read mostly wet while the median is "
               "low. That is the\n  signature of fog and low sun rather than "
               "of water in the mask; the dates\n  above say which.")
+    edge = measured_edge(frequency, often=often, slug=spec.get("slug", slug))
     return {"often_wet_share": float(share),
             "median_frame_share": float(settled),
-            "worst_frame_share": float(shares.max())}
+            "worst_frame_share": float(shares.max()),
+            "measured_edge": edge}
 
 
 def draw_mask_preview(path, mask, out_path):
