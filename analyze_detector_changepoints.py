@@ -293,6 +293,14 @@ def cameras_on_disk():
     return found
 
 
+def class_names(args):
+    """The class list the run is filtering on, or None for 'any'."""
+    wanted = getattr(args, "detection_class", None)
+    if not wanted or wanted == "any":
+        return None
+    return [c.strip() for c in str(wanted).split(",") if c.strip()]
+
+
 def class_mix(frame):
     """Counts per score_classes value, for the header line."""
     if "score_classes" not in frame.columns:
@@ -394,12 +402,18 @@ def attach_detection_rate(daily, slug):
     return daily, True
 
 
-def model_versions(path):
-    """Dates the payload's own model_name/model_version changed, if recorded.
+def model_versions(path, wanted=None):
+    """When each recorded model version is present, as a SPAN per version.
 
-    Worth more than every changepoint in this script put together when it is
-    present: a version string is the thing itself, not an inference about it.
-    It is reported first so a statistical date can be read against it.
+    Not as row-to-row transitions. Two models publish into one feed and their
+    rows interleave in time, so a walk down the sorted rows calls every row a
+    version change: Corolla Hampton Inn printed fifty-four lines alternating
+    "rip_current_detector / 1 -> yolo / v8n -> rip_current_detector / 1" across
+    five dates. That is the two models taking turns, not fifty-four
+    deployments, and it buried the one real transition at 2024-07-28.
+
+    A version's first and last appearance is what a deployment looks like, and
+    it is immune to interleaving.
     """
     frame = ad.read_csv(path)
     if frame is None or frame.empty:
@@ -410,18 +424,26 @@ def model_versions(path):
     frame = frame.copy()
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True,
                                         errors="coerce")
-    frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp")
-    tag = frame[columns].astype(str).agg(" / ".join, axis=1)
-    if tag.nunique() <= 1:
-        return [{"from": None, "to": tag.iloc[0], "date": None,
-                 "note": "one version throughout"}]
-    changed = tag.ne(tag.shift())
+    frame = frame.dropna(subset=["timestamp"])
+    if wanted and "score_classes" in frame.columns:
+        keep = frame["score_classes"].fillna("").map(
+            lambda v: not bls.class_set(v) or bls.class_set(v) <= set(wanted))
+        if keep.any():
+            frame = frame[keep]
+    if frame.empty:
+        return []
+    frame["tag"] = frame[columns].astype(str).agg(" / ".join, axis=1)
+
+    span_first = frame["timestamp"].min()
+    span_last = frame["timestamp"].max()
     out = []
-    for position in np.flatnonzero(changed.to_numpy())[1:]:
-        out.append({"from": tag.iloc[position - 1], "to": tag.iloc[position],
-                    "date": frame["timestamp"].iloc[position].strftime("%Y-%m-%d"),
-                    "note": ""})
-    return out
+    for tag, group in frame.groupby("tag"):
+        first, last = group["timestamp"].min(), group["timestamp"].max()
+        out.append({"tag": tag, "n": len(group), "first": first, "last": last,
+                    "starts_late": (first - span_first).days > 14,
+                    "ends_early": (span_last - last).days > 14})
+    return sorted(out, key=lambda v: v["first"])
+
 
 
 def daily_controls(camera, lat, lon):
@@ -586,7 +608,7 @@ def residualize(daily, controls, metrics):
     return out, names
 
 
-def monthly_histograms(path, camera):
+def monthly_histograms(path, camera, wanted=None):
     """score_max distribution per month, as counts in fixed 0.05 bins.
 
     Fixed bins, never per-month quantiles: the whole point is that two months
@@ -597,6 +619,15 @@ def monthly_histograms(path, camera):
     if frame is None or frame.empty or "score_max" not in frame.columns:
         return None
     frame = frame.copy()
+    # Filtered to the analysed class. Unfiltered, the floor a month shows is
+    # whichever model scored lowest that month, so Corolla read 0.501 in June
+    # 2024 from the object model while the rip model sat at 0.70 throughout --
+    # a calibration shift that never happened to the series being analysed.
+    if wanted and "score_classes" in frame.columns:
+        keep = frame["score_classes"].fillna("").map(
+            lambda v: not bls.class_set(v) or bls.class_set(v) <= set(wanted))
+        if keep.any():
+            frame = frame[keep]
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True,
                                         errors="coerce")
     frame["score_max"] = pd.to_numeric(frame["score_max"], errors="coerce")
@@ -979,16 +1010,21 @@ def main():
             print("  no coverage file: detection_rate is UNAVAILABLE, not zero "
                   "(run pull_rip_detection.py --coverage)")
 
-        versions = model_versions(path)
-        if versions:
-            print("\n  model version recorded in the payload:")
-            for change in versions:
-                if change["date"] is None:
-                    print(f"    {change['to']}  ({change['note']})")
-                else:
-                    print(f"    {change['date']}  {change['from']} -> {change['to']}")
-        else:
+        versions = model_versions(path, wanted=class_names(args))
+        if not versions:
             print("\n  payload records no model name or version")
+        elif len(versions) == 1:
+            print(f"\n  one model version throughout: {versions[0]['tag']}")
+        else:
+            print(f"\n  {len(versions)} model versions in the payload:")
+            for entry in versions:
+                mark = ""
+                if entry["starts_late"]:
+                    mark += "  STARTS mid-record"
+                if entry["ends_early"]:
+                    mark += "  STOPS mid-record"
+                print(f"    {entry['first']:%Y-%m-%d} to {entry['last']:%Y-%m-%d}"
+                      f"  {entry['n']:>7} frames  {entry['tag']}{mark}")
 
         print("\n  raw series:")
         metrics = [m for m in METRICS if m in daily.columns
@@ -1034,7 +1070,7 @@ def main():
                                            class_events)
 
         print("\n  monthly score_max histograms:")
-        hist = monthly_histograms(path, camera)
+        hist = monthly_histograms(path, camera, wanted=class_names(args))
         print_histograms(hist)
         if hist is not None:
             histograms.append(hist)

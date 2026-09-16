@@ -373,9 +373,30 @@ def check_end_to_end_recovers_both_dates():
 
             versions = cp.model_versions(
                 os.path.join(folder, "rip_detection", f"rip_{slug_a}.csv"))
-            check("the recorded model version change is reported",
-                  len(versions) == 1 and versions[0]["date"] ==
-                  SHARED_STEP.strftime("%Y-%m-%d"), str(versions))
+            check("both recorded model versions are reported as spans",
+                  len(versions) == 2, str([v["tag"] for v in versions]))
+            check("the older one ends where the newer one starts",
+                  versions[0]["ends_early"] and versions[1]["starts_late"],
+                  str([(v["tag"], v["starts_late"], v["ends_early"])
+                       for v in versions]))
+            check("and the handover is the date it was built at",
+                  abs((versions[1]["first"] - SHARED_STEP).days) <= 1,
+                  f"{versions[1]['first']:%Y-%m-%d}")
+
+            # Two models interleaving row by row is not N deployments.
+            path_a = os.path.join(folder, "rip_detection", f"rip_{slug_a}.csv")
+            table = pd.read_csv(path_a)
+            table["model_version"] = ["1.0", "1.1"] * (len(table) // 2) \
+                + ["1.0"] * (len(table) % 2)
+            table.to_csv(path_a, index=False)
+            interleaved = cp.model_versions(path_a)
+            check("two interleaved models report two spans, not one per row",
+                  len(interleaved) == 2, str(len(interleaved)))
+            check("and neither is flagged as starting or stopping mid-record",
+                  not any(v["starts_late"] or v["ends_early"]
+                          for v in interleaved),
+                  str([(v["starts_late"], v["ends_early"])
+                       for v in interleaved]))
 
             hist = cp.monthly_histograms(
                 os.path.join(folder, "rip_detection", f"rip_{slug_a}.csv"),
