@@ -240,7 +240,12 @@ def harmonic_check(frame, bearing):
                               np.sin(radians)])
     target = usable["sun_in_view"].to_numpy(float)
     beta, *_ = np.linalg.lstsq(design, target, rcond=None)
-    fitted = design @ beta
+    # errstate because some BLAS builds raise spurious divide/overflow flags on
+    # this product; the result is checked for finiteness rather than trusted.
+    with np.errstate(all="ignore"):
+        fitted = design @ beta
+    if not np.isfinite(fitted).all() or not np.isfinite(beta).all():
+        return None
     ss_res = float(((target - fitted) ** 2).sum())
     ss_tot = float(((target - target.mean()) ** 2).sum())
     return {"r2": 1 - ss_res / ss_tot if ss_tot else float("nan"),

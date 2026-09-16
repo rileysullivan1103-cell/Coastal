@@ -244,8 +244,35 @@ def mirror_data(source, destination, replacements, exclude=()):
 WORKSPACE_MARKER = ".coastal_variant_workspace"
 
 
+def looks_like_mirror(path, depth=2):
+    """True for a directory holding <label>/data/rip_detection underneath it.
+
+    The marker only helps for workspaces written after it existed. A workspace
+    left by an earlier run has none, and telling someone to delete a directory
+    the brief told them to keep is a poor trade for a shape that is entirely
+    unambiguous: nothing in a real data/ tree contains a nested
+    data/rip_detection, because that IS the mirror layout this module writes.
+    """
+    if os.path.isdir(os.path.join(path, "data", "rip_detection")):
+        return True
+    if depth <= 0:
+        return False
+    try:
+        children = sorted(os.listdir(path))
+    except OSError:
+        return False
+    for child in children:
+        full = os.path.join(path, child)
+        if os.path.isdir(full) and not os.path.islink(full):
+            if looks_like_mirror(full, depth - 1):
+                return True
+    return False
+
+
 def is_variant_workspace(path):
-    return os.path.isfile(os.path.join(path, WORKSPACE_MARKER))
+    """A directory this module built, by its marker or by its shape."""
+    return (os.path.isfile(os.path.join(path, WORKSPACE_MARKER))
+            or looks_like_mirror(path))
 
 
 def _mirror(source, destination, prefix, real_dirs, exclude):
@@ -292,8 +319,17 @@ def build_variant(workspace, label, table, slug):
                          "Its presence tells a later mirror of data/ to skip "
                          "this directory:\nthe rip_*_hourly.csv files under it "
                          "are variant tables, not cameras.\n")
-    scratch = os.path.join(folder, f"rip_{slug}_hourly.csv")
-    hourly = prd.hourly_summary(table, scratch)
+    # Written to a temp file, not into the workspace. hourly_summary needs a
+    # path, and a copy left beside the mirror is a second table under the
+    # filename assemble_rip globs for — harmless inside this run, and one more
+    # stray for the next script that mirrors data/ to trip over.
+    handle, scratch = tempfile.mkstemp(prefix=f"rip_{slug}_", suffix=".csv")
+    os.close(handle)
+    try:
+        hourly = prd.hourly_summary(table, scratch)
+    finally:
+        if os.path.exists(scratch):
+            os.unlink(scratch)
     if hourly is None or hourly.empty:
         print(f"  {label}: no hours survive; variant skipped")
         return None
@@ -316,10 +352,13 @@ def build_variant(workspace, label, table, slug):
                  "assemble_rip globs for that\n  name and takes the first "
                  "match, so this run would have labelled one\n  variant's "
                  "numbers with another variant's name.\n"
-                 f"\n  A workspace this tool built carries a {WORKSPACE_MARKER} "
-                 "file and is skipped\n  automatically. A stray table under "
-                 "data/ that has no marker has to go by\n  hand — delete it, "
-                 "or move --keep-workspace outside the mirrored tree.")
+                 "\n  A workspace this tool built is skipped automatically, "
+                 "by its\n  " + WORKSPACE_MARKER + " file or by its "
+                 "<label>/data/rip_detection shape.\n  Something above matches "
+                 "neither. Either delete it, or mark it by hand:\n"
+                 f"    touch <that directory>/{WORKSPACE_MARKER}\n"
+                 "  Do that only for a directory you know holds variant "
+                 "tables, not cameras.")
     return mirror
 
 

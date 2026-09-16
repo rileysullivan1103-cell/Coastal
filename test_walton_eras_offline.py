@@ -429,6 +429,23 @@ def check_an_earlier_run_s_workspace_is_skipped():
         check("an unmarked directory is not",
               not we.is_variant_workspace(stray))
 
+        # A workspace written before the marker existed. Recognised by its
+        # shape instead, so an older run's leftovers do not have to be
+        # deleted by anyone who followed the brief and kept them.
+        old_style = os.path.join(source, "old_workspace")
+        os.makedirs(os.path.join(old_style, "A", "data", "rip_detection"))
+        pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"], "score_max": [0.44]}
+                     ).to_csv(os.path.join(old_style, "A", "data",
+                                           "rip_detection",
+                                           "rip_fix_hourly.csv"), index=False)
+        check("a markerless workspace is recognised by its shape",
+              we.is_variant_workspace(old_style))
+        check("and the real rip_detection folder is NOT mistaken for one",
+              not we.is_variant_workspace(os.path.join(source,
+                                                       "rip_detection")))
+        check("nor is a plain directory of tables",
+              not we.is_variant_workspace(stray))
+
         key = os.path.join("rip_detection", "rip_fix_hourly.csv")
         replacement = pd.DataFrame({"hour": ["2025-01-01T00:00:00Z"],
                                     "score_max": [0.81]})
@@ -439,6 +456,8 @@ def check_an_earlier_run_s_workspace_is_skipped():
                                  recursive=True))
         check("the marked workspace contributes nothing",
               not any("era_workspace" in p for p in found), str(found))
+        check("nor does the markerless one",
+              not any("old_workspace" in p for p in found), str(found))
         check("the unmarked stray still shows up, so the guard can catch it",
               any("scratch" in p for p in found), str(found))
 
