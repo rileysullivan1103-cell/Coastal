@@ -43,7 +43,8 @@ driver of the RIP, because the label is model confidence and not a verified rip.
 |---|---|---|
 | analysable hours, class-filtered | 8,405 | 1,938 |
 | ...split at 2024-12-13 | 1,400 pre / 7,005 post | post era only |
-| span | 2024-05-31 to 2026-09-15 | 2026-04-25 to 2026-08-29 |
+| span, all classes | 2024-05-31 to 2026-09-15 | 2026-04-25 to 2026-08-29 |
+| span, rip class | **2024-06-24** to 2026-09-15 | same |
 | frames, all classes | 35,394 | 2,352 |
 | frames, rip class only | 28,721 (81%) | 2,352 (**100%**) |
 | usable days for a time series | **643** | 81 |
@@ -60,7 +61,7 @@ driver of the RIP, because the label is model confidence and not a verified rip.
 |---|---|---|
 | `ripdetect_walton / yolov8x_1.1` | `rip_current` | Walton, Virginia Beach, both Panama City views |
 | `rip_current_detector / 1` | `rip` | Corolla Hampton Inn, Corolla Sailfish, Carova |
-| `yolo / v8n` | COCO objects | Walton and both Corolla cameras, 2024-05 to 2024-07 only |
+| `yolo / v8n` | COCO objects | Walton 2024-05-31 to 2024-06-19 only; also both Corolla cameras |
 
 | camera | frames | rip class | usable days |
 |---|---|---|---|
@@ -200,8 +201,30 @@ which is evidence that the correction is correcting rather than merely differing
 
 **The three rip classes and three models above.** `rip_current` never co-occurs
 with an object class, so `set(classes) <= {"rip_current", "rip"}` is an exact
-filter. Frames with a blank class list are the observed zeros and must be KEPT.
-At Walton the object stream is 6,673 of 35,394 frames — 18.9%.
+filter.
+
+**At Walton the class filter is exactly a truncation of the first 24 days.**
+The monthly timeline settles this and it is not what "18.9% of frames" sounds
+like. The object model ran 2024-05-31 to 2024-06-19 and then stopped dead;
+`rip_current` starts 2024-06-24, five days later. The two NEVER overlap in
+time, so removing the object classes removes a block at the start of the
+record and nothing else. Every month from 2024-07 on is 0% object, for 26
+straight months. 28,721 rip + 6,673 object = 35,394 frames exactly, so any
+difference between an unfiltered and a class-filtered Walton result is
+attributable to those 24 days and to nothing else.
+Measured, not inferred: the unfiltered hourly table runs from 2024-05-31 21:00
+over 5,918 hours, the class-filtered one over 5,719 — a difference of 199
+hours, which is the same 199 the pre-era detection-hour counts give (1,207
+unfiltered against 1,008 filtered) and is what 2024-05-31 to 2024-06-19 comes
+to at roughly ten daylight hours a day.
+Two consequences: the record analysable for rips begins **2024-06-24**, not
+2024-05-31; and **`blank` is zero in every Walton month**, so the rule below
+about keeping blank-class observed zeros is moot here — Walton's zeros come
+entirely from the coverage file. The rule still matters at a camera that has
+them.
+**October 2024 is missing entirely** — 2024-09 has 339 frames, 2024-11 has
+2,647, and there is no row between. That gap sits inside the pre-era half of
+the era split, which is already the thin side at 1,400 hours.
 
 **Panama City west view is half one fixed object.** 464 of 980 detections in a
 single 64px cell at (960,192), centroids varying 10.2 x 5.5 px — 41% of the
@@ -254,10 +277,18 @@ contaminated by object detections.
   POSITIVE on both sides of the split (pre +0.128 to +0.172, post +0.050 to
   +0.076, every p below 1e-5). `pooled` differs from the original only by the
   class filter — the MOP/buoy n of 1,884 is identical across both runs, so the
-  underlying hours did not change. Rain empties a beach, the `person` class
-  falls with it, and that is what made the pre era read negative. What is left
-  is a consistent modest POSITIVE rain term, which belongs with cloud and glare
-  as image degradation, not ocean physics.
+  underlying hours did not change. What is left is a consistent modest
+  POSITIVE rain term, which belongs with cloud as image degradation rather
+  than ocean physics.
+  **The mechanism is narrower than the previous brief said.** It claimed rain
+  empties a beach and the `person` class falls with it. There is no such
+  ongoing relationship, because there are no person detections across 2024 —
+  only in a 20-day block, 2024-05-31 to 2024-06-19 (see the class window in
+  SETTLED). What the 2024 rain correlation was measuring is whatever the
+  weather did in those three weeks, during which a DIFFERENT model produced
+  6,582 detections in June alone against a typical month of 700-2,600. That is
+  a data-provenance artifact, not a story about beachgoers, and it should be
+  described as one.
 - **The MOP-vs-buoy ratio as a cross-era result.** Buoy 46236's record runs
   2025-08-31 to 2026-08-31 — entirely after the split. Zero matched hours fall
   in the low-floor era, so re-censoring cannot touch it and a pre-era split
@@ -362,8 +393,11 @@ timestamp in solar.py. Cloud cover is on disk at both sites.
 
 **Filter by `score_classes` before computing anything from a rip record.** Two
 rip class names (`rip_current`, `rip`) and one object stream share the column.
-Blank class lists are the observed zeros and must be KEPT. At Walton the filter
-moves 18.9% of frames and it has already overturned one published finding.
+Blank class lists are the observed zeros and must be KEPT where a camera has
+any — Walton has none. At Walton the filter moves 18.9% of frames, but they are
+not spread through the record: they are the first 24 days of it, so the filter
+is a truncation there and its whole effect falls before 2024-06-24. It has
+already overturned one published finding.
 
 **Cut Walton at 2024-12-13, or read it at one 0.70 floor.**
 `analyze_walton_eras.py` does both and prints them side by side:
