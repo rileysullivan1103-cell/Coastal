@@ -96,6 +96,30 @@ PERSIST = geo.PERSIST
 # ---------------------------------------------------------------------------
 
 MASKS = {
+    "beachfront-from-sailfish-street-beach-access-corolla-nc": {
+        # The shoreline in this frame is a straight line: fitting the
+        # sand/water colour boundary across 83 of 119 sampled columns (the
+        # rest rejected as canopies and tents) gives y = 0.615 - 0.198x, with
+        # a scatter of 0.004 of the frame height about it. The kept edge is
+        # that line pushed 0.10 landward -- a margin for tide, storm swash and
+        # seasonal beach width, none of which one frame can show. It leaves a
+        # land band 0.29 of the frame deep at the left edge and 0.48 at the
+        # right, which at 2688x1520 is 440 to 730 rows: far clear of
+        # THIN_BAND_PX either way.
+        "keep": [[(0.0, 0.71), (1.0, 0.52), (1.0, 1.0), (0.0, 1.0)]],
+        # THE "Sailfish" WATERMARK IS BURNED INTO THE SENSOR, NOT THE SCENE.
+        # Measured at x 0.033-0.104, y 0.927-0.956. It does not move when the
+        # camera moves, so leaving it in hands both routes a bright, sharp,
+        # perfectly stationary feature that anchors the fit and reports a
+        # camera that has turned as a camera that has not. Dropped with room
+        # to spare in case the overlay is repositioned during the record.
+        "drop": [[(0.0, 0.89), (0.16, 0.89), (0.16, 1.0), (0.0, 1.0)]],
+        "note": "drawn by Claude from the fractional grid preview of "
+                "currituck_sailfish-2024-06-02-165953Z.jpg (grid_beachfront-"
+                "from-sailfish-street-beach-access-corolla-nc.jpg); shoreline "
+                "fitted, not eyeballed; NOT YET CONFIRMED BY --mask-audit "
+                "against the archive",
+    },
     # "beachfront-from-hampton-inn-corolla-nc": {
     #     "keep": [[(0.0, 0.62), (1.0, 0.55), (1.0, 1.0), (0.0, 1.0)]],
     #     "drop": [],
@@ -885,6 +909,12 @@ def main():
                     help="fractional polygon 'x,y x,y x,y' (repeatable)")
     ap.add_argument("--mask-drop", action="append",
                     help="fractional polygon to cut back out (repeatable)")
+    ap.add_argument("--mask-audit", action="store_true",
+                    help="check the declared mask against every cached frame "
+                         "for water, and stop")
+    ap.add_argument("--warm", type=int, default=25,
+                    help="R-B level below which a pixel is called water in "
+                         "the mask audit")
     ap.add_argument("--mask-preview", action="store_true",
                     help="draw the mask over a frame and stop")
     ap.add_argument("--survey", action="store_true",
@@ -1037,6 +1067,14 @@ def main():
         draw_mask_preview(paths[len(paths) // 2], mask, out)
         print(f"\nwrote {out}\nCheck that every bright area is land that does "
               "not move, then\nrecord the polygon in MASKS and re-run.")
+
+    # THE AUDIT IS THE ONLY THING THAT TESTS THE MASK AGAINST THE RECORD. The
+    # preview above shows one frame at one tide; the mask is a claim about
+    # every frame, and only this checks it. It runs before registration so a
+    # mask that catches swash is caught before its results are believed.
+    if args.mask_audit or args.mask_preview:
+        audit_mask(paths, dates, mask, spec, warm=args.warm)
+    if args.mask_preview or args.mask_audit:
         return
 
     print("  mask as run: " + json.dumps(
@@ -1342,6 +1380,118 @@ def draw_grid_preview(path, out_path, step=0.05, label_every=2):
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     rgb.save(out_path, quality=90)
     return out_path
+
+
+def water_frequency(paths, shape, warm=25, downsample=4):
+    """How often each pixel looked like water, across every frame given.
+
+    A mask drawn on ONE frame is a hypothesis about every other frame. The
+    tide moves the waterline, storms move it further, and a mask that holds at
+    the hour it was drawn can still swallow swash on a spring high. Nothing
+    in a single-frame preview can show that; this can.
+
+    The discriminator is colour, not motion, because the sampling here is
+    daily and consecutive samples are a day apart -- there is no short
+    timescale left in which water moves and sand does not. Dry sand is warm
+    (R - B strongly positive); water, foam and wet sand are not. `warm` is
+    that threshold in levels.
+
+    It reads whitewater and wet sand as water, which is the conservative
+    direction, and it also reads a fog whiteout as water, which is not a mask
+    fault -- so the per-frame shares are reported rather than averaged into a
+    verdict. Returns (frequency, per_frame, size) where `frequency` is the
+    share of frames in which each pixel looked like water.
+    """
+    from PIL import Image
+    total, count, per_frame = None, 0, []
+    for path in paths:
+        try:
+            with Image.open(path) as img:
+                rgb = img.convert("RGB")
+                if downsample > 1:
+                    rgb = rgb.reduce(downsample)
+                array = np.asarray(rgb).astype(np.int16)
+        except Exception:
+            continue
+        wet = (array[..., 0] - array[..., 2]) < warm
+        if total is None:
+            total = np.zeros(wet.shape, dtype=np.float64)
+        elif wet.shape != total.shape:
+            continue
+        total += wet
+        count += 1
+        per_frame.append(wet)
+    if not count:
+        return None, [], None
+    return total / count, per_frame, total.shape
+
+
+def audit_mask(paths, dates, mask, spec, warm=25, downsample=4, often=0.25):
+    """Does the declared mask ever contain water, anywhere in the record?
+
+    Measurement, not correction: this reports what the mask caught and where.
+    It changes nothing and proposes no new mask.
+    """
+    print("\n" + "=" * 74)
+    print("MASK AUDIT  -- the mask was drawn on one frame; this is every frame")
+    print("=" * 74)
+    from PIL import Image
+    frequency, frames, shape = water_frequency(paths, mask.shape, warm,
+                                               downsample)
+    if frequency is None:
+        print("  no readable frames to audit against")
+        return None
+    small = np.asarray(Image.fromarray(mask.astype(np.uint8) * 255)
+                       .resize((shape[1], shape[0]))) > 127
+    inside = small.sum()
+    if not inside:
+        print("  the mask is empty at audit resolution")
+        return None
+
+    print(f"  {len(frames)} frames, {downsample}x downsampled, "
+          f"'water' = R-B below {warm} levels")
+    print(f"  (foam, wet sand and a fog whiteout all read as water here; "
+          f"that is\n   deliberate -- it is the direction that fails safe)")
+
+    often_wet = (frequency >= often) & small
+    share = often_wet.sum() / inside
+    print(f"\n  pixels inside the mask that looked like water in >= "
+          f"{often:.0%} of frames:")
+    print(f"    {often_wet.sum():,} of {inside:,}  ({share:.2%} of the mask)")
+
+    if often_wet.any():
+        reach = np.where(often_wet.any(axis=1))[0][-1] / shape[0]
+        edge = np.where(small.any(axis=1))[0][0] / shape[0]
+        print(f"    the mask's seaward edge is row {edge:.3f}; water reaches "
+              f"row {reach:.3f},\n    so the intrusion runs "
+              f"{reach - edge:.3f} of the frame height INTO the land.")
+
+    # The per-frame share is what names the dates worth looking at.
+    shares = np.array([(wet & small).sum() / inside for wet in frames])
+    print(f"\n  per-frame share of the mask that looked like water:")
+    print(f"    median {np.median(shares):.1%}   "
+          f"90th pct {np.percentile(shares, 90):.1%}   "
+          f"worst {shares.max():.1%}")
+    if shares.max() < 0.01:
+        print("    no frame in the record put water inside this mask.")
+    else:
+        order = np.argsort(shares)[::-1]
+        print("    the six worst frames (check these by eye before believing "
+              "the mask):")
+        for index in order[:6]:
+            print(f"      {dates[index]:%Y-%m-%d}  {shares[index]:>6.1%}")
+    settled = np.median(shares)
+    if settled > 0.35:
+        print("\n  WARNING: the TYPICAL frame has over a third of the mask "
+              "reading as water.\n  That is a mask fault, not a tide -- "
+              "redraw it landward.")
+    elif shares.max() > 0.6:
+        print("\n  NOTE: some frames read mostly wet while the median is "
+              "low. That is the\n  signature of fog and low sun rather than "
+              "of water in the mask; the dates\n  above say which.")
+    return {"often_wet_share": float(share),
+            "median_frame_share": float(settled),
+            "worst_frame_share": float(shares.max())}
 
 
 def draw_mask_preview(path, mask, out_path):

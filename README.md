@@ -1590,6 +1590,46 @@ big for that axis to see, not a camera that held still. `THIN_BAND_PX` now
 marks that ceiling rather than a blind spot, and the run prints the ceiling in
 pixels for the mask actually declared.
 
+### A mask is a claim about every frame, so `--mask-audit` tests it there
+
+The mask is drawn by hand on one frame. That frame was taken at one tide, in
+one season, with the beach at one width — and the mask asserts something about
+all 1.1 million stills. The failure mode is invisible to a preview by
+construction: a boundary traced along the waterline at low tide sits over dry
+sand in the frame it was drawn on and over swash on every spring high in the
+record. It looks right exactly once.
+
+`--mask-audit` walks the cached frames and counts, per pixel, how often that
+pixel looked like water. The discriminator is colour rather than motion,
+because daily sampling leaves no short timescale in which water moves and sand
+does not: dry sand is warm (`R - B` strongly positive), water, foam and wet
+sand are not. It reads a fog whiteout as water too, which is why the per-frame
+shares are reported rather than collapsed into a verdict — a bad mask wets a
+fraction of the frames, fog wets all of them at once, and the median tells them
+apart.
+
+On a synthetic record whose waterline swings between rows 180 and 260, a mask
+drawn at the calmest moment (boundary at row 0.55) is caught with **15.6% of
+its area reading as water in a quarter of the frames**; the same mask pushed to
+row 0.70 takes none. Both pass a single-frame look.
+
+### Masks are declared by hand, and the burned-in overlay is cut back out
+
+Every `MASKS` entry records who drew it and from which frame. The Sailfish mask
+was fitted rather than eyeballed: the sand/water colour boundary across 119
+sampled columns gives a shoreline of `y = 0.615 - 0.198x` with a scatter of
+0.004 of the frame height, and the kept edge is that line pushed **0.10
+landward** as margin for tide, storm swash and seasonal beach width. It leaves
+440 to 730 rows of land.
+
+The `drop` polygon is not cosmetic. **The "Sailfish" watermark is burned into
+the sensor, not the scene** — measured at x 0.033–0.104, y 0.927–0.956. It is
+bright, sharp and perfectly stationary, and it does not move when the camera
+moves. Left in the mask it anchors both routes and reports a camera that has
+turned as a camera that has not: the single most dangerous kind of false
+stability this pipeline can produce, because it raises confidence while
+destroying the measurement.
+
 ### The survey is the decisive test, and it is run early
 
 Tile the land into non-overlapping cells and register each independently. A

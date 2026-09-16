@@ -13,6 +13,7 @@ proves nothing about a method whose whole purpose is to survive hard data.
 
 import math
 import sys
+import os
 
 import numpy as np
 import pandas as pd
@@ -130,6 +131,89 @@ def test_masking_finds_the_land_where_not_masking_finds_the_water():
           drawn_to_water and unmasked[2] > strict.MIN_CONFIDENCE,
           "none" if unmasked is None
           else f"dx={unmasked[1]:.2f} conf={unmasked[2]:.0f}")
+
+
+def test_the_mask_audit_catches_a_tide_one_frame_could_not_show():
+    """A mask is a claim about every frame; a preview shows one.
+
+    The failure this exists to catch is invisible to the preview by
+    construction: a mask drawn at low tide sits over dry sand in the frame it
+    was drawn on, and over swash on every spring high in the record. Both
+    masks here pass a single-frame look; only one survives the archive.
+    """
+    import tempfile
+    import shutil
+    import contextlib
+    import io
+    from PIL import Image
+
+    height, width = 400, 600
+    folder = tempfile.mkdtemp()
+    try:
+        paths, dates = [], []
+        for index in range(60):
+            waterline = 220 + int(40 * np.sin(index / 3.0))   # tide swing
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+            frame[:waterline] = (70, 95, 110)      # water: R-B = -40
+            frame[waterline:] = (205, 180, 140)    # sand:  R-B = +65
+            path = os.path.join(folder, f"f{index:03d}.jpg")
+            Image.fromarray(frame).save(path, quality=95)
+            paths.append(path)
+            dates.append(pd.Timestamp("2024-01-01", tz="UTC")
+                         + pd.Timedelta(days=index))
+
+        def audit(edge):
+            spec = {"keep": [[(0.0, edge), (1.0, edge), (1.0, 1.0), (0.0, 1.0)]],
+                    "drop": [], "note": "test"}
+            mask = strict.build_mask((height, width), spec)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                got = strict.audit_mask(paths, dates, mask, spec, downsample=2)
+            return got, buffer.getvalue()
+
+        # 0.55 is 220 px -- the waterline in the calmest frame, and under
+        # water for a sixth of the record.
+        low, low_said = audit(0.55)
+        check("a mask drawn at low tide is caught taking water",
+              low["often_wet_share"] > 0.05,
+              f"{low['often_wet_share']:.1%} of the mask is wet in a quarter "
+              f"of frames")
+        check("...and the worst frames are named, so they can be looked at",
+              "2024-01-" in low_said or "2024-02-" in low_said,
+              low_said.strip().splitlines()[-1].strip()[:44])
+
+        # 0.70 is 280 px, clear of the highest water in the record.
+        safe, safe_said = audit(0.70)
+        check("a mask with margin is not",
+              safe["often_wet_share"] == 0 and safe["worst_frame_share"] < 0.01,
+              f"{safe['often_wet_share']:.1%} often wet, "
+              f"worst frame {safe['worst_frame_share']:.1%}")
+        check("...and a clean audit does not print a table of zeroes",
+              "no frame in the record put water inside this mask" in safe_said,
+              safe_said.strip().splitlines()[-1].strip()[:52])
+
+        # The median is what separates a bad mask from a foggy record: fog
+        # whitens every frame at once, a bad mask wets a fraction of them.
+        check("the median frame share is reported, not just the worst",
+              low["median_frame_share"] < low["worst_frame_share"],
+              f"median {low['median_frame_share']:.1%} vs worst "
+              f"{low['worst_frame_share']:.1%}")
+    finally:
+        shutil.rmtree(folder)
+
+
+def test_the_declared_masks_are_usable_as_declared():
+    """A mask that builds to nothing is worse than no mask: it runs."""
+    for slug, spec in strict.MASKS.items():
+        mask = strict.build_mask((1520, 2688), spec)
+        share = mask.mean()
+        check(f"{slug[:34]}: leaves a workable land region",
+              0.05 < share < 0.85, f"{share:.1%} of the frame")
+        cells, size = strict.land_cells(mask)
+        check(f"{slug[:34]}: the survey can tile it",
+              len(cells) >= strict.MIN_CLUSTER, f"{len(cells)} cells of {size} px")
+        check(f"{slug[:34]}: says where it came from",
+              len(spec.get("note", "")) > 20, spec.get("note", "")[:40] + "...")
 
 
 def test_a_thin_land_band_caps_its_range_rather_than_lying():
