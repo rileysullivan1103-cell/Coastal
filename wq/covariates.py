@@ -148,9 +148,11 @@ _MISSING = []
 # dict -- so two runs cannot coordinate, and together they can push a host
 # into refusing what either alone would not. A second between calls costs
 # nothing across a few dozen cached gauges and keeps the breaker out of it.
+# Open-Meteo is NOT paced here. Its pacing belongs at the request, in
+# pull_site_observations.open_meteo, because fetch_marine turns one call from
+# this module into up to 25 requests and a throttle wrapped around that walk
+# paces nothing. Pacing it in both places would only double the wait.
 HOST_MIN_INTERVAL = {
-    "archive-api.open-meteo.com": 15.0,
-    "marine-api.open-meteo.com": 15.0,
     "api.tidesandcurrents.noaa.gov": 1.0,
 }
 _LAST_CALL = {}

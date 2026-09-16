@@ -33,6 +33,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import pandas as pd
 import requests
@@ -76,6 +77,42 @@ def slugify(text):
     return "".join(c if c.isalnum() else "_" for c in str(text))[:48]
 
 
+# Open-Meteo meters by variables x days rather than by requests, and its
+# ceilings are roughly 600 units a minute, 5,000 an hour and 10,000 a day.
+# The pacing has to live HERE, at the request, not at the caller: fetch_marine
+# walks up to 25 neighbouring cells looking for water, so one call from the
+# caller's point of view is 25 requests from Open-Meteo's, and a throttle
+# wrapped around the walk paces nothing at all.
+OPEN_METEO_MIN_INTERVAL = {
+    "archive-api.open-meteo.com": 10.0,
+    "marine-api.open-meteo.com": 5.0,
+}
+_LAST_OPEN_METEO_CALL = {}
+# A minutely 429 names its own remedy -- "try again in one minute" -- so it is
+# worth waiting out rather than reporting as a refusal. The hourly and daily
+# limits are not: those are measured in hours, and the circuit breaker giving
+# up on the host is the honest outcome.
+MINUTELY_WAIT_SECONDS = 62
+MINUTELY_RETRIES = 2
+
+
+def _pace(url):
+    """Hold a host to its minimum spacing before a request goes out."""
+    host = urlsplit(url).netloc
+    wait = OPEN_METEO_MIN_INTERVAL.get(host)
+    if wait:
+        last = _LAST_OPEN_METEO_CALL.get(host)
+        if last is not None:
+            remaining = wait - (time.time() - last)
+            if remaining > 0:
+                time.sleep(remaining)
+    _LAST_OPEN_METEO_CALL[host] = time.time()
+
+
+def _is_minutely_limit(status, detail):
+    return status == 429 and "minut" in str(detail).lower()
+
+
 def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
     """(dataframe, note). Returns (None, note) when the request fails."""
     params = {"latitude": lat, "longitude": lon,
@@ -88,16 +125,26 @@ def open_meteo(url, lat, lon, start, end, variables, probe=False, models=None):
               "wind_speed_unit": "ms"}
     if models:
         params["models"] = models
-    try:
-        resp = requests.get(url, params=params, timeout=TIMEOUT)
-    except (requests.Timeout, requests.ConnectionError) as exc:
-        return None, f"{type(exc).__name__}"
-    if resp.status_code != 200:
+    for attempt in range(MINUTELY_RETRIES + 1):
+        _pace(url)
+        try:
+            resp = requests.get(url, params=params, timeout=TIMEOUT)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            return None, f"{type(exc).__name__}"
+        if resp.status_code == 200:
+            break
         detail = ""
         try:
             detail = str(resp.json().get("reason", ""))[:160]
         except ValueError:
             detail = resp.text[:160]
+        if (_is_minutely_limit(resp.status_code, detail)
+                and attempt < MINUTELY_RETRIES):
+            print(f"      minutely limit reached; waiting "
+                  f"{MINUTELY_WAIT_SECONDS}s and asking again "
+                  f"(attempt {attempt + 1}/{MINUTELY_RETRIES})")
+            time.sleep(MINUTELY_WAIT_SECONDS)
+            continue
         return None, f"HTTP {resp.status_code}: {detail}"
 
     payload = resp.json()
@@ -180,7 +227,6 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
                     # all 33 of them to find that out costs 33 requests
                     # against a quota that has already run out.
                     return done(None, f"no cell answered; last was {note}")
-            time.sleep(0.2)
     if not answered and last_note:
         return done(None, f"no cell answered; last was {last_note}")
     return done(None, "no ocean cell found within ~22 km")
