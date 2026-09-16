@@ -97,37 +97,33 @@ PERSIST = geo.PERSIST
 
 MASKS = {
     "beachfront-from-sailfish-street-beach-access-corolla-nc": {
-        # The shoreline in the reference frame is a straight line. Fitting the
-        # sand/water colour boundary across 178 columns (84 kept; the rest
-        # rejected as canopies, tents and shadow) gives y = 0.615 - 0.195x
-        # with a scatter of 0.003 of the frame height about it.
+        # THIS EDGE IS MEASURED, NOT DRAWN. --mask-audit over 1,602 usable
+        # frames of the 1,611-frame daily sample fits where water habitually
+        # reaches as y = 0.665 - 0.163x, scatter 0.006 of the frame height
+        # across 526 of 672 columns. The line below is that plus a 0.03
+        # margin.
         #
-        # THE MARGIN IS 0.04, NOT THE 0.10 IT WAS. The first draft pushed the
-        # edge a tenth of the frame landward of that line "for tide", which
-        # threw away about 150 rows of plainly dry sand -- the upper beach
-        # where the umbrellas sit, which is land in every frame and is the
-        # part with the most texture to register on. A margin is for what one
-        # frame cannot show, and 0.10 was not a margin, it was a guess with no
-        # measurement behind it. 0.04 is a working value pending the audit:
-        # --mask-audit measures where water actually reaches across the whole
-        # record and prints the empirical edge, and that is what this should
-        # be set from.
-        "keep": [[(0.0, 0.655), (1.0, 0.460), (1.0, 1.0), (0.0, 1.0)]],
+        # It is worth recording how far the two hand-drawn guesses were off,
+        # in both directions. The reference frame's own shoreline is
+        # y = 0.615 - 0.195x: across the record water reaches 0.05 further
+        # landward at the left and 0.08 at the right, and the slope is
+        # shallower than any single frame shows. So the first draft's 0.10
+        # margin was about right by accident and the 0.04 that replaced it was
+        # too tight -- it put the seaward edge 0.04 INSIDE habitual water at
+        # the right-hand end. A single frame cannot show a tide.
+        "keep": [[(0.0, 0.695), (1.0, 0.532), (1.0, 1.0), (0.0, 1.0)]],
         # THE "Sailfish" WATERMARK IS BURNED INTO THE SENSOR, NOT THE SCENE.
         # Measured at x 0.033-0.104, y 0.927-0.956. It does not move when the
         # camera moves, so leaving it in hands both routes a bright, sharp,
         # perfectly stationary feature -- and on a beach, where the sand is
         # texture-poor and this is the highest-contrast thing in the land
         # region, SIFT will weight it heavily. It votes for "no motion" in
-        # exactly the frames where the answer matters. Dropped with a little
-        # padding, but only a little: the first draft blocked out the whole
-        # bottom-left corner, which was more land given up for nothing.
+        # exactly the frames where the answer matters.
         "drop": [[(0.02, 0.915), (0.12, 0.915), (0.12, 0.97), (0.02, 0.97)]],
-        "note": "drawn by Claude from the fractional grid preview of "
-                "currituck_sailfish-2024-06-02-165953Z.jpg; shoreline fitted "
-                "(y = 0.615 - 0.195x) rather than eyeballed, plus a 0.04 "
-                "margin that is PROVISIONAL until --mask-audit measures the "
-                "real water excursion across the record",
+        "note": "seaward edge MEASURED by --mask-audit over 1,602 frames "
+                "(y = 0.665 - 0.163x, scatter 0.006, 526 of 672 columns) plus "
+                "a 0.03 margin; the watermark box is from "
+                "currituck_sailfish-2024-06-02-165953Z.jpg",
     },
     # "beachfront-from-hampton-inn-corolla-nc": {
     #     "keep": [[(0.0, 0.62), (1.0, 0.55), (1.0, 1.0), (0.0, 1.0)]],
@@ -1423,10 +1419,24 @@ def frame_water(array, sea_rows, warm=25, min_spread=20):
        split is set above it rather than at a fixed level, so an overcast
        afternoon is not read as a flooded beach.
     """
-    warmth = array[..., 0].astype(np.int16) - array[..., 2].astype(np.int16)
+    red = array[..., 0].astype(np.int16)
+    green = array[..., 1].astype(np.int16)
+    blue = array[..., 2].astype(np.int16)
+    warmth = red - blue
     low, high = np.percentile(warmth, [10, 90])
     if high - low < min_spread:
         return None, False
+
+    # DUNE VEGETATION IS NOT WARM EITHER, AND IT IS NOT WATER. Sea oats and
+    # the dark growth on the dune back read R-B around +15 to +30 -- under any
+    # threshold set for ocean, which runs about -40. On the first audit of the
+    # measured Sailfish mask that put the "intrusion" at row 0.997, the dune
+    # fence at the very bottom of the frame, which the ocean cannot reach.
+    # Green is what separates them: vegetation is the only thing here whose
+    # green channel leads both others. Water, foam, wet and dry sand all have
+    # green between red and blue, so this excludes the plants and nothing else.
+    plant = (green > red) & (green > blue)
+
     if sea_rows is not None:
         top, bottom = sea_rows
         band = warmth[top:bottom]
@@ -1434,8 +1444,8 @@ def frame_water(array, sea_rows, warm=25, min_spread=20):
             # Half way between what water looks like here and what the warmest
             # tenth of the frame looks like -- which on a beach is dry sand.
             level = float(np.median(band))
-            return warmth < (level + high) / 2.0, True
-    return warmth < warm, True
+            return (warmth < (level + high) / 2.0) & ~plant, True
+    return (warmth < warm) & ~plant, True
 
 
 def sea_band(mask, shape):

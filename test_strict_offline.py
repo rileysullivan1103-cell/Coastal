@@ -283,6 +283,43 @@ def test_the_audit_is_not_fooled_by_the_light():
           f"{share:.1%} safe vs {share_wet:.1%} at the waterline")
 
 
+def test_dune_vegetation_is_not_water():
+    """The audit's second confound, found on the real Sailfish record.
+
+    With the light handled, the audit still put the intrusion at row 0.997 --
+    the dune fence at the very bottom of the frame, which the ocean cannot
+    reach. Dune vegetation is the cause: sea oats and the dark growth on the
+    dune back read R-B around +15 to +30, under any threshold set to catch an
+    ocean that runs about -40.
+
+    Green separates them. Vegetation is the only thing in this scene whose
+    green channel leads both others; water, foam, wet sand and dry sand all
+    have green sitting between red and blue.
+    """
+    height, width = 200, 300
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    frame[:80] = (70, 95, 110)        # ocean
+    frame[80:170] = (205, 180, 140)   # dry sand
+    frame[170:] = (70, 95, 55)        # dark dune vegetation, R-B = +15
+
+    wet, usable = strict.frame_water(frame, (0, 60))
+    check("the ocean still reads as water", usable and wet[:80].mean() > 0.99,
+          f"{wet[:80].mean():.0%} of ocean rows")
+    check("dry sand still does not", wet[80:170].mean() < 0.01,
+          f"{wet[80:170].mean():.0%} of sand rows")
+    check("and dune vegetation no longer does",
+          wet[170:].mean() < 0.01,
+          f"{wet[170:].mean():.0%} of vegetation rows (R-B is only +15)")
+
+    # The guard must not fire on anything else in the scene.
+    for name, colour in (("whitewater", (230, 232, 235)),
+                         ("wet sand", (140, 125, 105)),
+                         ("overcast sand", (150, 140, 120))):
+        red, green, blue = colour
+        check(f"{name} is not mistaken for vegetation",
+              not (green > red and green > blue), f"RGB {colour}")
+
+
 def test_the_audit_measures_the_edge_instead_of_guessing_it():
     """The seaward edge was the one number in the file that was pure judgement.
 

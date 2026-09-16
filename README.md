@@ -1655,6 +1655,14 @@ hand-declared and logged, because an edge fitted automatically to a record
 containing a fog winter or a beach renourishment would be fitted to that
 instead, and nothing downstream would say so.
 
+**Vegetation was the audit's second confound.** With the light handled, the
+Sailfish run still put the intrusion at row 0.997 — the dune fence at the very
+bottom of the frame, which the ocean cannot reach. Sea oats and the dark growth
+on the dune back read `R - B` around +15 to +30, under any threshold set to
+catch an ocean that runs about −40. Green separates them: vegetation is the only
+thing in the scene whose green channel leads both others, while water, foam, wet
+sand and dry sand all have green between red and blue.
+
 ### Masks are declared by hand, and the burned-in overlay is cut back out
 
 Every `MASKS` entry records who drew it and from which frame. The Sailfish
@@ -1662,14 +1670,20 @@ shoreline was fitted, not eyeballed: the sand/water colour boundary across 178
 columns (84 kept, the rest rejected as canopies and shadow) gives
 `y = 0.615 - 0.195x` with a scatter of 0.003 of the frame height.
 
-**The margin on top of that line was wrong in the first draft, and wrong in the
-direction that looks responsible.** It was set to 0.10 "for tide" — about 150
-rows — which threw away the upper beach where the umbrellas sit: land in every
-frame, and the part of the land with the most texture to register on. Caution
-about the seaward edge is free; caution about the landward edge costs exactly
-the signal the run is trying to measure. No measurement said 0.10. The margin
-is now 0.04 and is marked provisional in the entry itself, pending what
-`--mask-audit` measures.
+**The margin on top of that line was guessed twice and measured once, and the
+guesses missed in both directions.** The first draft used 0.10 "for tide" —
+about 150 rows — which visibly threw away the upper beach where the umbrellas
+sit. Tightening it to 0.04 fixed that frame and broke the record: the audit over
+1,602 usable frames fits habitual water at **`y = 0.665 - 0.163x`** (scatter
+0.006 of the frame height, 526 of 672 columns), which is 0.05 further landward
+than the reference frame's own shoreline at the left and **0.08 further at the
+right** — so 0.04 put the seaward edge *inside* habitual water at the right-hand
+end. The slope is shallower than any single frame shows, too.
+
+The declared edge is now that measured line plus 0.03, which lands at 38.1% of
+the frame — within 0.1 points of the over-cautious first draft, but for a
+measured reason and with the right slope. **A single frame cannot show a tide,**
+and neither guess was going to.
 
 The `drop` polygon is not cosmetic. **The "Sailfish" watermark is burned into
 the sensor, not the scene** — measured at x 0.033–0.104, y 0.927–0.956. It is
