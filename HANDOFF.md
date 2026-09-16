@@ -19,12 +19,15 @@ Last regenerated: 2026-09-16.
 > 0.50 -> 0.70, +30 sd. Not weather, not a retrain. Walton's record must be cut
 > into pre- and post-2024-12-13 eras, or read at one floor.
 >
-> **Sun geometry moves whether the detector fires at all.** Two bearing terms
-> add dR2 +0.0325 to detection rate and +0.0381 to detections over a model that
-> already holds wave height, period, tide, wind, temperature, rain and cloud.
-> F = 148.6 and 179.3 on n = 8,262. This survives the class filter, survives
-> re-censoring to one floor, and survives in each era separately. It used to be
-> a `score_max` curiosity; it is now a statement about the detection rate.
+> **The detector fires more near the middle of the day, beyond what solar
+> elevation explains.** Two sun-bearing terms add dR2 +0.0325 to detection rate
+> and +0.0381 to detections over a model already holding wave height, period,
+> tide, wind, temperature, rain, solar elevation and cloud. F = 148.6 and 179.3
+> on n = 8,262, surviving the class filter, the floor correction and each era
+> separately. **Do not call this glare.** Rotating the assumed bearing through
+> all 360 deg puts the maximum at 185 deg — 5 deg from the solar-noon azimuth
+> and 21 deg from the camera's 206. The previous brief called it a camera
+> effect; that was a threshold artifact and is corrected below.
 
 ---
 
@@ -104,7 +107,7 @@ era to 0.70 removes **69.1% of its detections**: 7,400 detected frames -> 2,283,
 across 2024-12-13 without correction is comparing a record where two thirds of
 one side does not exist on the other.
 
-**Glare geometry drives the detection RATE, not just confidence.** `sun_in_view`
+**The sun terms drive the detection RATE, not just confidence.** `sun_in_view`
 + `sun_glare` over a base holding wave height and period, tide, onshore wind,
 wind speed, temperature, precipitation, 48h rain, solar elevation and cloud:
 
@@ -116,12 +119,54 @@ wind speed, temperature, precipitation, 48h rain, solar elevation and cloud:
 | B, post era alone (n=6,862) | +0.0293, F=109.3 | +0.0299, F=114.1 | +0.0034, p=1.1e-4 |
 
 Every p on the count targets is below 1e-9. The original number (`score_max`,
-dR2 +0.0248, F(2,5824) = 78.43) is reproduced and enlarged — pooled +0.0424,
-A +0.0295 — but `score_max` is the variable the labelling killed, so quote the
-count rows. For scale against the ocean: `mop_wave_height` is the strongest
-physical predictor in the same data at rho_hrmo +0.2205 (detections, variant A).
-dR2 and rho-squared are not the same quantity; do not divide one by the other
-in a deck.
+dR2 +0.0248, F(2,5824) = 78.43) is reproduced and enlarged, but `score_max` is
+the variable the labelling killed, so quote the count rows. For scale against
+the ocean: `mop_wave_height` is the strongest physical predictor in the same
+data at rho_hrmo +0.2205 (detections, variant A). dR2 and rho-squared are not
+the same quantity; do not divide one by the other in a deck.
+
+**The effect is entirely on the sunlit side of the camera, and that proves
+less than it looks.** Splitting on whether the sun's azimuth is within 90 deg
+of 206:
+
+| group | detection_rate | detections |
+|---|---|---|
+| sun-in-front, n=6,121 | +0.0249, F=82.6, p=4e-36 | +0.0372, F=128.1, p=3.2e-55 |
+| sun-behind, n=2,141 | +0.0002, p=0.49 | +0.0005, p=0.26 |
+| sun-behind, signed terms | +0.0017, p=0.10 | +0.0008, p=0.33 |
+| sun-behind, daylight only | +0.0001, p=0.67 | +0.0011, p=0.094 |
+
+The behind null is REAL, not underpowered: at n=2,141 an effect the size of the
+front group's would land at F=37.9, p=7e-17, and it measured +0.0002. It
+survives giving that group two live terms (`sun_glare` is identically zero
+behind the camera, so the published pair is one term there) and survives
+dropping its 397 night hours. But it cannot separate the competing stories,
+because **sun-behind is 06:00-09:00 local and almost nothing else** — 1,426 of
+its 1,974 lit hours — while sun-in-front is 09:00-18:00. That is a
+morning-versus-midday split, and every candidate explanation predicts it.
+
+**What the bearing rotation says: solar noon, not the camera.** dR2 recomputed
+against every bearing on a 5 deg grid, variant A, whole record:
+
+| target | peak bearing | peak dR2 | at the camera (206) | gap to camera | gap to solar noon (180) |
+|---|---|---|---|---|---|
+| detection_rate | 185 | +0.0486 | +0.0325 | 21 deg | **5 deg** |
+| detections | 185 | +0.0573 | +0.0382 | 21 deg | **5 deg** |
+| bbox_area_max | 175 | +0.0041 | +0.0019 | 31 deg | **5 deg** |
+
+The sweep has real contrast — trough +0.0003 at 120 deg against a peak of
++0.0486, a 160-fold range — so this is not a flat curve being over-read. The
+camera's own bearing collects 67% of the maximum. Under `pooled` both count
+targets peak at exactly 180. Every real target sits closer to solar noon than
+to the camera under both variants.
+
+**Why a threshold cannot answer this, and what replaced it.** Due south at
+36.95N is ~180 deg and the seaward bearing is 206, so the two hypotheses are 26
+deg apart: any tolerance wide enough to accept a real camera effect accepts a
+pure time-of-day one. The first run's verdict line used "within 45 deg of the
+camera" and duly called it a camera effect — that was measuring the threshold.
+`analyze_glare_split.classify_peak` now races the two against each other with a
+10 deg margin and returns "cannot separate" rather than picking a side.
 
 **Cloud cover raises largest-box size at both sites, and it survives everything.**
 VB rho +0.247 (+0.211 with hour and month removed) — VB is 100% `rip_current`
@@ -184,6 +229,25 @@ contaminated by object detections.
 
 ## RULED OUT — do not propose these again
 
+- **The front/behind split as a way to separate lens glare from sea breeze.**
+  It cannot, at this camera. With a seaward bearing of 206 the sun-behind group
+  is 06:00-09:00 local and almost nothing else, so the split is morning versus
+  midday and every candidate story predicts a front-heavy result. The test ran,
+  the front/behind contrast is enormous and clean (dR2 +0.0372 against +0.0005
+  on detections), and it still decides nothing. Do not propose it again; the
+  bearing rotation is the test with discriminating power.
+- **Afternoon sea breeze as what the sun terms are carrying.** An afternoon
+  effect centred on 15:00-17:00 local is azimuth ~220-260 at this site, and the
+  rotation would peak there. It peaks at 185 on both count targets and at 180
+  under `pooled`. The three candidate stories are now two: something that peaks
+  near solar noon, in the scene or in the detector.
+- **The published bearing-term F-test as evidence that 206 deg is special.**
+  cos(az - b) = cos(az)cos(b) + sin(az)sin(b), so `sun_in_view` is EXACTLY the
+  azimuth harmonics rotated: fitted R2 on cos(az) and sin(az) is 1.000000 with
+  coefficients -0.8989 and -0.4381, which are cos(206) and sin(206). The
+  comparator rung `+ elev/cloud` holds no azimuth at all, so the dR2 it buys is
+  "the sun's horizontal position matters beyond elevation" and every bearing
+  buys something. Only the rotation distinguishes bearings.
 - **The four rain correlations reversing between years.** THE REVERSAL WAS THE
   OBJECT DETECTIONS. On rip frames it is gone under every variant, including
   the one closest to the original run: all four predictor/target pairs are
@@ -248,17 +312,27 @@ timestamp in solar.py. Cloud cover is on disk at both sites.
    disagreement means the labels measure visibility in a still, and the
    detector has not been fairly tested. An hour's work.
 
-1. **Is the glare result the detector or the ocean?** Now the second-biggest
-   question, because it is the largest surviving effect in the project and it
-   is exactly the confound this project was set up to worry about. Sun geometry
-   could be degrading the image, or afternoon sea breeze could genuinely change
-   the surf, or offshore-facing light could make real rips visible. Nothing run
-   so far separates them. Two candidate tests, neither started: (a) the RipAID
-   frames carry human annotations and timestamps, so the same bearing terms can
-   be run against HUMAN labels — if they vanish there, it is the detector;
-   (b) split the Walton effect by whether the sun is in front of or behind the
-   camera, since a physical sea-breeze story does not care and a lens-flare
-   story does.
+1. **Is the MIDDAY effect the detector or the scene?** Still the second-biggest
+   question and the largest surviving effect in the project, but the question
+   has narrowed. It is no longer three stories, it is two. Sea breeze is out —
+   an afternoon effect would put the rotation's peak at azimuth 220-260 and it
+   is at 185. Camera-specific glare is not supported — the peak sits 5 deg from
+   solar noon and 21 deg from the camera's bearing, and the camera collects 67%
+   of the maximum. What is left: something in the WATER that peaks near solar
+   noon (sun angle changing what is visible through the surface, or a genuine
+   midday pattern in the surf), or something in the DETECTOR that does
+   (contrast, exposure, overhead light).
+   **The test that separates them is (a), and it is the same file as OPEN #0.**
+   RipAID's frames carry human rip annotations and timestamps, so the same
+   bearing terms can be fitted against HUMAN labels. If a human's rip calls
+   also peak near solar noon, it is the water or the visibility and the
+   detector is tracking something real. If only the detector's do, it is the
+   detector. Note that the RipAID cameras have their own bearings and
+   latitudes, so the rotation must be run per site, and `solar_noon_bearing`
+   already computes the competitor from the data rather than assuming 180.
+   Secondary, cheaper: `--front-deg` narrower than 90 does NOT help; the
+   sun-behind group is 06:00-09:00 local and shrinking it further only removes
+   power. Do not propose it.
 
 2. **What are the false positives made of?** The notes column on the 360 labels
    is the only record. Jetty, boat wake and whitewater-on-rocks recurred. If
@@ -327,6 +401,23 @@ Open-Meteo hourly quota — run them one at a time. The wq/ pipeline writes only
 data/wq/** plus wq_manifest.json and contends with nothing; analyze_walton_eras
 makes no Open-Meteo calls at all and runs safely beside it.
 
+**Any bearing-derived term carries the whole azimuth unless azimuth is in the
+comparator.** cos(az - b) is a fixed linear combination of cos(az) and sin(az),
+so a term built from a camera bearing is the azimuth harmonics rotated and
+nothing more. Tested over a rung holding no azimuth, its dR2 answers "does the
+sun's horizontal position matter", never "does THIS bearing matter". To ask the
+second question, rotate the bearing and compare peaks — and race the peak
+against the solar-noon azimuth rather than against a tolerance, because at a
+mid-latitude site the two candidate bearings are a few tens of degrees apart
+and any tolerance wide enough to accept one accepts the other.
+`analyze_glare_split.py` does all of this; `classify_peak` is the decision.
+
+**A variant workspace carries a marker and is skipped by later mirrors.**
+`analyze_walton_eras.build_variant` writes `.coastal_variant_workspace`, and a
+mirror also skips any directory shaped like one (`<label>/data/rip_detection`
+beneath it). An unmarked stray table under data/ still trips the one-table
+guard, which is correct: an unexplained table is not something to skip quietly.
+
 **Read rho_hrmo, except for solar elevation.** Hour-of-day IS solar elevation,
 so demeaning by hour-by-month removes it by construction. For the light columns
 read rho and rho_mo; section (b) of analyze_glare.py is where light competes
@@ -363,7 +454,7 @@ sandbox. It can write and test analysis code but cannot run it on real data;
 Riley runs it locally and pastes output back. Prompts should ask for code plus
 the exact command, not for numbers.
 
-Offline test suites are the contract: 23 of them, all passing, named
+Offline test suites are the contract: 24 of them, all passing, named
 test_*_offline.py. Any new analysis script should arrive with one, and any
 fixture must be built so the expected answer is known by construction rather
 than copied from a previous run of the same code. The era fixture is the model
@@ -385,6 +476,14 @@ one module while another kept its own; a guard put on regression slopes when
 the overflow was in the product; a sign asserted backwards in a test fixture;
 a mirror built on a false belief about glob and symlinks. Prompts should ask
 for the fix AND the command that would show it failed.
+
+**Race the hypotheses; do not threshold one of them.** The first bearing-
+rotation run printed "3 of 3 targets peak within 45 deg of the camera's axis"
+and concluded the lens story. The peak was at 185, the camera at 206 and solar
+noon at 180 — the verdict was reporting the threshold, not the data. Whenever
+two explanations predict nearby values, the prompt should ask for them to be
+compared against EACH OTHER with a margin, and for "cannot separate" to be an
+allowed answer.
 
 **Ask whether a variant could even move the number.** The first era run printed
 a full MOP-vs-buoy verdict under variant A that was a byte-identical copy of
