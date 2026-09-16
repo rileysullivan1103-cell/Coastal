@@ -320,6 +320,43 @@ def test_dune_vegetation_is_not_water():
               not (green > red and green > blue), f"RGB {colour}")
 
 
+def test_a_shadow_is_not_water():
+    """The third confound, and the one the first two fixes were aimed at.
+
+    The Sailfish audit reported habitual water at the very foot of the frame
+    through the light fix and the vegetation fix alike -- 101 pixels across
+    the bottom row, in a mask whose typical frame reads 2.5% wet, stationary
+    rather than tidal. Neither earlier diagnosis was it.
+
+    The cause is that the test reads only colour, and black has none. R-B is
+    about zero for anything near black, and zero sits below every threshold
+    this function can set, because water runs about -40 and the split lands
+    near +10. So a shadow, a dark object or an overlay bar reads as water in
+    every frame forever.
+    """
+    height, width = 200, 300
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    frame[:80] = (70, 95, 110)        # ocean
+    frame[80:190] = (205, 180, 140)   # dry sand
+    frame[190:] = (10, 10, 12)        # shadow at the foot of the frame
+
+    wet, usable = strict.frame_water(frame, (0, 60))
+    check("the ocean still reads as water", usable and wet[:80].mean() > 0.99,
+          f"{wet[:80].mean():.0%} of ocean rows")
+    check("dry sand still does not", wet[80:190].mean() < 0.01,
+          f"{wet[80:190].mean():.0%} of sand rows")
+    check("and a near-black band no longer does", wet[190:].mean() < 0.01,
+          f"{wet[190:].mean():.0%} of shadow rows (R-B is -2)")
+
+    # The guard must not reach anything with light in it. Dusk water is still
+    # water; night frames are skipped whole, one level up.
+    for name, colour in (("dusk ocean", (55, 80, 95)),
+                         ("whitewater", (230, 232, 235)),
+                         ("wet sand", (140, 125, 105))):
+        check(f"{name} is not blacked out by the light floor",
+              max(colour) >= 40, f"brightest channel {max(colour)}")
+
+
 def test_the_audit_measures_the_edge_instead_of_guessing_it():
     """The seaward edge was the one number in the file that was pure judgement.
 

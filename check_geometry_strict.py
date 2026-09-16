@@ -1387,7 +1387,7 @@ def draw_grid_preview(path, out_path, step=0.05, label_every=2):
     return out_path
 
 
-def frame_water(array, sea_rows, warm=25, min_spread=20):
+def frame_water(array, sea_rows, warm=25, min_spread=20, min_light=40):
     """(wet, usable): which pixels look like water, and whether to believe it.
 
     THE FIRST VERSION OF THIS TEST WAS CONFOUNDED AND SAID SO LOUDLY WITHOUT
@@ -1437,6 +1437,21 @@ def frame_water(array, sea_rows, warm=25, min_spread=20):
     # green between red and blue, so this excludes the plants and nothing else.
     plant = (green > red) & (green > blue)
 
+    # A PIXEL WITH NO LIGHT IN IT HAS NO COLOUR TO JUDGE, AND THIS TEST ONLY
+    # READS COLOUR. R-B is 0 for anything near black -- a shadow at the foot of
+    # the dune, a dark object, a black bar at the frame edge -- and 0 sits
+    # below every threshold this function can set, because water here runs
+    # about -40 and the split lands near +10. So black reads as water, every
+    # frame, forever. That is the shape of what the Sailfish audit kept
+    # reporting: 101 pixels across the bottom row, habitually wet, in a mask
+    # whose typical frame is 2.5% wet -- stationary, not tidal.
+    #
+    # This is the same rule as the whole-frame spread guard one level up, at
+    # pixel scale: no colour, no evidence, not water. It cannot hide real
+    # water, because water this dark is night, and night frames are already
+    # skipped entire.
+    dark = array.max(axis=-1) < min_light
+
     if sea_rows is not None:
         top, bottom = sea_rows
         band = warmth[top:bottom]
@@ -1444,8 +1459,8 @@ def frame_water(array, sea_rows, warm=25, min_spread=20):
             # Half way between what water looks like here and what the warmest
             # tenth of the frame looks like -- which on a beach is dry sand.
             level = float(np.median(band))
-            return (warmth < (level + high) / 2.0) & ~plant, True
-    return (warmth < warm) & ~plant, True
+            return (warmth < (level + high) / 2.0) & ~plant & ~dark, True
+    return (warmth < warm) & ~plant & ~dark, True
 
 
 def sea_band(mask, shape):
@@ -1476,13 +1491,16 @@ def water_frequency(paths, mask, warm=25, downsample=4, min_spread=20):
     timescale left in which water moves and sand does not. See `frame_water`
     for why it is not a fixed threshold.
 
-    Returns (frequency, per_frame, size, skipped): the share of USABLE frames
-    in which each pixel looked like water, the per-frame maps, the downsampled
-    shape, and how many frames carried no colour to judge with.
+    Returns (frequency, per_frame, size, skipped, colour): the share of USABLE
+    frames in which each pixel looked like water, the per-frame maps, the
+    downsampled shape, how many frames carried no colour to judge with, and
+    the mean RGB of each pixel over the usable frames -- which is how the
+    audit can report what a stubbornly-wet region actually IS rather than
+    leaving it to be guessed at.
     """
     from PIL import Image
     total, count, per_frame, skipped, kept = None, 0, [], 0, []
-    band = None
+    band, colour = None, None
     for path in paths:
         try:
             with Image.open(path) as img:
@@ -1503,12 +1521,16 @@ def water_frequency(paths, mask, warm=25, downsample=4, min_spread=20):
         elif wet.shape != total.shape:
             continue
         total += wet
+        if colour is None:
+            colour = np.zeros(array.shape, dtype=np.float64)
+        if colour.shape == array.shape:
+            colour += array
         count += 1
         per_frame.append(wet)
         kept.append(path)
     if not count:
-        return None, [], None, skipped
-    return total / count, per_frame, total.shape, skipped
+        return None, [], None, skipped, None
+    return total / count, per_frame, total.shape, skipped, colour / count
 
 
 # A shoreline fitted across columns is smooth: the good Sailfish fit scattered
@@ -1650,8 +1672,8 @@ def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
     print("MASK AUDIT  -- the mask was drawn on one frame; this is every frame")
     print("=" * 74)
     from PIL import Image
-    frequency, frames, shape, skipped = water_frequency(paths, mask, warm,
-                                                        downsample)
+    frequency, frames, shape, skipped, colour = water_frequency(
+        paths, mask, warm, downsample)
     if frequency is None:
         print("  no frame in the record carries enough colour to judge with")
         return None
@@ -1700,6 +1722,7 @@ def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
             print(f"    (deepest single wet pixel: row {extreme / rows:.3f}, "
                   f"{speck} in that row. That is an\n    extreme, not a "
                   f"reach; the earlier audit reported it as one.)")
+        describe_wet(often_wet, colour, band if band is not None else extreme)
 
     # The per-frame share is what names the dates worth looking at.
     shares = np.array([(wet & small).sum() / inside for wet in frames])
@@ -1729,6 +1752,31 @@ def audit_mask(paths, dates, mask, spec, warm=25, downsample=4,
             "median_frame_share": float(settled),
             "worst_frame_share": float(shares.max()),
             "measured_edge": edge}
+
+
+def describe_wet(often_wet, colour, row):
+    """Say what the habitually-wet pixels at `row` actually look like.
+
+    A diagnosis stated from a desk is a guess. The audit kept reporting water
+    at the foot of the Sailfish frame through two fixes aimed at causes I had
+    picked by reasoning -- the light, then the vegetation -- and neither was
+    it. This prints the mean colour of the pixels in question so the next run
+    names the cause instead of the next guess: ocean runs R-B about -40 at
+    ordinary brightness; a shadow or a black bar sits near zero R-B with
+    almost no light in it, and reads as water for want of any colour at all.
+    """
+    if colour is None or row is None:
+        return
+    wet = often_wet[row]
+    if not wet.any():
+        return
+    pixels = colour[row][wet]
+    red, green, blue = (float(np.median(pixels[:, i])) for i in range(3))
+    print(f"    what those pixels ARE, averaged over the record: "
+          f"RGB {red:.0f},{green:.0f},{blue:.0f}\n    (R-B {red - blue:+.0f}, "
+          f"brightest channel {max(red, green, blue):.0f}). Ocean here runs "
+          f"R-B about -40 at\n    ordinary brightness; near-black with R-B "
+          f"near zero is shadow or an overlay bar,\n    not water.")
 
 
 def draw_mask_preview(path, mask, out_path):

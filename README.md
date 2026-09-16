@@ -1674,6 +1674,23 @@ On a well-placed mask there is no such row, and the audit now says so instead of
 naming the dune fence. This is the same discipline as the confidence rule: *a
 statistic that a single pixel can move is not a measurement.*
 
+**Neither was it vegetation, and the reach said so.** With the reach reported
+at a stated density instead of as a maximum, the Sailfish run still put
+habitual water on the bottom row — **101 pixels across it**, 15% of the row's
+masked width, in a mask whose typical frame reads 2.5% wet. That is not a
+speck and not a tide; it is stationary. The cause is that the test reads only
+*colour*, and black has none: `R - B` is about zero for anything near black,
+and zero sits below every threshold the test can set, because water runs about
+−40 and the split lands near +10. A shadow at the foot of the dune, a dark
+object or an overlay bar therefore reads as water in every frame, forever.
+The fix is the whole-frame spread guard applied at pixel scale — **no colour,
+no evidence, not water** — with a light floor of 40 levels on the brightest
+channel. It cannot hide real water, because water that dark is night, and
+night frames are already skipped whole. Two diagnoses before this one were
+picked by reasoning and were both wrong, so the audit now also **prints the
+mean colour of the stubbornly-wet pixels**: the next run names the cause
+instead of the next guess.
+
 **A fit is not a measurement until it is tight.** The first Sailfish audit fitted
 `y = 0.665 - 0.163x` at scatter 0.006 over 526 of 672 columns — a real shoreline,
 worth pasting. The re-run against the mask built *from that line* fitted
