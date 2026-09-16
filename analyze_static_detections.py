@@ -48,11 +48,30 @@ TOP = 8
 OUT_DIR = f"{ad.DATA_DIR}/static_detections"
 
 
+REQUIRED = ("timestamp", "bbox_x", "bbox_y")
+
+
 def rip_frames(path, wanted=RIP_CLASS):
-    """Detected frames of one class, with a usable box centroid."""
+    """Detected frames of one class, with a usable box centroid.
+
+    Every column is checked before it is used. Not defensive habit: one file
+    under data/rip_detection/ matching rip_*.csv has no timestamp column at
+    all, and assuming the schema killed the whole run on the first camera
+    reached rather than reporting that one file and carrying on to the other
+    six. What that file is matters too, so its columns are printed rather than
+    swallowed.
+    """
     frame = ad.read_csv(path)
     if frame is None or frame.empty:
         return None
+    missing = [c for c in REQUIRED if c not in frame.columns]
+    if missing:
+        print(f"  {os.path.basename(path)}: no {', '.join(missing)} column"
+              f"{'s' if len(missing) > 1 else ''} — skipped")
+        print(f"    it has: {', '.join(map(str, frame.columns[:12]))}"
+              f"{' ...' if len(frame.columns) > 12 else ''}")
+        return None
+
     frame = frame.copy()
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True,
                                         errors="coerce")
@@ -62,9 +81,10 @@ def rip_frames(path, wanted=RIP_CLASS):
         frame = frame[classes.map(
             lambda v: {p.strip() for p in str(v).split(",") if p.strip()}
             == {wanted})]
+    else:
+        print(f"  {os.path.basename(path)}: no score_classes column; "
+              f"cannot separate {wanted} from object detections")
     for column in ("bbox_x", "bbox_y"):
-        if column not in frame.columns:
-            return None
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame.dropna(subset=["bbox_x", "bbox_y"])
     return frame if not frame.empty else None

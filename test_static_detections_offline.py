@@ -152,6 +152,35 @@ def check_only_the_named_class_is_counted():
         check("a record with no usable centroid returns None rather than "
               "an empty grid", sd.rip_frames(path) is None)
 
+        # One file on disk really does lack a timestamp column, and assuming
+        # the schema killed the run on the first camera reached.
+        bare = os.path.join(folder, "rip_bare.csv")
+        pd.DataFrame({"detected": [True, False],
+                      "whatever": [1, 2]}).to_csv(bare, index=False)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = sd.rip_frames(bare)
+        check("a record with no timestamp column is skipped, not fatal",
+              result is None)
+        check("and the missing column is named",
+              "no timestamp" in buffer.getvalue(), buffer.getvalue().strip())
+        check("along with what the file does have",
+              "whatever" in buffer.getvalue())
+
+        no_class = os.path.join(folder, "rip_noclass.csv")
+        pd.DataFrame({
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h",
+                                       tz="UTC"),
+            "bbox_x": [10.0, 20.0], "bbox_y": [10.0, 20.0]}).to_csv(
+                no_class, index=False)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = sd.rip_frames(no_class)
+        check("a record with no score_classes is used but flagged",
+              result is not None and len(result) == 2)
+        check("with a note that the classes cannot be separated",
+              "cannot separate" in buffer.getvalue())
+
 
 def main():
     print("static detection offline checks\n")
