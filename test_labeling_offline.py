@@ -473,6 +473,98 @@ def check_offsets_are_reported_by_kind_not_pooled():
           "every detection row is within" in buffer.getvalue())
 
 
+def check_the_class_filter_separates_two_models():
+    """Walton's real class mix: rip_current alone, or COCO objects together.
+
+    28,721 rip_current frames against ~6,670 person/boat/car/bird frames, and
+    rip_current never co-occurring with any of them -- two models writing into
+    one feed, separable exactly. Every one of those object frames has counted
+    as a detection until now, in the rate, in score_max and in bbox_area_max.
+    """
+    import io
+    import contextlib
+    import build_label_sample as bls
+
+    frames = pd.DataFrame({
+        "score_classes": ["rip_current"] * 8 + ["person", "boat,person",
+                                                "car", "bird", ""] + [None],
+        "detected": [True] * 13 + [False],
+    })
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        kept, dropped = bls.keep_class(frames, "rip_current")
+    check("the four object frames are dropped", dropped == 4, str(dropped))
+    check("the eight rip frames are kept",
+          (kept["score_classes"] == "rip_current").sum() == 8)
+    check("a blank class list is KEPT, because it is an observed zero",
+          len(kept) == 10, f"{len(kept)} rows")
+    check("the dropped class names are named in the output",
+          all(n in buffer.getvalue() for n in ("person", "boat", "car", "bird")))
+
+    mixed = pd.DataFrame({"score_classes": ["rip_current,person",
+                                            "rip_current"],
+                          "detected": [True, True]})
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        kept, dropped = bls.keep_class(mixed, "rip_current")
+    check("a frame mixing rip with an object class is dropped, not kept",
+          len(kept) == 1 and dropped == 1, f"{len(kept)} kept")
+    check("and the mixing is called out",
+          "mix rip_current with other classes" in buffer.getvalue())
+
+    check("class_set splits on commas and trims",
+          bls.class_set(" boat , person ") == {"boat", "person"})
+    check("class_set of a blank is empty", bls.class_set("") == set())
+
+
+def check_a_rebuild_carries_labels_forward():
+    """A frame drawn again is the same still; its verdict is still true."""
+    import build_label_sample as bls
+
+    original = bls.LABEL_CSV
+    with tempfile.TemporaryDirectory() as folder:
+        bls.LABEL_CSV = os.path.join(folder, "labels.csv")
+        try:
+            pd.DataFrame([
+                {"frame_id": "A", "rip_present": "yes", "notes": "clear rip",
+                 "labeled_at": "2026-09-15T20:00:00", "box_labels": '{"0": true}'},
+                {"frame_id": "B", "rip_present": "no", "notes": "",
+                 "labeled_at": "2026-09-15T20:01:00", "box_labels": ""},
+                {"frame_id": "C", "rip_present": "", "notes": "",
+                 "labeled_at": "", "box_labels": ""},
+            ]).to_csv(bls.LABEL_CSV, index=False)
+
+            carried = bls.carry_labels()
+            check("only frames with a verdict are carried",
+                  set(carried) == {"A", "B"}, str(sorted(carried)))
+            check("the verdict comes with its note",
+                  carried["A"]["notes"] == "clear rip")
+            check("and its box marks",
+                  carried["A"]["box_labels"] == '{"0": true}')
+            check("and its original timestamp, not a new one",
+                  carried["B"]["labeled_at"] == "2026-09-15T20:01:00")
+
+            # A rebuild that draws A and D: A keeps its verdict, D is blank.
+            rebuilt = [{"frame_id": "A", "rip_present": "", "notes": "",
+                        "labeled_at": ""},
+                       {"frame_id": "D", "rip_present": "", "notes": "",
+                        "labeled_at": ""}]
+            for row in rebuilt:
+                previous = carried.get(row["frame_id"])
+                if previous:
+                    row.update(previous)
+            check("the surviving frame keeps its verdict",
+                  rebuilt[0]["rip_present"] == "yes")
+            check("a newly drawn frame stays blank",
+                  rebuilt[1]["rip_present"] == "")
+
+            bls.LABEL_CSV = os.path.join(folder, "absent.csv")
+            check("no previous CSV carries nothing, without raising",
+                  bls.carry_labels() == {})
+        finally:
+            bls.LABEL_CSV = original
+
+
 def main():
     print("labelling pipeline offline checks\n")
     check_weighting_beats_the_sample()
@@ -489,6 +581,8 @@ def main():
     check_boxes_come_off_disk_and_belong_to_their_frame()
     check_a_repair_does_not_lose_labels()
     check_offsets_are_reported_by_kind_not_pooled()
+    check_the_class_filter_separates_two_models()
+    check_a_rebuild_carries_labels_forward()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
 

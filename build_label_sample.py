@@ -38,6 +38,7 @@ IMAGE_DIR = f"{OUT_DIR}/images"
 LABEL_CSV = f"{OUT_DIR}/labels.csv"
 STRATA_CSV = f"{OUT_DIR}/strata.csv"
 
+RIP_CLASS = "rip_current"
 TARGET = 300
 BOOSTER_EACH = 30
 LOW_SUN_DEG = 15.0          # below this the sun is in the water, not over it
@@ -177,6 +178,50 @@ def assign_strata(pool, cut, edges):
     pool.loc[pool["mop_wave_height"].isna(), "wave_tercile"] = MISSING_TERCILE
     pool["stratum"] = pool["confidence"] + " / " + pool["wave_tercile"].astype(str)
     return pool
+
+
+def class_set(value):
+    """The set of class names a frame's score_classes column names."""
+    if not isinstance(value, str) or not value.strip():
+        return set()
+    return {part.strip() for part in value.split(",") if part.strip()}
+
+
+def keep_class(frames, wanted=RIP_CLASS, label=""):
+    """Only the frames whose detections are the class being studied.
+
+    The rip product's feed carries two models' output. At Walton, 28,721 frames
+    are rip_current and about 6,670 are COCO object classes -- person 3,395,
+    boat 894, boat+person 798, then car, bird, truck, kite. rip_current never
+    appears alongside any of them, so the two are separable exactly rather than
+    by threshold.
+
+    That is 19% of the record, and until now every one of those frames counted
+    as a detection: in the detection rate, in score_max, in bbox_area_max. A
+    box drawn around a person standing on the beach is a correct box around a
+    correctly identified object, and it has nothing to do with rip currents.
+
+    Frames whose class list is empty are KEPT: score_classes is blank on rows
+    with no detection, and those are the observed zeros the analysis needs.
+    """
+    if "score_classes" not in frames.columns:
+        print(f"  {label}no score_classes column; cannot filter by class")
+        return frames, 0
+    sets = frames["score_classes"].map(class_set)
+    keep = sets.map(lambda names: not names or names == {wanted})
+    mixed = int((sets.map(lambda names: wanted in names and names != {wanted})).sum())
+    dropped = int((~keep).sum())
+    if dropped:
+        other = sorted({n for names in sets[~keep] for n in names})
+        print(f"  {label}dropped {dropped} frames detecting something other "
+              f"than {wanted}\n    ({', '.join(other[:8])}"
+              f"{', ...' if len(other) > 8 else ''}) — "
+              f"{dropped / max(len(frames), 1):.1%} of the record")
+    if mixed:
+        print(f"  {label}NOTE: {mixed} frames mix {wanted} with other classes; "
+              "they are dropped too,\n    because their score_max and "
+              "bbox_area_max pool both models' output")
+    return frames[keep].reset_index(drop=True), dropped
 
 
 def clip_to_rip_record(coverage, frames, label=""):
@@ -408,6 +453,39 @@ def still_url(row, service, cache):
 BOX_OFFSET_TOLERANCE_S = 60.0
 
 
+def carry_labels():
+    """Verdicts already entered, by frame_id, so a rebuild does not lose them.
+
+    A rebuild changes which frames are drawn, but a frame that appears in both
+    samples is the same still of the same moment, and the verdict given to it
+    is still true. Discarding those because the POOL changed would throw away
+    hand labelling for no reason -- and this sample has been rebuilt twice
+    already, once for the wrong stills and once for the wrong class.
+    """
+    table = ad.read_csv(LABEL_CSV)
+    if table is None or table.empty or "rip_present" not in table.columns:
+        return {}
+    def text(value):
+        # pandas reads a blank CSV cell as NaN, and str(NaN) is the non-empty
+        # string "nan". Spelled the obvious way, every UNLABELLED row is
+        # carried forward carrying the verdict "nan". This is the third place
+        # in this pipeline that trap has bitten.
+        return "" if value is None or value != value else str(value).strip()
+
+    keep = {}
+    for _, row in table.iterrows():
+        verdict = text(row.get("rip_present"))
+        if not verdict:
+            continue
+        keep[str(row.get("frame_id"))] = {
+            "rip_present": verdict,
+            "notes": text(row.get("notes")),
+            "labeled_at": text(row.get("labeled_at")),
+            "box_labels": text(row.get("box_labels", "")),
+        }
+    return keep
+
+
 def report_offsets(rows):
     """How far each still sits from the moment it is supposed to show.
 
@@ -532,6 +610,9 @@ def main():
                         help="fixed so the same sample can be rebuilt exactly")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the stratum table and stop, downloading nothing")
+    parser.add_argument("--detection-class", default=RIP_CLASS,
+                        help="keep only frames detecting this class; the feed "
+                             "also carries COCO object detections")
     parser.add_argument("--repair-boxes", action="store_true",
                         help="recompute the boxes column of an existing "
                              "labels.csv in place, keeping images and labels")
@@ -551,6 +632,9 @@ def main():
     coverage = load_coverage(slug)
     conditions = hourly_conditions(args.camera, lat, lon)
 
+    frames, _ = keep_class(frames, args.detection_class, label="class: ")
+    if frames.empty:
+        sys.exit(f"No frames left after keeping only {args.detection_class!r}.")
     detected = frames[frames["detected"].astype(bool)].copy()
     coverage, _ = clip_to_rip_record(coverage, frames, label="coverage: ")
     blank_hours = coverage[~coverage["hour"].isin(frames["hour"])].copy()
@@ -614,6 +698,7 @@ def main():
         print("\n  --dry-run: nothing downloaded, nothing written.")
         return 0
 
+    carried = carry_labels()
     if os.path.exists(LABEL_CSV) and not args.force:
         sys.exit(f"\n{LABEL_CSV} already exists. Labelling it again from scratch "
                  "would discard the labels in it.\nPass --force if that is what you want.")
@@ -682,9 +767,20 @@ def main():
             "notes": "",
             "labeled_at": "",
         })
+        previous = carried.get(out[-1]["frame_id"])
+        if previous:
+            out[-1].update(previous)
 
     table = pd.DataFrame(out)
     table.to_csv(LABEL_CSV, index=False)
+    if carried:
+        kept = sum(1 for row in out if str(row.get("rip_present") or "").strip())
+        print(f"\n  carried {kept} of {len(carried)} existing labels forward "
+              "onto frames that survived the rebuild")
+        if kept < len(carried):
+            print(f"  {len(carried) - kept} label(s) were on frames this "
+                  "sample no longer draws; they are\n    still in the previous "
+                  "labels.csv if you kept a copy")
 
     # How common each stratum is in the whole record, not in the sample. The
     # sample deliberately over-represents high confidence and the boosters, so
