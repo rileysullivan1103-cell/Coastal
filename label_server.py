@@ -27,6 +27,7 @@ import argparse
 import csv
 import io
 import json
+import html
 import os
 import posixpath
 import sys
@@ -44,6 +45,8 @@ LABEL_CSV = f"{OUT_DIR}/labels.csv"
 # judged at all -- lens water, total dark, a test card. They have to be
 # separable downstream: doubt belongs in the precision bracket, unusable
 # belongs out of the denominator entirely.
+DEFAULT_TITLE = "Walton rip labelling"
+
 VERDICTS = {"yes", "no", "doubt", "unusable", ""}
 BOX_COLUMN = "box_labels"
 EXTRA_COLUMNS = [BOX_COLUMN]
@@ -206,7 +209,7 @@ def import_labels(path, overwrite=False):
 PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Walton rip labelling</title>
+<title>__PAGE_TITLE__</title>
 <style>
   :root{ --bg:#11171c; --panel:#1a232a; --ink:#e6eef2; --muted:#93a6b0;
          --rule:#2b3942; --yes:#3f9e6a; --no:#b5544a; --doubt:#b08a3c; }
@@ -253,7 +256,7 @@ PAGE = """<!doctype html>
 </style>
 
 <header>
-  <b>Walton rip labelling</b>
+  <b>__PAGE_TITLE__</b>
   <span id="count"></span>
   <span id="strat"></span>
   <span style="margin-left:auto">
@@ -336,15 +339,21 @@ function cycleBox(b){
 function draw(){
   const r = rows[i]; if(!r) return;
   document.getElementById("shot").src = "/images/" + encodeURIComponent(r.image);
-  document.getElementById("strat").textContent =
-    r.stratum + (r.booster ? "  ·  " + r.booster : "");
+  // A row carrying display_meta is a BLINDED sample: it says what may be
+  // shown and everything else stays hidden. The calibration set uses it so no
+  // stratum, score or box count can hint at the answer. Without the column the
+  // page behaves exactly as before.
+  const blind = (r.display_meta !== undefined);
+  document.getElementById("strat").textContent = blind
+    ? (r.display_meta || "")
+    : (r.stratum || "") + (r.booster ? "  ·  " + r.booster : "");
   const done = rows.filter(x => (x.rip_present || "").trim()).length;
   document.getElementById("count").textContent =
     (i+1) + " / " + rows.length + "  ·  " + done + " labelled";
   document.getElementById("fill").style.width = (100 * done / rows.length) + "%";
 
   const n = v => (v === "" || v == null || isNaN(+v)) ? "—" : (+v).toFixed(2);
-  document.getElementById("meta").innerHTML =
+  document.getElementById("meta").innerHTML = blind ? "" :
     "<span>" + esc(r.timestamp) + "</span>" +
     "<span>score <b>" + (r.score_max === "" ? "none" : n(r.score_max)) + "</b></span>" +
     "<span>boxes <b>" + (r.bbox_count === "" ? "0" : esc(r.bbox_count)) + "</b></span>" +
@@ -514,9 +523,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global OUT_DIR, IMAGE_DIR, LABEL_CSV, PAGE
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--dir", default=OUT_DIR, metavar="DIR",
+                        help="the sample directory to serve: DIR/labels.csv "
+                             f"and DIR/images/ (default {OUT_DIR})")
+    parser.add_argument("--title", default=DEFAULT_TITLE,
+                        help="heading and browser tab text")
     parser.add_argument("--no-open", action="store_true",
                         help="do not open a browser window")
     parser.add_argument("--import", dest="import_path", default=None,
@@ -526,8 +541,18 @@ def main():
                         help="let the import replace verdicts already in the CSV")
     args = parser.parse_args()
 
+    # Rebound rather than threaded through: read_rows, write_rows and the
+    # request handler all read these as module globals, and a second sample
+    # served from the same process would otherwise write its verdicts into the
+    # first one's labels.csv.
+    OUT_DIR = args.dir
+    IMAGE_DIR = os.path.join(OUT_DIR, "images")
+    LABEL_CSV = os.path.join(OUT_DIR, "labels.csv")
+    PAGE = PAGE.replace("__PAGE_TITLE__", html.escape(args.title))
+
     if not os.path.exists(LABEL_CSV):
-        sys.exit(f"{LABEL_CSV} does not exist — run build_label_sample.py first.")
+        sys.exit(f"{LABEL_CSV} does not exist — run build_label_sample.py "
+                 "(or build_ripaid_calibration.py) first.")
 
     if args.import_path:
         applied, skipped, problems = import_labels(args.import_path,

@@ -227,27 +227,52 @@ def attach_geometry(frame, bearing, suffix=""):
     return frame
 
 
-def solar_noon_bearing(frame):
-    """The azimuth the sun sits at when it is highest, averaged over days.
+def solar_noon_bearing(frame, lat=None, lon=None, days=24):
+    """(azimuth of solar noon, days used, exact) — the competitor bearing.
 
     This is the bearing that turns cos(az - b) into a proximity-to-solar-noon
-    index, and it is the direct competitor to the camera's own bearing. At a
-    mid-latitude northern site it is near 180, which at Walton is only 26 deg
-    from the seaward bearing -- close enough that "the peak is within 45 deg of
-    the camera" cannot tell the two apart, and the two are the whole question.
+    index, and it is the direct competitor to the camera's own bearing. It has
+    to be right to within a couple of degrees, because classify_peak races the
+    two against each other over a 10 degree margin.
 
-    Computed from the data rather than assumed to be 180, so it stays right for
-    a southern-hemisphere camera or a site inside the tropics.
+    Taking the azimuth at the observed maximum elevation is NOT right enough.
+    Frames are hourly and solar noon is not on the hour, so the argmax lands up
+    to half an hour off and the azimuth with it: measured against a minute grid
+    the error is 4.3 deg at Walton, 4.5 at Cala Millor and 5.6 at Son Bou —
+    half the margin, from rounding alone. With lat/lon the azimuth is computed
+    on a minute grid for dates drawn from the data, which removes it.
+
+    Without lat/lon the coarse estimate is returned with exact=False, so a
+    caller can say so rather than quietly racing against a bearing that is off
+    by half its tolerance.
     """
     lit = frame[frame["solar_elevation"] > 0]
     if lit.empty:
-        return None, 0
-    peak_index = lit.groupby(lit["hour"].dt.floor("D"))["solar_elevation"].idxmax()
-    radians = np.radians(lit.loc[peak_index, "solar_azimuth"].to_numpy(float))
-    # Circular mean: azimuths near 0/360 average to 180 if done arithmetically.
-    mean = math.degrees(math.atan2(float(np.sin(radians).mean()),
-                                   float(np.cos(radians).mean()))) % 360.0
-    return mean, len(peak_index)
+        return None, 0, False
+
+    def circular_mean(degrees):
+        radians = np.radians(np.asarray(degrees, dtype=float))
+        return math.degrees(math.atan2(float(np.sin(radians).mean()),
+                                       float(np.cos(radians).mean()))) % 360.0
+
+    if lat is None or lon is None:
+        peak = lit.groupby(lit["hour"].dt.floor("D"))["solar_elevation"].idxmax()
+        return circular_mean(lit.loc[peak, "solar_azimuth"]), len(peak), False
+
+    # Dates drawn from the data rather than from the calendar, so a record that
+    # is all July is not answered with a year's average.
+    present = sorted(pd.DatetimeIndex(lit["hour"]).normalize().unique())
+    if not present:
+        return None, 0, False
+    step = max(1, len(present) // max(1, days))
+    chosen = present[::step][:max(1, days)]
+    azimuths = []
+    for date in chosen:
+        grid = pd.date_range(pd.Timestamp(date), periods=24 * 60, freq="min",
+                             tz="UTC")
+        elevation, azimuth = solar.position(grid, lat, lon)
+        azimuths.append(float(azimuth[int(np.argmax(elevation))]))
+    return circular_mean(azimuths), len(azimuths), True
 
 
 def fold(angle):
@@ -569,7 +594,7 @@ def main():
           "camera's AXIS (folded onto 0-90); the gap to the\n  bearing itself "
           "is reported beside it and is the weaker claim.")
 
-    noon, noon_days = solar_noon_bearing(observed)
+    noon, noon_days, noon_exact = solar_noon_bearing(observed, lat, lon)
     if noon is not None:
         print(f"\n  THE COMPETITOR. Over {noon_days} days the sun is highest "
               f"at azimuth\n  {noon:.1f} deg. A sweep peak there means the term "
@@ -579,6 +604,10 @@ def main():
               "camera' and\n  'near solar noon' are nearly the same answer "
               "here and must be compared\n  against each other rather than "
               "against a threshold.")
+        if not noon_exact:
+            print("  NOTE: computed from the observed hourly maximum, which "
+                  "rounds solar noon\n  to the hour and can be several degrees "
+                  "off. Pass the camera's lat/lon.")
 
     bearings = list(range(0, 360, max(1, args.bearing_step)))
     sweep = observed.copy()

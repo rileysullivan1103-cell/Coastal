@@ -345,10 +345,23 @@ def check_the_peak_is_raced_against_solar_noon():
     rng = np.random.default_rng(88)
     frame = scaffold(rng)
     frame["hour_of_day"] = frame["hour"].dt.hour
-    noon, days = gs.solar_noon_bearing(frame)
-    check("solar noon is found and is near due south at this latitude",
-          noon is not None and abs(noon - 180.0) < 10.0 and days > 300,
-          f"{noon:.1f} deg over {days} days")
+    noon, days, exact = gs.solar_noon_bearing(frame, LAT, LON)
+    # Due south, to within a degree: at any latitude poleward of the tropics
+    # the sun crosses the meridian at local noon. That is astronomy, not
+    # something this code computes, so it is the right thing to assert against.
+    check("solar noon is due south to within a degree",
+          noon is not None and abs(noon - 180.0) < 1.0 and exact,
+          f"{noon:.3f} deg from {days} dates")
+
+    # The coarse path is what the function used to do everywhere. It is kept
+    # for callers with no coordinates, and it is wrong by half the margin
+    # classify_peak decides on, which is why the exact path exists.
+    coarse, _, coarse_exact = gs.solar_noon_bearing(frame)
+    check("the coarse fallback is flagged as inexact", not coarse_exact)
+    check("and is several degrees off, which is why lat/lon is passed",
+          2.0 < abs(gs.fold(coarse - 180.0)) < 10.0,
+          f"coarse {coarse:.1f} vs true 180, off by "
+          f"{abs(gs.fold(coarse - 180.0)):.1f} deg")
 
     # The classifier on its own, with hand-picked peaks.
     call, to_cam, to_noon = gs.classify_peak(206.0, BEARING, 180.0)
