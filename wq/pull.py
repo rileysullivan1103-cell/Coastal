@@ -20,9 +20,11 @@ whole reason the run script starts with caffeinate.
 """
 
 import argparse
+import glob
 import os
 import sys
 import time
+from contextlib import contextmanager
 from datetime import date
 from io import StringIO
 
@@ -110,7 +112,35 @@ class PullFailed(RuntimeError):
     stack trace."""
 
 
-def _get(url, params):
+# scan_cameras.TIMEOUT is 180 seconds, which is right for a camera frame and
+# wrong for a WQP state query. California's station request answers in about
+# 198 seconds -- it is the largest state in the study by a wide margin -- so
+# every one of get_with_retry's four attempts timed out, pull_stations
+# recorded CA as failed and carried on, and the study lost the entire Pacific
+# coast to a constant. The "first N states all failed" guard did not fire
+# because CA is fourth alphabetically and AK, AL and AS had already
+# succeeded; the run printed "1 state(s) failed" and nothing read it.
+#
+# The timeout is raised HERE rather than in scan_cameras, because that module
+# is shared with the camera pipeline and a 10-minute timeout is wrong for
+# what it does. A slow answer from a government bulk-export endpoint is
+# normal; a slow answer from a camera is a dead camera.
+WQP_TIMEOUT = 600
+
+
+@contextmanager
+def _patched_timeout(seconds):
+    """Hold scan_cameras.TIMEOUT at `seconds` for one call and put it back."""
+    import scan_cameras as scan
+    previous = scan.TIMEOUT
+    scan.TIMEOUT = seconds
+    try:
+        yield
+    finally:
+        scan.TIMEOUT = previous
+
+
+def _get(url, params, timeout=None):
     """scan_cameras' retry/backoff, imported here so a bare checkout can still
     import this module and run the offline tests.
 
@@ -122,7 +152,8 @@ def _get(url, params):
     import requests
     import scan_cameras as scan
     try:
-        return scan.get_with_retry(url, params=params)
+        with _patched_timeout(WQP_TIMEOUT if timeout is None else timeout):
+            return scan.get_with_retry(url, params=params)
     except requests.RequestException as exc:
         host = url.split("/")[2]
         raise PullFailed(f"{host}: {type(exc).__name__}") from exc
@@ -289,7 +320,33 @@ def pull_stations(states=None, refresh=False, probe=False):
         print(f"\n  {len(failed)} state(s) failed and were not written: "
               f"{', '.join(failed)}\n  Re-run to retry only those — the rest "
               "are cached.")
-    frames = [f for f in frames if not f.empty]
+
+    # stations.csv is the study's station table, not a report on this
+    # invocation, so it is rebuilt from EVERY cached chunk rather than from
+    # the states this call happened to ask for. `--states CA` used to rewrite
+    # the file with California alone and silently drop the other 35 states,
+    # which is a one-command way to shrink the study and leaves no trace
+    # except a smaller row count.
+    cached = sorted(glob.glob(os.path.join(config.RAW_DIR, "stations_*.csv")))
+    frames, on_disk = [], []
+    for path in cached:
+        state = os.path.basename(path)[len("stations_"):-len(".csv")]
+        try:
+            frame = pd.read_csv(path, low_memory=False)
+        except (OSError, pd.errors.ParserError) as exc:
+            print(f"  {state}: cached chunk unreadable ({exc}) — skipped")
+            continue
+        if not frame.empty:
+            frames.append(frame)
+            on_disk.append(state)
+    absent = [s for s in sorted(COASTAL_STATES) if s not in on_disk]
+    print(f"\nassembling stations.csv from {len(on_disk)} cached state "
+          f"chunk(s) of {len(COASTAL_STATES)}")
+    if absent:
+        print(f"  {len(absent)} coastal state(s) have no chunk on disk: "
+              f"{', '.join(absent)}")
+        print("  Every station count below describes the states listed as "
+              "present, and no others.")
     if not frames:
         sys.exit("No stations returned for any state.")
     every = pd.concat(frames, ignore_index=True, sort=False)
