@@ -333,9 +333,11 @@ def daily_metrics(path, min_frames, wanted=bls.RIP_CLASS):
     # how often the beach was busy. bls.keep_class keeps rows with no class at
     # all, which are the observed zeros.
     if wanted and wanted != "any":
-        frame, dropped = bls.keep_class(frame, wanted, label="class: ")
+        names = ([wanted] if isinstance(wanted, str) and "," not in wanted
+                 else [c.strip() for c in str(wanted).split(",") if c.strip()])
+        frame, dropped = bls.keep_class(frame, names, label="class: ")
         if frame.empty or not frame.get("detected", pd.Series(dtype=bool)).any():
-            return None, (f"no {wanted} detections at all "
+            return None, (f"no {' or '.join(names)} detections at all "
                           f"({dropped} frames of other classes) — "
                           "pass --detection-class any to analyse them")
 
@@ -560,8 +562,22 @@ def residualize(daily, controls, metrics):
         rows = usable & np.isfinite(target)
         column = np.full(len(merged), np.nan)
         if rows.sum() > len(names) + 3:
-            slopes = control_slopes(target[rows], design[rows])
-            adjusted = target[rows] - design[rows] @ slopes
+            # Centred and scaled before fitting. The guard added earlier was on
+            # the SLOPES, and they were finite; the overflow was in the product,
+            # because an ill-conditioned fit on raw columns (bbox areas run to
+            # 1e5, cloud cover to 1e2) produced slopes large enough that
+            # design @ slopes overflowed. On standardized columns the slopes are
+            # O(1) and the product cannot blow up. Centring also leaves the
+            # residual's mean equal to the target's, so the before/after levels
+            # printed for a residualized series stay on the metric's own scale.
+            block = design[rows]
+            centre = block.mean(axis=0)
+            spread = block.std(axis=0)
+            spread[spread == 0] = 1.0
+            scaled = (block - centre) / spread
+            slopes = control_slopes(target[rows], scaled)
+            with np.errstate(all="ignore"):
+                adjusted = target[rows] - scaled @ slopes
             # Never let a bad fit through as data: a non-finite residual would
             # be dropped silently by the changepoint search's isfinite mask,
             # shortening the series without saying so.
@@ -853,7 +869,8 @@ def main():
                         help="cameras to also run on weather-residualized series; "
                              "default Walton, '' for none")
     parser.add_argument("--detection-class", "--class-filter",
-                        dest="detection_class", default=bls.RIP_CLASS,
+                        dest="detection_class",
+                        default=",".join(bls.RIP_CLASSES),
                         help="analyse only this class; 'any' pools every class, "
                              "which is what the earlier version did")
     parser.add_argument("--compare-classes", action="store_true",
@@ -922,9 +939,10 @@ def main():
         if mix:
             top = ", ".join(f"{name} {count}" for name, count
                             in sorted(mix.items(), key=lambda kv: -kv[1])[:6])
-            rip = mix.get(bls.RIP_CLASS, 0)
+            rip = sum(count for name, count in mix.items()
+                      if set(bls.class_set(name)) <= set(bls.RIP_CLASSES))
             print(f"  classes: {top}")
-            print(f"  {bls.RIP_CLASS}: {rip} of {sum(mix.values())} "
+            print(f"  rip classes: {rip} of {sum(mix.values())} "
                   f"({rip / max(sum(mix.values()), 1):.0%})")
 
         class_events = []

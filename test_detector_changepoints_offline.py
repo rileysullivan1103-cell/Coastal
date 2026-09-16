@@ -668,6 +668,64 @@ def check_a_degenerate_control_does_not_poison_the_residuals():
     check("and leaves the series unchanged, since nothing was explained",
           np.allclose(values, target), f"{values[0]:.4f} vs {target[0]:.4f}")
 
+    # The real failure: slopes were finite, the PRODUCT overflowed. Controls
+    # on wildly different scales (bbox areas near 1e5, cloud cover near 1e2)
+    # made an ill-conditioned fit produce slopes big enough to blow up
+    # design @ slopes. Guarding the slopes alone did not stop it.
+    wide = np.column_stack([rng.normal(3e5, 1e5, n),
+                            rng.normal(50, 20, n),
+                            rng.normal(3e5, 1e5, n) * 1.0000001])
+    daily_wide = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=n, freq="D", tz="UTC"),
+        "bbox_area_median": target * 1e5})
+    controls_wide = pd.DataFrame(
+        {"a": wide[:, 0], "b": wide[:, 1], "c": wide[:, 2]},
+        index=daily_wide["date"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        residuals, _ = cp.residualize(daily_wide, controls_wide,
+                                      ["bbox_area_median"])
+    got = residuals["bbox_area_median"].to_numpy()
+    check("badly scaled controls raise no RuntimeWarning",
+          np.isfinite(got).all(), str(got[:2]))
+    check("and the residual keeps the metric's own mean",
+          abs(np.nanmean(got) - np.nanmean(target * 1e5)) < 1e-6,
+          f"{np.nanmean(got):.4f}")
+
+
+def check_both_rip_class_names_are_analysed():
+    """Three real cameras emit "rip", not "rip_current", from another model."""
+    import io
+    import contextlib
+
+    waves = wave_series()
+    original = ad.DATA_DIR
+    with tempfile.TemporaryDirectory() as folder:
+        ad.DATA_DIR = folder
+        try:
+            camera = "Other Rip Model, Nowhere, NC"
+            slug = build_camera(folder, camera, rate_of=lambda i, w: 0.4,
+                                floor_of=lambda i: 0.3, waves=waves)
+            path = os.path.join(folder, "rip_detection", f"rip_{slug}.csv")
+            table = pd.read_csv(path)
+            table["score_classes"] = "rip"
+            table.to_csv(path, index=False)
+
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                daily, note = cp.daily_metrics(path, 5, "rip_current,rip")
+            check("a record using the 'rip' class name is analysed",
+                  daily is not None and len(daily) == DAYS,
+                  note or f"{0 if daily is None else len(daily)} days")
+
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                only, _ = cp.daily_metrics(path, 5, "rip_current")
+            check("and filtering on rip_current alone still excludes it",
+                  only is None)
+        finally:
+            ad.DATA_DIR = original
+
 
 def main():
     print("detector changepoint offline checks\n")
@@ -680,6 +738,7 @@ def main():
     check_object_only_cameras_are_not_analysed_as_rip_cameras()
     check_a_class_switching_on_fools_only_the_unfiltered_run()
     check_a_degenerate_control_does_not_poison_the_residuals()
+    check_both_rip_class_names_are_analysed()
     check_residualizing_blanks_rows_rather_than_mixing()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
