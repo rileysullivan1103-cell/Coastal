@@ -920,6 +920,9 @@ def main():
     ap.add_argument("--warm", type=int, default=25,
                     help="R-B level below which a pixel is called water in "
                          "the mask audit")
+    ap.add_argument("--open", dest="open_images", action="store_true",
+                    help="open the previews when the run finishes, in "
+                         "whatever this machine uses for images")
     ap.add_argument("--mask-preview", action="store_true",
                     help="draw the mask over a frame and stop")
     ap.add_argument("--survey", action="store_true",
@@ -1044,6 +1047,7 @@ def main():
         print("    },")
         print("\nOr try one without committing to it:")
         print('    --mask-poly "0,0.60 1,0.56 1,1 0,1" --mask-preview')
+        deliver([out], args.open_images)
         return
 
     if spec is None:
@@ -1067,9 +1071,14 @@ def main():
     mask = build_mask(shape, spec)
     describe_mask(mask, spec, shape)
 
+    written = []
     if args.mask_preview:
         out = os.path.join(OUT_DIR, f"mask_{slug}.jpg")
         draw_mask_preview(paths[len(paths) // 2], mask, out)
+        written.append(out)
+        grid = os.path.join(OUT_DIR, f"grid_{slug}.jpg")
+        draw_grid_preview(paths[len(paths) // 2], grid)
+        written.append(grid)
         print(f"\nwrote {out}\nCheck that every bright area is land that does "
               "not move, then\nrecord the polygon in MASKS and re-run.")
 
@@ -1080,6 +1089,7 @@ def main():
     if args.mask_audit or args.mask_preview:
         audit_mask(paths, dates, mask, spec, warm=args.warm, slug=slug)
     if args.mask_preview or args.mask_audit:
+        deliver(written, args.open_images)
         return
 
     print("  mask as run: " + json.dumps(
@@ -1355,6 +1365,30 @@ def write_series(slug, homography, phase):
         print("\nwrote:")
         for path in written:
             print(f"  {path}")
+
+
+def deliver(written, open_them):
+    """Print the ABSOLUTE path of every image written, and optionally open it.
+
+    A relative path in a scrollback is not a file you can hand to anyone. The
+    mask for a camera is declared from a picture, and declaring it means
+    getting that picture in front of whoever is drawing the polygon -- which
+    at this point in the work means attaching it to a message. So the path is
+    printed in the form you can copy straight into an attach dialog, and
+    --open puts it on screen as well.
+    """
+    if not written:
+        return
+    print("\n" + "=" * 74)
+    print("IMAGE WRITTEN" + ("S" if len(written) > 1 else ""))
+    print("=" * 74)
+    for path in written:
+        print("  " + os.path.abspath(path))
+    print("\n  That is the file to open, or to attach when someone else is "
+          "drawing the\n  mask. It is a plain JPEG; nothing else is needed "
+          "to read it.")
+    if open_them:
+        geo.show([os.path.abspath(path) for path in written])
 
 
 def draw_grid_preview(path, out_path, step=0.05, label_every=2):
