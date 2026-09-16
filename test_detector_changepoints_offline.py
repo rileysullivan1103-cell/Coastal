@@ -28,6 +28,7 @@ import pandas as pd
 
 import analyze_drivers as ad
 import analyze_detector_changepoints as cp
+import build_label_sample as bls
 import diagnose_class_timeline as ct
 
 FAILURES = []
@@ -635,6 +636,22 @@ def check_a_class_switching_on_fools_only_the_unfiltered_run():
             # and can never be less than any single object group.
             check("the combined object column starts at zero too",
                   before["object"].sum() == 0)
+
+            # BOTH rip class names must land in the rip group. Matching only
+            # rip_current filed the three cameras that emit `rip` as 100%
+            # object and 0% rip -- the "three cameras have never detected a
+            # rip" error, arrived at from a different direction.
+            check("rip_current is a rip", ct.class_group("rip_current") == ct.RIP)
+            check("and so is rip", ct.class_group("rip") == ct.RIP)
+            check("every name build_label_sample calls a rip is one",
+                  all(ct.class_group(n) == ct.RIP for n in bls.RIP_CLASSES),
+                  str(bls.RIP_CLASSES))
+            check("an object class is still an object",
+                  ct.class_group("kite") == "other object"
+                  and ct.class_group("person") == "person")
+            check("a frame naming only a rip class is not an object frame",
+                  ct.groups_of("rip") == {ct.RIP}
+                  and ct.groups_of("rip_current") == {ct.RIP})
             check("and never exceeds that month's frame count",
                   bool((monthly["object"] <= monthly["frames"]).all()))
             check("nor falls below any single object group it contains",

@@ -32,7 +32,14 @@ import pandas as pd
 import analyze_drivers as ad
 import build_label_sample as bls
 
-RIP = bls.RIP_CLASS
+# The reporting group, not a class name: TWO models emit a rip class in this
+# feed (`rip_current` from ripdetect_walton, `rip` from rip_current_detector)
+# and they are the same finding. Matching only the first filed Corolla,
+# Sailfish and Carova as 100% "other object" and 0% rip, which is exactly the
+# "three cameras have never detected a rip" error already on the ruled-out
+# list. Any rip class name build_label_sample knows about lands here.
+RIP = "rip"
+RIP_NAMES = frozenset(bls.RIP_CLASSES)
 OBJECT_GROUPS = ("person", "boat", "other object")
 GROUPS = (RIP,) + OBJECT_GROUPS + ("blank",)
 OUT_DIR = f"{ad.DATA_DIR}/class_timeline"
@@ -43,7 +50,7 @@ def class_group(name):
     name = str(name).strip().lower()
     if not name:
         return "blank"
-    if name == RIP:
+    if name in RIP_NAMES:
         return RIP
     if name == "person":
         return "person"
@@ -178,6 +185,26 @@ def report(camera, frame):
     print(f"  {'TOTAL':<9} {int(totals['frames']):>7} {int(totals[RIP]):>7} "
           f"{int(totals['object']):>7} "
           f"{totals['object'] / max(totals['frames'], 1):>5.0%}")
+
+    # The raw names, so a class this script does not recognise is SEEN rather
+    # than quietly counted as an object. That is how the rip/rip_current split
+    # was missed the first time.
+    seen = {}
+    for value in frame["score_classes"]:
+        for name in bls.class_set(value):
+            seen[name] = seen.get(name, 0) + 1
+    if seen:
+        print("\n  class names in this camera's payload: "
+              + ", ".join(f"{n} {c}" for n, c in
+                          sorted(seen.items(), key=lambda kv: -kv[1])))
+        unknown = sorted(n for n in seen
+                         if class_group(n) == "other object")
+        if unknown:
+            print(f"    {len(unknown)} counted as 'other object': "
+                  + ", ".join(unknown))
+            print("    If any of those is a rip class under another name, it is"
+                  " being\n    reported as an object and every rip count here "
+                  "is wrong. Add it to\n    build_label_sample.RIP_CLASSES.")
 
     print(f"\n  {'group':<14} {'n':>7}  {'first':<12} {'last':<12} months")
     for event in events:
