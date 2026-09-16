@@ -621,6 +621,54 @@ def check_a_class_switching_on_fools_only_the_unfiltered_run():
             ad.DATA_DIR = original
 
 
+def check_a_degenerate_control_does_not_poison_the_residuals():
+    """The real Walton run raised "divide by zero encountered in matmul".
+
+    A control column that never moves between consecutive kept days leaves
+    lstsq with a rank-deficient system; it returns a solution, that solution
+    held infinities, and every residual below was computed from them. The
+    residuals PRINTED anyway, which is what made it dangerous rather than
+    merely noisy.
+    """
+    import warnings
+
+    n = 200
+    rng = np.random.default_rng(5)
+    target = rng.normal(0, 1, n)
+    # One control moves, one is stone dead.
+    design = np.column_stack([rng.normal(0, 1, n), np.full(n, 3.0)])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        slopes = cp.control_slopes(target, design)
+    check("a constant control gets a zero slope rather than an infinity",
+          np.isfinite(slopes).all() and slopes[1] == 0.0, str(slopes))
+    check("the moving control still gets fitted", slopes[0] != 0.0,
+          f"{slopes[0]:.4f}")
+
+    dead = np.column_stack([np.full(n, 1.0), np.full(n, 3.0)])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        slopes = cp.control_slopes(target, dead)
+    check("all-constant controls give all-zero slopes",
+          np.isfinite(slopes).all() and not slopes.any(), str(slopes))
+
+    # And through residualize, with a non-finite value in the design.
+    daily = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=n, freq="D", tz="UTC"),
+        "detection_rate": target})
+    controls = pd.DataFrame({"wave_height": np.full(n, 2.0)},
+                            index=daily["date"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        residuals, _ = cp.residualize(daily, controls, ["detection_rate"])
+    values = residuals["detection_rate"].to_numpy()
+    check("residualizing on a dead control returns finite numbers",
+          np.isfinite(values).all(), str(values[:3]))
+    check("and leaves the series unchanged, since nothing was explained",
+          np.allclose(values, target), f"{values[0]:.4f} vs {target[0]:.4f}")
+
+
 def main():
     print("detector changepoint offline checks\n")
     check_a_clean_step_is_found_where_it_was_put()
@@ -631,6 +679,7 @@ def main():
     check_thin_cameras_are_not_residualized()
     check_object_only_cameras_are_not_analysed_as_rip_cameras()
     check_a_class_switching_on_fools_only_the_unfiltered_run()
+    check_a_degenerate_control_does_not_poison_the_residuals()
     check_residualizing_blanks_rows_rather_than_mixing()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))

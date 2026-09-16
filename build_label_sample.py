@@ -39,6 +39,13 @@ LABEL_CSV = f"{OUT_DIR}/labels.csv"
 STRATA_CSV = f"{OUT_DIR}/strata.csv"
 
 RIP_CLASS = "rip_current"
+# Two different rip models are in this feed under two different class names.
+# ripdetect_walton/yolov8x_1.1 emits "rip_current" at Walton, Virginia Beach
+# and both Panama City views; rip_current_detector/1 emits "rip" at Corolla
+# Hampton Inn, Corolla Sailfish and Carova. Reading only "rip_current" made
+# those three cameras look like they had never detected a rip in their lives,
+# when Carova's record is 100% rip and the other two carry 1,064 and 472.
+RIP_CLASSES = ("rip_current", "rip")
 TARGET = 300
 BOOSTER_EACH = 30
 LOW_SUN_DEG = 15.0          # below this the sun is in the water, not over it
@@ -187,7 +194,7 @@ def class_set(value):
     return {part.strip() for part in value.split(",") if part.strip()}
 
 
-def keep_class(frames, wanted=RIP_CLASS, label=""):
+def keep_class(frames, wanted=RIP_CLASSES, label=""):
     """Only the frames whose detections are the class being studied.
 
     The rip product's feed carries two models' output. At Walton, 28,721 frames
@@ -207,18 +214,23 @@ def keep_class(frames, wanted=RIP_CLASS, label=""):
     if "score_classes" not in frames.columns:
         print(f"  {label}no score_classes column; cannot filter by class")
         return frames, 0
+    names_wanted = ({wanted} if isinstance(wanted, str)
+                    else {str(n) for n in wanted})
     sets = frames["score_classes"].map(class_set)
-    keep = sets.map(lambda names: not names or names == {wanted})
-    mixed = int((sets.map(lambda names: wanted in names and names != {wanted})).sum())
+    keep = sets.map(lambda names: not names or names <= names_wanted)
+    mixed = int((sets.map(lambda names: bool(names & names_wanted)
+                          and not names <= names_wanted)).sum())
     dropped = int((~keep).sum())
     if dropped:
         other = sorted({n for names in sets[~keep] for n in names})
+        label_wanted = (wanted if isinstance(wanted, str)
+                        else " or ".join(sorted(names_wanted)))
         print(f"  {label}dropped {dropped} frames detecting something other "
-              f"than {wanted}\n    ({', '.join(other[:8])}"
+              f"than {label_wanted}\n    ({', '.join(other[:8])}"
               f"{', ...' if len(other) > 8 else ''}) — "
               f"{dropped / max(len(frames), 1):.1%} of the record")
     if mixed:
-        print(f"  {label}NOTE: {mixed} frames mix {wanted} with other classes; "
+        print(f"  {label}NOTE: {mixed} frames mix a rip class with others; "
               "they are dropped too,\n    because their score_max and "
               "bbox_area_max pool both models' output")
     return frames[keep].reset_index(drop=True), dropped
@@ -664,7 +676,7 @@ def main():
                         help="fixed so the same sample can be rebuilt exactly")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the stratum table and stop, downloading nothing")
-    parser.add_argument("--detection-class", default=RIP_CLASS,
+    parser.add_argument("--detection-class", default=",".join(RIP_CLASSES),
                         help="keep only frames detecting this class; the feed "
                              "also carries COCO object detections")
     parser.add_argument("--repair-boxes", action="store_true",
@@ -686,7 +698,9 @@ def main():
     coverage = load_coverage(slug)
     conditions = hourly_conditions(args.camera, lat, lon)
 
-    frames, _ = keep_class(frames, args.detection_class, label="class: ")
+    frames, _ = keep_class(
+        frames, [c.strip() for c in str(args.detection_class).split(",") if c.strip()],
+        label="class: ")
     if frames.empty:
         sys.exit(f"No frames left after keeping only {args.detection_class!r}.")
     detected = frames[frames["detected"].astype(bool)].copy()

@@ -490,6 +490,10 @@ def check_the_class_filter_separates_two_models():
                                                 "car", "bird", ""] + [None],
         "detected": [True] * 13 + [False],
     })
+    # The other rip model's class name, which three real cameras use and
+    # nothing else does. Reading only "rip_current" made those look empty.
+    check("the second rip class is accepted by default",
+          len(bls.keep_class(pd.DataFrame({"score_classes": ["rip"] * 3}))[0]) == 3)
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         kept, dropped = bls.keep_class(frames, "rip_current")
@@ -510,7 +514,8 @@ def check_the_class_filter_separates_two_models():
     check("a frame mixing rip with an object class is dropped, not kept",
           len(kept) == 1 and dropped == 1, f"{len(kept)} kept")
     check("and the mixing is called out",
-          "mix rip_current with other classes" in buffer.getvalue())
+          "mix a rip class with others" in buffer.getvalue(),
+          buffer.getvalue().strip()[-90:])
 
     check("class_set splits on commas and trims",
           bls.class_set(" boat , person ") == {"boat", "person"})

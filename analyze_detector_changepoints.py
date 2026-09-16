@@ -513,7 +513,25 @@ def control_slopes(target, design):
     d_design = np.diff(design, axis=0)
     if d_target.size <= d_design.shape[1] + 2:
         return np.zeros(d_design.shape[1])
-    slopes, *_ = np.linalg.lstsq(d_design, d_target, rcond=None)
+
+    # A control that never moves between consecutive kept days -- which happens
+    # when the series has long gaps and the differences straddle them, or when
+    # a column is constant -- leaves lstsq with a rank-deficient system. It
+    # returns a solution, but on the real Walton run that solution contained
+    # infinities and every subtraction below raised "divide by zero encountered
+    # in matmul". The residuals printed anyway, which is the dangerous part.
+    usable = np.isfinite(d_design).all(axis=1) & np.isfinite(d_target)
+    if usable.sum() <= d_design.shape[1] + 2:
+        return np.zeros(d_design.shape[1])
+    moving = np.std(d_design[usable], axis=0) > 0
+    slopes = np.zeros(d_design.shape[1])
+    if not moving.any():
+        return slopes
+    fitted, *_ = np.linalg.lstsq(d_design[usable][:, moving],
+                                 d_target[usable], rcond=None)
+    slopes[moving] = fitted
+    if not np.isfinite(slopes).all():
+        return np.zeros(d_design.shape[1])
     return slopes
 
 
@@ -543,7 +561,11 @@ def residualize(daily, controls, metrics):
         column = np.full(len(merged), np.nan)
         if rows.sum() > len(names) + 3:
             slopes = control_slopes(target[rows], design[rows])
-            column[rows] = target[rows] - design[rows] @ slopes
+            adjusted = target[rows] - design[rows] @ slopes
+            # Never let a bad fit through as data: a non-finite residual would
+            # be dropped silently by the changepoint search's isfinite mask,
+            # shortening the series without saying so.
+            column[rows] = np.where(np.isfinite(adjusted), adjusted, np.nan)
         out[metric] = column
     return out, names
 
