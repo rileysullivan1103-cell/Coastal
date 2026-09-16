@@ -565,6 +565,76 @@ def check_a_rebuild_carries_labels_forward():
             bls.LABEL_CSV = original
 
 
+def check_the_repair_backfills_the_class():
+    """An existing sample must become auditable without being rebuilt.
+
+    Boxes landing on boats and a rock jetty have two possible causes that call
+    for opposite responses: the sample still carrying boat detections (a
+    sampling fault, fix by rebuilding) or the rip model firing on a boat (a
+    finding about the detector, and exactly what the labelling exists to
+    measure). Without the class on the row they cannot be told apart, and a
+    rebuild to find out would cost the labels again.
+    """
+    import io
+    import contextlib
+    import build_label_sample as bls
+
+    original = bls.LABEL_CSV
+    with tempfile.TemporaryDirectory() as folder:
+        bls.LABEL_CSV = os.path.join(folder, "labels.csv")
+        try:
+            pd.DataFrame([
+                {"frame_id": "20260301T120000Z", "rip_present": "no",
+                 "notes": "boat", "boxes": "[]", "confidence": "high"},
+                {"frame_id": "20260301T130000Z", "rip_present": "",
+                 "notes": "", "boxes": "[]", "confidence": "high"},
+            ]).to_csv(bls.LABEL_CSV, index=False)
+
+            frames = pd.DataFrame([
+                {"timestamp": pd.Timestamp("2026-03-01T12:00:00Z"),
+                 "score_classes": "rip_current", "source_file": "x.json",
+                 "original_image": "a.jpg"},
+                {"timestamp": pd.Timestamp("2026-03-01T13:00:00Z"),
+                 "score_classes": "rip_current", "source_file": "x.json",
+                 "original_image": "b.jpg"},
+            ])
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                bls.repair_boxes("nonexistent-slug", frames)
+            text = buffer.getvalue()
+
+            table = pd.read_csv(bls.LABEL_CSV)
+            check("score_classes is backfilled onto the sample",
+                  list(table["score_classes"]) == ["rip_current", "rip_current"],
+                  str(list(table["score_classes"])))
+            check("the existing verdict survived the repair",
+                  table.loc[0, "rip_present"] == "no")
+            check("a clean sample says the boxes are the detector's doing",
+                  "is a finding, not a sampling fault" in text,
+                  text.strip()[-120:])
+
+            # And a contaminated one must say the opposite.
+            frames.loc[1, "score_classes"] = "boat"
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                bls.repair_boxes("nonexistent-slug", frames)
+            text = buffer.getvalue()
+            check("a stray class is flagged as a sampling fault",
+                  "WARNING" in text and "Rebuild" in text, text.strip()[-140:])
+            check("and named", "boat" in text)
+
+            bare = pd.read_csv(bls.LABEL_CSV).drop(columns=["confidence"])
+            bare.to_csv(bls.LABEL_CSV, index=False)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                bls.repair_boxes("nonexistent-slug", frames)
+            check("a labels.csv predating the confidence column repairs "
+                  "without crashing",
+                  "rewrote the boxes" in buffer.getvalue())
+        finally:
+            bls.LABEL_CSV = original
+
+
 def main():
     print("labelling pipeline offline checks\n")
     check_weighting_beats_the_sample()
@@ -583,6 +653,7 @@ def main():
     check_offsets_are_reported_by_kind_not_pooled()
     check_the_class_filter_separates_two_models()
     check_a_rebuild_carries_labels_forward()
+    check_the_repair_backfills_the_class()
     print("\n" + ("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}"))
     return 1 if FAILURES else 0
 

@@ -559,6 +559,11 @@ def report_boxes(table):
     drawn = int((table["boxes"] != "[]").sum())
     print(f"  {drawn} rows carry detector boxes to overlay; "
           f"{len(table) - drawn} have none")
+    # Guarded: a repair runs against whatever labels.csv is already on disk,
+    # including one written before this column existed, and crashing on it
+    # would take the labels with it.
+    if "confidence" not in table.columns:
+        return drawn
     detections = table[table["confidence"] != "none"]
     missing = int((detections["boxes"] == "[]").sum())
     if missing:
@@ -608,18 +613,43 @@ def repair_boxes(slug, frames):
     index = source_index(slug)
     print(f"  {len(index)} payload files in the detection index")
 
-    boxes = []
+    boxes, classes = [], []
     for frame_id in table["frame_id"]:
         frame = lookup.get(str(frame_id))
         boxes.append(json.dumps(boxes_for(frame, index)) if frame is not None
                      else "[]")
+        # Backfilled as well as the boxes: without the class on the row there
+        # is no way to tell a detector firing on a boat from a sample that
+        # still carries boat detections, and those call for opposite responses.
+        if frame is None:
+            classes.append("")
+        else:
+            value = frame.get("score_classes")
+            classes.append("" if value is None or value != value else str(value))
     table["boxes"] = boxes
+    table["score_classes"] = classes
 
     labelled = count_labelled(table)
     temporary = LABEL_CSV + ".tmp"
     table.to_csv(temporary, index=False)
     os.replace(temporary, LABEL_CSV)
-    print(f"\n  rewrote the boxes column of {LABEL_CSV}")
+    print(f"\n  rewrote the boxes and score_classes columns of {LABEL_CSV}")
+    named = [c for c in classes if c]
+    if named:
+        from collections import Counter
+        tally = Counter(named)
+        print("  classes now on the sample: "
+              + ", ".join(f"{name} {count}"
+                          for name, count in tally.most_common(6)))
+        stray = {n for n in tally if n != RIP_CLASS}
+        if stray:
+            print(f"  WARNING: {sum(tally[n] for n in stray)} row(s) are not "
+                  f"{RIP_CLASS} ({', '.join(sorted(stray))}).")
+            print("    Rebuild to drop them — the filter runs at build time.")
+        else:
+            print(f"  every labelled row is {RIP_CLASS}: a box on a boat or a "
+                  "jetty here is the\n    detector calling that a rip, which "
+                  "is a finding, not a sampling fault.")
     print(f"  {labelled} existing labels preserved")
     report_boxes(table)
     return 0
@@ -663,13 +693,13 @@ def main():
     coverage, _ = clip_to_rip_record(coverage, frames, label="coverage: ")
     blank_hours = coverage[~coverage["hour"].isin(frames["hour"])].copy()
     for column in ("score_max", "detection_count", "bbox_count", "bbox_area_max",
-                   "source_file", "original_image", "timestamp"):
+                   "source_file", "original_image", "timestamp", "score_classes"):
         if column not in blank_hours.columns:
             blank_hours[column] = np.nan
     blank_hours["timestamp"] = blank_hours["hour"]
 
     keep = ["timestamp", "hour", "score_max", "detection_count", "bbox_count",
-            "bbox_area_max", "source_file", "original_image"]
+            "bbox_area_max", "source_file", "original_image", "score_classes"]
     pool = pd.concat([detected[keep], blank_hours[keep]], ignore_index=True)
     pool, _ = deduplicate_frames(pool, label="pool: ")
     pool = pool.merge(conditions, on="hour", how="left")
@@ -780,6 +810,8 @@ def main():
             "wave_tercile": row["wave_tercile"],
             "booster": row.get("booster", ""),
             "score_max": row["score_max"],
+            "score_classes": ("" if pd.isna(row.get("score_classes"))
+                              else row.get("score_classes")),
             "detection_count": row["detection_count"],
             "bbox_count": row["bbox_count"],
             "bbox_area_max": row["bbox_area_max"],
