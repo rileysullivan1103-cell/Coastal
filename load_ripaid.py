@@ -4,7 +4,10 @@ RipAID (Zenodo 15082427) is a CVAT/COCO export of HUMAN-drawn rip annotations
 on fixed coastal camera imagery. It differs from the WebCOOS rip feed in three
 ways that matter more than its size:
 
-  * It has real negatives. 948 of its 2,815 frames carry no annotation at all,
+  * It has real negatives. Reportedly 948 of its 2,815 frames carry no
+    annotation at all -- a figure from the record's DESCRIPTION, never yet
+    confirmed against a download, so summarize() prints the real counts and
+    those are the ones to quote --
     which means a person looked and saw no rip. The WebCOOS feed publishes an
     element only when the detector fires, so 'no file' there means 'no rip OR
     no image' and the denominator had to be rebuilt from a separate stills

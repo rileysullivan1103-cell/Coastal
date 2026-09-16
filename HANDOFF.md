@@ -236,10 +236,23 @@ temperature coefficient GROW.
    identifiable in a SINGLE STILL by ONE observer (practitioners use video or
    time-averaged imagery). More of the same labelling cannot separate them: at
    a 2.6% rate, detecting a doubling between bands needs ~868 labels per band.
-   **The test is built.** `build_ripaid_calibration.py` draws 60 blinded RipAID
-   frames (30 human-annotated rips, 30 real negatives, doubt frames excluded);
-   `analyze_ripaid_calibration.py` reports Cohen's kappa against the
-   annotators. An hour's labelling.
+   **The test is built but BLOCKED on the data.** `build_ripaid_calibration.py`
+   draws 60 blinded RipAID frames (30 human-annotated rips, 30 real negatives,
+   doubt frames excluded); `analyze_ripaid_calibration.py` reports Cohen's
+   kappa against the annotators. An hour's labelling once the input exists.
+   **What is on disk is 480 images and NO annotations.** `RipAID_v1.0.0/`
+   holds `images/default/` only — 480 PNGs, cameras clm_s_01..05 and
+   snb_s_01..03, spanning 2011-10 to 2024-09 — with no COCO export beside
+   them. Nothing can run until the annotations part of Zenodo 15082427 is
+   downloaded.
+   **And the size figures in `load_ripaid.py` are UNVERIFIED.** Its docstring
+   says "948 of its 2,815 frames carry no annotation at all". That came from
+   the record's description, never from a run — no copy of the data had been
+   downloaded when it was written. The local copy is 480 images, so either
+   this download is a subset or the figure describes something else. Do not
+   quote 2,815 or 948 until a real parse prints them. The same caution applies
+   to the "60 frames, 30 of each" plan: whether 30 clean negatives even exist
+   here is unknown until the annotations arrive.
 
 1. **Is the midday effect the detector or the water?** Largest surviving effect
    in the project. Sea breeze is out and camera-specific glare is unsupported
