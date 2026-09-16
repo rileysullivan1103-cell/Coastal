@@ -44,6 +44,7 @@ Reads only what is already on disk under data/. Makes no network calls.
 
 import argparse
 import glob
+import io
 import json
 import math
 import os
@@ -54,6 +55,7 @@ import pandas as pd
 
 import analyze_drivers as ad
 import build_label_sample as bls
+import diagnose_class_timeline as ct
 
 OUT_DIR = f"{ad.DATA_DIR}/changepoints"
 RESIDUALIZE_DEFAULT = ["Walton Lighthouse, Santa Cruz, CA"]
@@ -656,6 +658,120 @@ def analyze_series(label, dates, values, args, findings, camera, kind):
     return [dates[i] for i in splits]
 
 
+def dates_for(daily, metrics, args):
+    """{metric: [date, ...]} for one daily table, printing nothing."""
+    out = {}
+    for metric in metrics:
+        if metric not in daily.columns:
+            continue
+        values = pd.to_numeric(daily[metric], errors="coerce").to_numpy(float)
+        keep = np.isfinite(values)
+        if keep.sum() < 2 * args.min_segment:
+            out[metric] = []
+            continue
+        kept = pd.DatetimeIndex(daily["date"][keep].to_numpy())
+        splits = detect(values[keep], args.max_k, args.min_segment)
+        flags = reverted_flags(values[keep], splits)
+        out[metric] = [(kept[i], undone)
+                       for i, undone in zip(splits, flags)]
+    return out
+
+
+def near_class_event(moment, events, window):
+    """The object-class start/stop within `window` days of a date, if any.
+
+    This is the whole point of running both passes. A class switching on
+    mid-record steps the UNFILTERED series on that date, and a changepoint
+    search will name it and invite a hunt for a release note that does not
+    exist. Marking the coincidence is what tells the two apart.
+    """
+    best, best_gap = None, None
+    for event in events:
+        gap = abs((pd.Timestamp(event["date"]).tz_localize(None)
+                   - pd.Timestamp(moment).tz_localize(None)).days)
+        if gap <= window and (best_gap is None or gap < best_gap):
+            best, best_gap = event, gap
+    return best
+
+
+def compare_classes(camera, path, slug, args, class_events):
+    """Filtered and unfiltered changepoint dates, side by side."""
+    print("\n  filtered (rip_current) vs unfiltered (every class)")
+    passes = {}
+    for label, wanted in (("filtered", args.detection_class), ("unfiltered", "any")):
+        with _quiet():
+            daily, _ = daily_metrics(path, args.min_frames, wanted)
+            if daily is not None and not daily.empty:
+                daily, _ = attach_detection_rate(daily, slug)
+        if daily is None or daily.empty:
+            passes[label] = {}
+            continue
+        metrics = [m for m in METRICS
+                   if m in daily.columns and daily[m].notna().any()]
+        passes[label] = dates_for(daily, metrics, args)
+
+    every = sorted(set(passes["filtered"]) | set(passes["unfiltered"]))
+    if not every:
+        print("    neither pass produced a usable series")
+        return []
+
+    rows = []
+    print(f"    {'metric':<18} {'filtered':<34} unfiltered")
+    for metric in every:
+        left = _stamp(passes["filtered"].get(metric, []))
+        right = _stamp(passes["unfiltered"].get(metric, []))
+        print(f"    {metric:<18} {left:<34} {right}")
+        for moment, undone in passes["unfiltered"].get(metric, []):
+            hit = near_class_event(moment, class_events, args.coincide)
+            rows.append({"camera": camera, "metric": metric, "pass": "unfiltered",
+                         "date": moment.strftime("%Y-%m-%d"),
+                         "transient": bool(undone),
+                         "class_event": ("" if hit is None else
+                                         f"{hit['group']} {hit['kind']} "
+                                         f"{pd.Timestamp(hit['date']):%Y-%m-%d}")})
+        for moment, undone in passes["filtered"].get(metric, []):
+            rows.append({"camera": camera, "metric": metric, "pass": "filtered",
+                         "date": moment.strftime("%Y-%m-%d"),
+                         "transient": bool(undone), "class_event": ""})
+
+    marked = [r for r in rows if r["class_event"]]
+    if marked:
+        print(f"\n    {len(marked)} unfiltered date(s) coincide with an object "
+              f"class switching\n    within {args.coincide} days — these are "
+              "the class, not the detector:")
+        for row in marked:
+            print(f"      {row['date']}  {row['metric']:<18} {row['class_event']}")
+    elif class_events:
+        print(f"\n    no unfiltered date falls within {args.coincide} days of "
+              "an object class switching")
+
+    only_unfiltered = {r["date"] for r in rows if r["pass"] == "unfiltered"} \
+        - {r["date"] for r in rows if r["pass"] == "filtered"}
+    if only_unfiltered:
+        print(f"    {len(only_unfiltered)} date(s) appear ONLY unfiltered: "
+              + ", ".join(sorted(only_unfiltered)))
+    return rows
+
+
+class _quiet:
+    """Silence a helper that prints, without silencing the report around it."""
+
+    def __enter__(self):
+        self._saved = sys.stdout
+        sys.stdout = io.StringIO()
+
+    def __exit__(self, *exc):
+        sys.stdout = self._saved
+        return False
+
+
+def _stamp(pairs):
+    if not pairs:
+        return "-"
+    return ", ".join(f"{d:%Y-%m-%d}" + ("*" if undone else "")
+                     for d, undone in pairs)
+
+
 def coincidences(findings, window):
     """Dates where two or more CAMERAS shift within `window` days.
 
@@ -714,9 +830,14 @@ def main():
     parser.add_argument("--residualize", nargs="*", default=None,
                         help="cameras to also run on weather-residualized series; "
                              "default Walton, '' for none")
-    parser.add_argument("--detection-class", default=bls.RIP_CLASS,
+    parser.add_argument("--detection-class", "--class-filter",
+                        dest="detection_class", default=bls.RIP_CLASS,
                         help="analyse only this class; 'any' pools every class, "
                              "which is what the earlier version did")
+    parser.add_argument("--compare-classes", action="store_true",
+                        help="run filtered and unfiltered side by side and mark "
+                             "dates that coincide with an object class starting "
+                             "or stopping")
     parser.add_argument("--min-frames", type=int, default=MIN_FRAMES_PER_DAY)
     parser.add_argument("--min-segment", type=int, default=MIN_SEGMENT_DAYS,
                         help="shortest run of days that can be called a regime")
@@ -769,7 +890,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
     findings, histograms, daily_tables = [], [], []
-    treatment = []
+    treatment, comparisons = [], []
 
     for camera, slug, path in found:
         print(f"\n{'=' * 72}\n{camera}\n{'=' * 72}")
@@ -783,6 +904,14 @@ def main():
             print(f"  classes: {top}")
             print(f"  {bls.RIP_CLASS}: {rip} of {sum(mix.values())} "
                   f"({rip / max(sum(mix.values()), 1):.0%})")
+
+        class_events = []
+        if args.compare_classes:
+            timeline, why = ct.load(path)
+            if timeline is not None:
+                class_events = ct.transitions(
+                    ct.monthly_table(timeline), ct.class_events(timeline),
+                    timeline["timestamp"].min(), timeline["timestamp"].max())
 
         daily, note = daily_metrics(path, args.min_frames, args.detection_class)
         if daily is None or daily.empty:
@@ -860,6 +989,10 @@ def main():
             treatment.append({"camera": camera, "treatment": "raw only",
                               "reason": why})
 
+        if args.compare_classes:
+            comparisons += compare_classes(camera, path, slug, args,
+                                           class_events)
+
         print("\n  monthly score_max histograms:")
         hist = monthly_histograms(path, camera)
         print_histograms(hist)
@@ -904,6 +1037,11 @@ def main():
         pd.DataFrame(treatment).to_csv(f"{args.out_dir}/treatment.csv", index=False)
         print(f"  wrote {args.out_dir}/treatment.csv  "
               "(which cameras were residualized and which were not)")
+    if comparisons:
+        pd.DataFrame(comparisons).to_csv(
+            f"{args.out_dir}/class_comparison.csv", index=False)
+        print(f"  wrote {args.out_dir}/class_comparison.csv  "
+              "(filtered vs unfiltered dates, with class events marked)")
     if clusters:
         with open(f"{args.out_dir}/coincidences.json", "w") as handle:
             json.dump(clusters, handle, indent=2)

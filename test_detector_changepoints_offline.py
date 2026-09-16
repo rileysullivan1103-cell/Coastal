@@ -17,6 +17,8 @@ release note that was never written.
 No network, no data/ directory, nothing but numpy and pandas.
 """
 
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -26,6 +28,7 @@ import pandas as pd
 
 import analyze_drivers as ad
 import analyze_detector_changepoints as cp
+import diagnose_class_timeline as ct
 
 FAILURES = []
 
@@ -170,6 +173,7 @@ class Args:
     min_segment = 14
     coincide = 7
     min_frames = 5
+    detection_class = "rip_current"
 
 
 def check_a_clean_step_is_found_where_it_was_put():
@@ -501,6 +505,122 @@ def check_object_only_cameras_are_not_analysed_as_rip_cameras():
             ad.DATA_DIR = original
 
 
+CLASS_SWITCH = pd.Timestamp("2026-05-01", tz="UTC")
+
+
+def check_a_class_switching_on_fools_only_the_unfiltered_run():
+    """The whole reason for running both passes.
+
+    A camera that starts emitting `person` halfway through steps its UNFILTERED
+    detection rate on that date. A changepoint search names it, and without the
+    comparison it reads as a detector deployment worth going to find a release
+    note for. The rip_current series underneath never moves.
+
+    Built so the answer is known: rip detections are a flat 8 per day for the
+    whole record, and person detections switch from 0 to 10 per day on
+    2026-05-01 and nothing else changes.
+    """
+    original = ad.DATA_DIR
+    with tempfile.TemporaryDirectory() as folder:
+        ad.DATA_DIR = folder
+        try:
+            camera = "Switcher, Testville, CA"
+            slug = ad.rip_slug(camera)
+            detection_dir = os.path.join(folder, "rip_detection")
+            os.makedirs(detection_dir, exist_ok=True)
+
+            rows, coverage = [], []
+            for index, day in enumerate(dates()):
+                for hour in range(24):
+                    coverage.append({
+                        "hour": (day + pd.Timedelta(hours=hour)).isoformat(),
+                        "images": 60})
+                for hour in range(8):
+                    rows.append({
+                        "timestamp": (day + pd.Timedelta(hours=hour)).isoformat(),
+                        "detected": True, "score_classes": "rip_current",
+                        "score_max": 0.7, "detection_count": 1, "bbox_count": 1,
+                        "bbox_area_max": 1000.0, "source_file": "s.json",
+                        "original_image": f"r{index}_{hour}.jpg"})
+                if day >= CLASS_SWITCH:
+                    for hour in range(8, 18):
+                        rows.append({
+                            "timestamp": (day + pd.Timedelta(hours=hour)).isoformat(),
+                            "detected": True, "score_classes": "person",
+                            "score_max": 0.9, "detection_count": 1,
+                            "bbox_count": 1, "bbox_area_max": 500.0,
+                            "source_file": "s.json",
+                            "original_image": f"p{index}_{hour}.jpg"})
+            path = os.path.join(detection_dir, f"rip_{slug}.csv")
+            pd.DataFrame(rows).to_csv(path, index=False)
+            pd.DataFrame(coverage).to_csv(
+                os.path.join(detection_dir, f"coverage_{slug}_hourly.csv"),
+                index=False)
+
+            args = Args()
+            quiet = io.StringIO()
+
+            with contextlib.redirect_stdout(quiet):
+                pooled, _ = cp.daily_metrics(path, args.min_frames, "any")
+                pooled, _ = cp.attach_detection_rate(pooled, slug)
+                filtered, _ = cp.daily_metrics(path, args.min_frames,
+                                               "rip_current")
+                filtered, _ = cp.attach_detection_rate(filtered, slug)
+
+            pooled_dates = series_dates(pooled, "detection_rate", args)
+            check("the UNFILTERED run flags the class-switch date",
+                  nearest(pooled_dates, CLASS_SWITCH) is not None
+                  and nearest(pooled_dates, CLASS_SWITCH) <= TOLERANCE_DAYS,
+                  f"{[str(d.date()) for d in pooled_dates]}")
+
+            filtered_dates = series_dates(filtered, "detection_rate", args)
+            check("the FILTERED run does not",
+                  not filtered_dates
+                  or nearest(filtered_dates, CLASS_SWITCH) > TOLERANCE_DAYS,
+                  f"{[str(d.date()) for d in filtered_dates]}")
+
+            # And the class timeline names the same date independently.
+            timeline, why = ct.load(path)
+            check("the class timeline loads the record", timeline is not None,
+                  why)
+            events = ct.transitions(ct.monthly_table(timeline),
+                                    ct.class_events(timeline),
+                                    timeline["timestamp"].min(),
+                                    timeline["timestamp"].max())
+            starts = [e for e in events if e["kind"] == "starts"]
+            check("it reports person starting mid-record",
+                  len(starts) == 1 and starts[0]["group"] == "person",
+                  str([(e["group"], e["kind"], str(e["date"].date()))
+                       for e in events]))
+            check("on the date it was built to start",
+                  abs((starts[0]["date"] - CLASS_SWITCH).days) <= 1,
+                  f"{starts[0]['date']:%Y-%m-%d}")
+
+            hit = cp.near_class_event(pooled_dates[0], events, args.coincide)
+            check("and the unfiltered changepoint is marked against it",
+                  hit is not None and hit["group"] == "person", str(hit))
+
+            monthly = ct.monthly_table(timeline)
+            before = monthly[monthly["month"] < "2026-05"]
+            after = monthly[monthly["month"] >= "2026-05"]
+            check("monthly counts show person at zero before the switch",
+                  before["person"].sum() == 0, str(before["person"].sum()))
+            check("and present after", after["person"].sum() > 0)
+            check("while rip_current is unchanged across it",
+                  before[ct.RIP].sum() > 0 and after[ct.RIP].sum() > 0)
+
+            with contextlib.redirect_stdout(quiet):
+                rows_out = cp.compare_classes(camera, path, slug, args, events)
+            marked = [r for r in rows_out if r["class_event"]]
+            check("compare_classes returns the marked rows",
+                  any(r["pass"] == "unfiltered" for r in marked), str(marked[:2]))
+            check("and marks none of the filtered rows",
+                  not any(r["pass"] == "filtered" and r["class_event"]
+                          for r in rows_out))
+        finally:
+            ad.DATA_DIR = original
+
+
 def main():
     print("detector changepoint offline checks\n")
     check_a_clean_step_is_found_where_it_was_put()
@@ -510,6 +630,7 @@ def main():
     check_end_to_end_recovers_both_dates()
     check_thin_cameras_are_not_residualized()
     check_object_only_cameras_are_not_analysed_as_rip_cameras()
+    check_a_class_switching_on_fools_only_the_unfiltered_run()
     check_residualizing_blanks_rows_rather_than_mixing()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {FAILURES}"))
