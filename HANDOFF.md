@@ -240,19 +240,16 @@ temperature coefficient GROW.
    draws 60 blinded RipAID frames (30 human-annotated rips, 30 real negatives,
    doubt frames excluded); `analyze_ripaid_calibration.py` reports Cohen's
    kappa against the annotators. An hour's labelling once the input exists.
-   **What is on disk is 480 images and NO annotations.** `RipAID_v1.0.0/`
-   holds `images/default/` only — 480 PNGs, cameras clm_s_01..05 and
-   snb_s_01..03, spanning 2011-10 to 2024-09 — with no COCO export beside
-   them. Nothing can run until the annotations part of Zenodo 15082427 is
-   downloaded.
-   **And the size figures in `load_ripaid.py` are UNVERIFIED.** Its docstring
-   says "948 of its 2,815 frames carry no annotation at all". That came from
-   the record's description, never from a run — no copy of the data had been
-   downloaded when it was written. The local copy is 480 images, so either
-   this download is a subset or the figure describes something else. Do not
-   quote 2,815 or 948 until a real parse prints them. The same caution applies
-   to the "60 frames, 30 of each" plan: whether 30 clean negatives even exist
-   here is unknown until the annotations arrive.
+   **BLOCKED: no annotations on disk.** `RipAID_v1.0.0/` holds
+   `images/default/` only — 480 PNGs, cameras clm_s_01..05 and snb_s_01..03,
+   2011-10 to 2024-09 — a partial extract with no annotation file beside it.
+   **Download RipAID v2.0.0's `yolo-obb.zip`** (6.7 GB, DOI 10.5281/zenodo.
+   18196300). NOT the CVAT backup: that is meant to be restored into CVAT and
+   its internal annotations are in CVAT's own format, while YOLO-OBB is plain
+   per-image TXT — one line per instance, class index plus four normalised
+   corner points — which is directly parseable and keeps both the class and
+   the box orientation. `load_ripaid.py` reads COCO and will need a new reader
+   for it.
 
 1. **Is the midday effect the detector or the water?** Largest surviving effect
    in the project. Sea breeze is out and camera-specific glare is unsupported
@@ -315,6 +312,29 @@ currents were removed", so the negatives are the residue of a hand deletion.
 What survives the selection is asked WITHIN annotated rips: drawn size
 (z-scored within camera — pixel areas are not comparable across them) and
 annotator doubt.
+
+**RipAID v2.0.0 is three datasets in one, and only one third is usable here.**
+Confirmed from its README: 6,789 images = 2,815 from v1.0.0 (SIRENA fixed
+cameras, two Mediterranean beaches) + 2,944 from RipScout (aerial, drone and
+Google Earth) + 1,030 from UFSC CoastSnap (crowd-sourced smartphone shots,
+Brazil). **Only the 2,815 SIRENA frames have a fixed viewing bearing, a known
+lat/lon and a timestamp in the filename**, so only they can carry the bearing
+rotation — a drone image has no camera bearing to rotate against.
+`build_frames` drops the rest as unparsed, which is the right behaviour, but
+it means v2.0.0 buys no extra rotation power over v1.0.0.
+
+**v2.0.0 adds a third class, `sediment`** — "a sediment plume that might
+relate to a rip current", 4,591 instances across 1,588 images (23.4%). It is
+neither a rip nor a clean negative, so like `doubt` it must be excluded from
+both strata of the calibration draw, not silently bucketed as an object. Label
+counts: rip_current 4,103 instances / 3,577 images (52.7%), doubt 1,437 /
+1,259 (18.5%), sediment 4,591 / 1,588 (23.4%), no annotation 1,082 images
+(15.9%). Those are WHOLE-dataset figures; the SIRENA-only split is not given
+and must be measured.
+
+**The DOI in the code is v1.0.0's.** v1.0.0 = 10.5281/zenodo.15082427,
+v2.0.0 = 10.5281/zenodo.18196300. `load_ripaid.py` and this brief cite the
+first.
 
 **Any bearing-derived term carries the whole azimuth unless azimuth is in the
 comparator.** To ask whether a specific bearing matters, rotate it and race the
