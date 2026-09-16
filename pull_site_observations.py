@@ -69,6 +69,10 @@ TIMEOUT = 300
 # offsets in degrees to try, nearest first, when the exact point fails. Which
 # direction is seaward is not knowable here, so all eight are tried.
 MARINE_NUDGES = [0.0, 0.05, 0.10, 0.20]
+# Days of data the seaward walk asks for while deciding whether a cell
+# is water. Three is enough for a non-NaN column and costs about one
+# unit against Open-Meteo's variables-x-days meter.
+PROBE_DAYS = 3
 MARINE_BEARINGS = [(0, 1), (1, 0), (0, -1), (-1, 0),
                    (1, 1), (1, -1), (-1, 1), (-1, -1)]
 
@@ -222,12 +226,20 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
     # with consequences: the caller caches that as a fact about the site, and
     # a beach that has waves is recorded as having none until someone clears
     # the cache by hand.
+    # Whether a cell is water is a fact about GEOGRAPHY, not about the study
+    # window, so the walk asks it with three days of data instead of nine and
+    # a half years. Open-Meteo meters by variables x days: the full series is
+    # worth about fifty of its units and the probe is worth one, and the walk
+    # averaged 3.6 requests per cell over the Northeast. Paying the full price
+    # to learn that a cell is dry land was three quarters of the wave model's
+    # entire bill.
+    probe_start = end - timedelta(days=PROBE_DAYS)
     answered, last_note = False, ""
     for nudge in MARINE_NUDGES:
         bearings = [(0, 0)] if nudge == 0 else MARINE_BEARINGS
         for dlat, dlon in bearings:
             try_lat, try_lon = lat + dlat * nudge, lon + dlon * nudge
-            frame, note = open_meteo(MARINE, try_lat, try_lon, start, end,
+            frame, note = open_meteo(MARINE, try_lat, try_lon, probe_start, end,
                                      variables, probe=probe and nudge == 0,
                                      models=models)
             if frame is not None:
@@ -239,7 +251,13 @@ def fetch_marine(lat, lon, start, end, probe=False, models=None,
                         km = nudge * 111
                         print(f"      exact point has no wave data; used a cell "
                               f"~{km:.0f} km away ({try_lat:.3f}, {try_lon:.3f})")
-                    return done(frame, "ok", (try_lat, try_lon))
+                    # This cell is water. NOW buy the series.
+                    full, note = open_meteo(MARINE, try_lat, try_lon, start, end,
+                                            variables, models=models)
+                    if full is None:
+                        return done(None, f"cell ({try_lat:.3f}, {try_lon:.3f}) "
+                                          f"has waves but the series failed: {note}")
+                    return done(full, "ok", (try_lat, try_lon))
             else:
                 last_note = note
                 if nudge == 0:
