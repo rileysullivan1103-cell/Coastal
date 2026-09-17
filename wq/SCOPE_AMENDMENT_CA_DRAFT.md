@@ -19,6 +19,9 @@ Nothing here was chosen in response to a result.
 | 9b | Covariate build must clear per-source coverage: ERA5 99% of all stations, marine 95% of wet cells, tide 95% of gauged stations, water temp ungated | yes |
 | 10 | Holdout = 20% of clusters + last 12 months, seed `20260916` | **NO — redrawing invalidates every comparison** |
 | 11 | Santa Cruz Wharf and Carpinteria excluded from replication statistics | **NO — they are already excluded from the holdout too** |
+| 12 | Exceedance comparisons across `region` are confounded by criterion and unit (§4b) | yes |
+| 13 | **PENDING** — what to do about NE fecal coliform being shellfish monitoring (§4c i) | yes, re-fit |
+| 14 | **PENDING** — whether to keep the 22 Great Lakes stations (§4c ii) | yes, re-fit |
 
 Items 10 and 11 are the ones that stop being free once Phase 2 runs.
 
@@ -106,6 +109,64 @@ lab method it used, and the analyte mix — California is essentially the entire
 Pacific level, carries all 687 total-coliform pairs, and reports in MPN where
 the Northeast reports largely in CFU. A region effect here is not a coastal
 effect.
+
+## 4b. The criteria are not symmetric between regions
+
+`region` is the stratum this amendment exists to make testable, and the thing
+that makes it hardest to read is that the two levels are not judged by the
+same rule.
+
+| | California | Northeast |
+|---|---|---|
+| criterion | **state regulation** — 17 CCR 7958 (AB 411) | **federal fallback** — EPA 2012 / 1976 |
+| ENT | 104 MPN/100 mL | 130 cfu/100 mL (2012 RWQC STV, 36/1,000) |
+| FECAL | 400 MPN/100 mL | 400 cfu/100 mL (EPA 1976, the 10%-exceedance value) |
+| TOTAL | 10,000, **and 1,000** when fecal/total > 0.1 | no fitted pairs |
+| ECOLI | **no applicable standard** | 410 (freshwater STV, used as a marine fallback and flagged) |
+| unit reported | mostly MPN | mostly CFU |
+
+So a Pacific exceedance is a California posting decision and an Atlantic one
+is an EPA recommendation that no state in this study has been checked against.
+The enterococcus limits differ by 25% (104 against 130) in opposite directions
+from what the regional difference in bacteria would suggest, and CFU and MPN
+are different estimators that this pipeline deliberately never interconverts.
+
+**Therefore: any region difference in the exceedance columns (`auc_exceedance`,
+and anything Phase 2 scores on exceedance classification) is confounded with
+the criterion, the unit and the programme, and is not evidence about the
+coast.** The rank correlations are unaffected — `rho_ctrl` never touches a
+threshold — so D1, D2, D3 and D6 remain comparable across regions and only the
+C4 exceedance column carries this asymmetry. Report it that way.
+
+This is on top of the confounding already noted in section 4: region is also
+the state programme, the lab method and the analyte mix.
+
+## 4c. Decisions pending from the pre-report checks
+
+Two findings are recorded here and **not yet acted on**. Both change what the
+study contains, so they are the author's call, not the pipeline's.
+
+**(i) The Northeast fecal coliform is not beach monitoring.** Of 1,692 fitted
+FECAL pairs outside California, **zero** come from a BEACH Act bathing-beach
+station, and **1,473 (87.1%)** match a shellfish growing-area pattern exactly:
+fecal-coliform-only, estuarine, numerically coded, run by the New Jersey
+Bureau of Marine Water Monitoring. NSSP classifies shellfish waters on fecal
+coliform; the BEACH Act programme posts bathing beaches on enterococcus, and
+in this data every `BEACH Program Site-*` station measures ENT or E. coli and
+none measures fecal coliform. California's FECAL, by contrast, is 488 of 498
+pairs from `BEACH Program Site-Ocean`.
+
+Left as it stands, the FECAL distribution pools a shellfish harvest
+classification with a beach posting decision and calls the result one analyte.
+It also means the Phase 1 `outfall_type` finding — carried by NJDEP stations —
+was a finding about shellfish waters.
+
+**(ii) The Great Lakes level is 22 stations.** All `21NYBCH` bathing beaches,
+all `water_class: fresh`, contributing 22 fitted pairs, every one E. coli.
+They are the only fresh-water stations in the study, so excluding them would
+make the whole study marine and retire the `_default` fresh block entirely.
+Without them `region` is a clean two-level stratum, Atlantic 2,830 against
+Pacific 723.
 
 ## 5. D6 headline
 
