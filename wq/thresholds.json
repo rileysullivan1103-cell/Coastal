@@ -27,7 +27,8 @@
     "sample's own unit alongside, so a CFU/MPN mismatch stays visible.",
     "",
     "VERIFICATION PASS 2026-09-16: California was checked against the regulation itself and all four of its values are correct. The _default block was checked against the 2012 RWQC and found to MIX EPA's two alternative magnitude sets -- see _default._source. No number was changed. What is still unverified is flagged entry by entry.",
-    "SCOPE NOTE 2026-09-16: of the _default entries, only marine ENT, marine FECAL and fresh ECOLI are exercised by the current study. All 687 total-coliform pairs and all fitted Californian pairs use the CA block; there are no fresh-water enterococcus pairs at all. An entry's _verified flag matters in proportion to how many pairs it scores."
+    "SCOPE NOTE 2026-09-16: of the _default entries, only marine ENT, marine FECAL and fresh ECOLI are exercised by the current study. All 687 total-coliform pairs and all fitted Californian pairs use the CA block; there are no fresh-water enterococcus pairs at all. An entry's _verified flag matters in proportion to how many pairs it scores.",
+    "PROGRAMME BLOCK 2026-09-17: a 'programmes' block now sits ABOVE the state block in the lookup. It exists because the Northeast's fecal coliform turned out to be shellfish growing-area monitoring rather than beach monitoring, and scoring a growing area against a bathing-beach number answers a question nobody asked."
   ],
   "_default": {
     "_source": "US EPA, 2012 Recreational Water Quality Criteria, EPA-820-F-12-058 (https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf), 36 per 1,000 magnitude set -- see _magnitude_set -- plus EPA 1976 and 1986 criteria where 2012 has no equivalent. _verified stays false for the BLOCK because fresh ENT could not be read off a primary table and marine TOTAL has no federal basis at all (marine FECAL was verified 2026-09-16); the entries that were checked carry their own _verified and the date.",
@@ -149,5 +150,42 @@
       "_verified_against": "Cal. Code Regs. tit. 17, s 7958(a)(1), read verbatim at https://www.law.cornell.edu/regulations/california/17-CCR-7958. The regulation's single-sample list is: 1,000 total coliform/100 mL if the fecal/total ratio exceeds 0.1; 10,000 total coliform/100 mL; 400 fecal coliform/100 mL; 104 enterococcus/100 mL. All four values below match it exactly; none was changed."
     },
     "_GREAT_LAKES_NOTE": "Great Lakes states (MI, WI, IL, IN, OH, PA, NY, MN) are served by the _default fresh block: E. coli 235/100 mL, which is the 1986 single-sample maximum most Great Lakes beach programs post against. Add a state block here wherever the state's own criterion differs."
+  },
+  "programmes": {
+    "_README": [
+      "Criteria that follow the MONITORING PROGRAMME rather than the state.",
+      "Looked up BEFORE the state block, because a station managed under a",
+      "national programme is judged by that programme's rule wherever it sits.",
+      "",
+      "programme comes from wq.strata.programme_of, which reads the WQP",
+      "location type and nothing else. It says whether a station is published",
+      "under the BEACH Act; it does NOT assert that a non_beach station is a",
+      "shellfish growing area. In this study the two coincide almost exactly --",
+      "no BEACH Act station reports fecal coliform at all, and 1,473 of 1,692",
+      "non-Californian fecal pairs are fecal-only estuarine stations run by a",
+      "state marine water monitoring bureau -- but a non_beach station that is",
+      "NOT a growing area would be scored here against a standard it is not",
+      "managed under. Read the programme counts in the report before reading",
+      "any exceedance column that came from this block."
+    ],
+    "non_beach": {
+      "_source": "US FDA National Shellfish Sanitation Program, Model Ordinance, approved growing-area criteria for fecal coliform. Confirmed verbatim 2026-09-17 against Virginia's adoption at https://law.lis.virginia.gov/admincode/title9/agency25/chapter260/section160/: 'The geometric mean fecal coliform value for a sampling station shall not exceed an MPN ... of 14 per 100 milliliters' and 'The estimated 90th percentile shall not exceed an MPN of 43 per 100 ml for a 5-tube decimal dilution test or an MPN of 49 per 100 ml for a 3-tube decimal dilution test or MF test of 31 CFU per 100 ml.'",
+      "_verified": true,
+      "_verified_on": "2026-09-17",
+      "marine": {
+        "FECAL": {
+          "threshold": 43,
+          "unit": "MPN/100mL",
+          "basis": "NSSP approved growing-area 90th-percentile limit, 5-tube decimal dilution. Verified 2026-09-17. TWO CAVEATS, both the same shape as the EPA 1976 note on the 400 figure. (1) 43 is a 90th PERCENTILE of a station's distribution, not a single-sample maximum; used here as a per-sample threshold it is an approximation, and roughly a tenth of samples at a compliant station are expected to exceed it. The companion geometric-mean limit of 14 is not applied at all, because this pipeline scores samples and not stations. (2) 43 is the MPN figure; the membrane-filtration equivalent is 31 CFU, and this pipeline never interconverts the two estimators, so a CFU-reporting station is being compared against an MPN number. The sample's own estimator is on its row.",
+          "_verified": true,
+          "_verified_on": "2026-09-17",
+          "alternatives": {
+            "3_tube_MPN": 49,
+            "membrane_filtration_CFU": 31,
+            "geometric_mean_MPN": 14
+          }
+        }
+      }
+    }
   }
 }

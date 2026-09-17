@@ -214,6 +214,44 @@ def site_clusters(sites, radius_km=SITE_CLUSTER_RADIUS_KM):
             pd.Series(sizes, index=sites.index))
 
 
+# EPA's BEACH Act programme publishes its stations under location types that
+# begin with this. It is the cleanest metadata signal in the whole table of
+# what a station is FOR.
+BEACH_ACT_PREFIX = "beach program site"
+
+
+def programme_of(site_type):
+    """beach_act | non_beach, from the location type alone.
+
+    The Northeast's fecal coliform is not beach monitoring. Of 1,692 fitted
+    FECAL pairs outside California, none comes from a BEACH Act station and
+    1,473 match a shellfish growing-area pattern exactly: fecal-coliform-only,
+    estuarine, numerically coded, run by a state bureau of marine water
+    monitoring. NSSP classifies shellfish waters on fecal coliform; the BEACH
+    Act posts bathing beaches on enterococcus. In this data every
+    BEACH Program Site-* station measures enterococcus or E. coli and not one
+    measures fecal coliform, so the two programmes separate cleanly on a
+    column that is pure metadata.
+
+    Deliberately NOT derived from the analyte mix, even though the analyte mix
+    is what makes the pattern obvious. This module may not read a sample
+    value -- that is the rule that keeps strata assignable before results
+    exist -- and a label built from which analytes a station happens to report
+    would be exactly that.
+
+    The label is therefore what it says and no more: beach_act means the
+    station is published under the BEACH Act programme, non_beach means it is
+    not. It does NOT assert that a non_beach station is a shellfish growing
+    area. Most of them are; the ones that are not would be scored against a
+    shellfish standard they are not managed under, so the count of each is
+    reported and the threshold entry says so.
+    """
+    text = str(site_type or "").strip().lower()
+    if not text or text == "nan":
+        return None
+    return "beach_act" if text.startswith(BEACH_ACT_PREFIX) else "non_beach"
+
+
 def load_overrides(path=None):
     """Hand-corrected values for anything except beach_type.
 
@@ -270,6 +308,11 @@ def assign(sites, datums=None, reviewed=None, spatial=None):
               "be dropped for coverage. Run: python -m wq.review --worklist")
 
     out["tidal_range_m"], out["datum_gauge"] = tidal_range(out, datums)
+
+    out["programme"] = [programme_of(t) for t in out.get(
+        "site_type", pd.Series([None] * len(out), index=out.index))]
+    counts = out["programme"].value_counts(dropna=False).to_dict()
+    print(f"  programme: {counts}")
 
     out["site_cluster"], out["site_cluster_n"] = site_clusters(out)
     clustered = int((out["site_cluster_n"] > 1).sum())

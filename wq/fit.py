@@ -46,13 +46,36 @@ def _stats():
     return spearman, demean_by
 
 
+EXCLUSIONS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "excluded_stations.csv")
+
+
+def load_exclusions(path=None):
+    """Stations deliberately kept out of the study, and why.
+
+    A committed file rather than a filter in code, for the same reason
+    wq/hypothesis_sites.csv is: an exclusion decided once and typed into a
+    script is invisible six weeks later, and the attrition table is supposed
+    to be a census of what happened to every station that was pulled. These
+    are reported there under their own outcome rather than quietly absent.
+    """
+    path = path or EXCLUSIONS_PATH
+    if not os.path.exists(path):
+        return {}
+    frame = pd.read_csv(path, dtype=str)
+    if "station_id" not in frame.columns:
+        return {}
+    return {str(r["station_id"]): str(r.get("reason", "excluded"))
+            for _, r in frame.iterrows()}
+
+
 def load_thresholds(path=None):
     path = path or config.THRESHOLDS_PATH
     with open(path) as handle:
         return json.load(handle)
 
 
-def threshold_entry(thresholds, state, analyte, water_class):
+def threshold_entry(thresholds, state, analyte, water_class, programme=None):
     """(entry, source_label) for the criterion that applies here.
 
     Split out of threshold_for so the ratio rule and the no-standard marker
@@ -60,6 +83,15 @@ def threshold_entry(thresholds, state, analyte, water_class):
     how a site ends up scored against one state's number and explained with
     another's.
     """
+    # Programme BEFORE state: a station managed under a national programme is
+    # judged by that programme's rule wherever it sits. New Jersey's shellfish
+    # growing-area stations are classified on the NSSP fecal criterion, not on
+    # whatever bathing-beach number the state or EPA would otherwise supply.
+    if programme:
+        block = thresholds.get("programmes", {}).get(str(programme), {})
+        entry = block.get(water_class, {}).get(analyte) if block else None
+        if entry:
+            return entry, f"programme:{programme}:{water_class}"
     state = str(state or "").upper()
     states = thresholds.get("states", {})
     if state in states and isinstance(states[state], dict):
@@ -72,7 +104,7 @@ def threshold_entry(thresholds, state, analyte, water_class):
     return None, "no criterion"
 
 
-def threshold_for(thresholds, state, analyte, water_class):
+def threshold_for(thresholds, state, analyte, water_class, programme=None):
     """(value, unit, source_label). A missing entry returns (None, None,
     'no criterion') and the site is reported as unscoreable rather than being
     compared against a number nobody chose.
@@ -83,7 +115,8 @@ def threshold_for(thresholds, state, analyte, water_class):
     standard, and scoring Californian E. coli against EPA's FRESHWATER number
     would manufacture exceedances against a rule no beach is posted on.
     """
-    entry, source = threshold_entry(thresholds, state, analyte, water_class)
+    entry, source = threshold_entry(thresholds, state, analyte, water_class,
+                                    programme)
     if entry is None:
         return None, None, "no criterion"
     if entry.get("no_standard"):
@@ -91,7 +124,7 @@ def threshold_for(thresholds, state, analyte, water_class):
     return entry.get("threshold"), entry.get("unit"), source
 
 
-def ratio_rule_for(thresholds, state, analyte, water_class):
+def ratio_rule_for(thresholds, state, analyte, water_class, programme=None):
     """The stricter limb of a two-limb criterion, or None.
 
     17 CCR 7958 sets total coliform at 10,000/100 mL, and at 1,000/100 mL when
@@ -99,7 +132,8 @@ def ratio_rule_for(thresholds, state, analyte, water_class):
     wq/thresholds.json; none of those numbers appears in this file, which is
     the rule the whole module is built on.
     """
-    entry, _ = threshold_entry(thresholds, state, analyte, water_class)
+    entry, _ = threshold_entry(thresholds, state, analyte, water_class,
+                               programme)
     return (entry or {}).get("ratio_rule")
 
 
@@ -161,21 +195,30 @@ def apply_ratio_rules(joined, sites, thresholds):
             frame[column] = False
         return frame
 
+    from .strata import programme_of
     meta = {}
     if sites is not None and not sites.empty:
         for _, site in sites.iterrows():
+            programme = site.get("programme")
+            if programme is None or (isinstance(programme, float)
+                                     and pd.isna(programme)):
+                programme = programme_of(site.get("site_type"))
             meta[str(site.get("station_id"))] = (
-                site.get("state"), site.get("water_class", "marine"))
+                site.get("state"), site.get("water_class", "marine"), programme)
     stations = frame["station_id"].astype(str)
-    states = stations.map(lambda s: meta.get(s, (None, "marine"))[0])
-    classes = stations.map(lambda s: meta.get(s, (None, "marine"))[1])
+    blank = (None, "marine", None)
+    states = stations.map(lambda s: meta.get(s, blank)[0])
+    classes = stations.map(lambda s: meta.get(s, blank)[1])
+    programmes = stations.map(lambda s: meta.get(s, blank)[2])
 
     base, rules = [], []
-    for state, analyte, water_class in zip(states, frame["analyte"], classes):
+    for state, analyte, water_class, programme in zip(
+            states, frame["analyte"], classes, programmes):
         value, _unit, _source = threshold_for(thresholds, state, analyte,
-                                              water_class)
+                                              water_class, programme)
         base.append(value)
-        rules.append(ratio_rule_for(thresholds, state, analyte, water_class))
+        rules.append(ratio_rule_for(thresholds, state, analyte, water_class,
+                                    programme))
     frame["exceedance_threshold"] = pd.to_numeric(pd.Series(base, index=frame.index),
                                                   errors="coerce")
     frame["ratio_value"] = np.nan
@@ -259,8 +302,13 @@ def fit_site_analyte(group, site, analyte, thresholds, strict=True):
     target = pd.to_numeric(group["log_value"], errors="coerce")
     target_ctrl = demean_by(target, months)
 
+    programme = site.get("programme")
+    if programme is None or (isinstance(programme, float) and pd.isna(programme)):
+        from .strata import programme_of
+        programme = programme_of(site.get("site_type"))
     value, unit, source = threshold_for(thresholds, site.get("state"), analyte,
-                                        site.get("water_class", "marine"))
+                                        site.get("water_class", "marine"),
+                                        programme)
     # Per-row limits where a criterion has two limbs (wq.fit.apply_ratio_rules
     # puts them on the frame). Falling back to the scalar keeps every caller
     # that has not run that step working unchanged.
@@ -406,6 +454,12 @@ def run(joined, sites, nondetects=None, strict=True, payload=None):
               "the\n  permissive limb stood and their exceedance count is an "
               "undercount rather than a measurement")
 
+    excluded = load_exclusions()
+    if excluded:
+        present = [k for k in excluded if k in set(sites["station_id"].astype(str))]
+        print(f"  {len(present)} station(s) excluded by decision, not by data: "
+              f"{sorted(set(excluded[k] for k in present))}")
+
     by_station = {str(s["station_id"]): s for _, s in sites.iterrows()}
     rows, attrition = [], []
     stations = sorted(set(joined["station_id"].astype(str))
@@ -416,7 +470,10 @@ def run(joined, sites, nondetects=None, strict=True, payload=None):
         for analyte in config.ANALYTES:
             group = at_station[at_station["analyte"] == analyte]
             flagged = flags.get((station, analyte), False)
-            reason = attrition_reason(site, group, flagged)
+            if station in excluded:
+                reason = f"excluded: {excluded[station]}"
+            else:
+                reason = attrition_reason(site, group, flagged)
             attrition.append({
                 "station_id": station,
                 "state": site.get("state"),

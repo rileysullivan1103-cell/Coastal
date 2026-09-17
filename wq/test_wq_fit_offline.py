@@ -791,6 +791,58 @@ def test_an_unknowable_exceedance_label_is_not_a_negative():
           "there is only one number to be on one side of")
 
 
+def test_a_shellfish_station_is_not_judged_as_a_beach():
+    """The Northeast's fecal coliform is shellfish growing-area monitoring:
+    no BEACH Act station in the study reports fecal coliform at all. NSSP
+    classifies growing areas at 43 MPN/100 mL, bathing beaches are posted at
+    400. Scoring one against the other answers a question nobody asked."""
+    print("\n[programme criteria]")
+    from wq import strata
+    thresholds = fit.load_thresholds()
+
+    shellfish = fit.threshold_for(thresholds, "NJ", "FECAL", "marine",
+                                  "non_beach")
+    beach = fit.threshold_for(thresholds, "NJ", "FECAL", "marine", "beach_act")
+    check("a non-beach station gets the NSSP fecal limit",
+          shellfish[0] == 43 and "programme:non_beach" in shellfish[2],
+          str(shellfish))
+    check("a BEACH Act station does not", beach[0] == 400, str(beach))
+    check("programme beats the state block",
+          fit.threshold_for(thresholds, "CA", "FECAL", "marine",
+                            "non_beach")[0] == 43,
+          "a growing area is judged by NSSP wherever it sits")
+    check("California's beaches are untouched",
+          fit.threshold_for(thresholds, "CA", "FECAL", "marine",
+                            "beach_act")[0] == 400)
+    check("an analyte with no programme entry falls through",
+          "_default" in fit.threshold_for(thresholds, "NJ", "ENT", "marine",
+                                          "non_beach")[2],
+          "NSSP has no enterococcus criterion")
+    check("no programme at all behaves as before",
+          fit.threshold_for(thresholds, "NJ", "FECAL", "marine")[0] == 400)
+
+    check("the label comes from metadata, never from the analyte mix",
+          strata.programme_of("BEACH Program Site-Ocean") == "beach_act"
+          and strata.programme_of("Estuary") == "non_beach"
+          and strata.programme_of(None) is None)
+    check("neither NSSP limb is hardcoded in fit.py",
+          "43" not in open(os.path.join(os.path.dirname(
+              os.path.abspath(__file__)), "fit.py")).read().replace(
+                  "n=43", "").replace("4390", ""))
+
+
+def test_excluded_stations_are_reported_not_vanished():
+    """A station kept out by decision must appear in the attrition census
+    under its own outcome. An exclusion that leaves no row is invisible."""
+    print("\n[decided exclusions]")
+    excluded = fit.load_exclusions()
+    check("the exclusion list is committed and readable", len(excluded) > 0,
+          f"{len(excluded)} station(s)")
+    check("every entry carries a reason",
+          all(bool(v) for v in excluded.values()),
+          sorted(set(excluded.values()))[0][:52])
+
+
 def test_california_has_no_ocean_ecoli_standard():
     """17 CCR 7958 lists total coliform, fecal coliform and enterococcus and
     nothing else. Scoring Californian E. coli against EPA's FRESHWATER 410
@@ -850,6 +902,8 @@ def main():
                  test_multiple_testing_expectation,
                  test_per_site_table_has_what_was_asked_for,
                  test_ab411_ratio_rule,
+                 test_a_shellfish_station_is_not_judged_as_a_beach,
+                 test_excluded_stations_are_reported_not_vanished,
                  test_an_unknowable_exceedance_label_is_not_a_negative,
                  test_california_has_no_ocean_ecoli_standard):
         test()
