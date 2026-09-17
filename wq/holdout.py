@@ -51,6 +51,27 @@ HOLDOUT_SEED = 20260916
 HOLDOUT_FRACTION = 0.20
 TIME_HOLDOUT_MONTHS = 12
 
+# Holding out a CLUSTER is not the same as holding out a beach, because the
+# next cluster along the same shoreline is usually 150-600 m away and sampled
+# by the same agency on the same mornings. Measured on this study: the median
+# held-out cluster has a training station 561 m away, 44.6% have one inside
+# 500 m and 76.3% inside 1 km. The nearest possible is 150 m, which is the
+# cluster radius itself -- anything closer would have merged.
+#
+# So the evaluation fit drops training stations within this distance of any
+# test cluster. It does NOT change which clusters are held out;
+# holdout_sites.csv is fixed and hashed, and this is a property of the
+# TRAINING side.
+#
+# 0.5 km is the headline. Single-linkage clusters span up to about 500 m, so
+# it means "not contiguous with the test beach", and it costs 16.1% of
+# training stations. 1.0 km is the sensitivity: more defensible in principle,
+# but it costs 40.3% of training stations and 51.4% of New Jersey's, which is
+# the whole shellfish population -- so at 1 km the two arms of the comparison
+# are drawn from different coasts as well as different beaches.
+TRAINING_BUFFER_KM = 0.5
+TRAINING_BUFFER_SENSITIVITY_KM = 1.0
+
 HOLDOUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "holdout_sites.csv")
 HYPOTHESIS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -167,6 +188,38 @@ def build(samples, sites, hypothesis=None, fraction=HOLDOUT_FRACTION,
         "time_holdout_months": TIME_HOLDOUT_MONTHS,
     }
     return rows, summary
+
+
+def buffered_training_stations(sites, buffer_km=TRAINING_BUFFER_KM,
+                               held=None):
+    """Training stations too close to a test cluster to count as unseen.
+
+    Returns (keep_ids, dropped_ids). Distance is station-to-station: a
+    training station is dropped when ANY station of ANY held-out cluster is
+    within buffer_km of it.
+
+    This is for the evaluation fit only. holdout_sites.csv is not touched --
+    the test set is fixed and hashed, and moving it to suit a buffer would be
+    choosing the test set after seeing the geometry.
+    """
+    from .strata import _haversine_km
+    held = read_holdout() if held is None else held
+    frame = sites.copy()
+    frame["station_id"] = frame["station_id"].astype(str)
+    if held.empty:
+        return set(frame["station_id"]), set()
+    clusters = set(held["site_cluster"].astype(str))
+    is_test = frame["site_cluster"].astype(str).isin(clusters)
+    test = frame[is_test].dropna(subset=["lat", "lon"])
+    train = frame[~is_test].dropna(subset=["lat", "lon"])
+    if test.empty or train.empty:
+        return set(train["station_id"]), set()
+    lat, lon = test["lat"].to_numpy(), test["lon"].to_numpy()
+    dropped = set()
+    for row in train.itertuples():
+        if float(_haversine_km(row.lat, row.lon, lat, lon).min()) <= buffer_km:
+            dropped.add(str(row.station_id))
+    return set(train["station_id"]) - dropped, dropped
 
 
 def drop_holdout(frame, evaluate_holdout=False, samples=None, quiet=False):
