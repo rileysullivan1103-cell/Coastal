@@ -1066,16 +1066,42 @@ def load_water_quality(sites):
 
 
 def _load_ckan_wq(sites):
-    """The California file, joined back to cameras by station code."""
+    """The California file, joined back to cameras by station code.
+
+    CENSORING. The CKAN export puts its qualifier in ResultQualCode, not in
+    Result: a "<10" arrives as ResultQualCode "<" with Result 10. This
+    function used to ignore that column entirely and hardcode
+    nondetect = False, so every censored sample entered as a MEASURED value at
+    its own detection limit -- the highest it could possibly be rather than
+    the lowest.
+
+    That is not a rounding error in this file. 116 of 654 rows carry "<",
+    17.7% overall, and it is concentrated: 28 of Carpinteria's 46 enterococcus
+    rows and 18 of Stinson's are censored. Reading a detection limit as a
+    measurement pushes the whole low end of those series upward, and the low
+    end is the dry days.
+
+    Non-detects are now flagged and substituted at half the reported limit,
+    which is what wq/clean.py does under config.NONDETECT_SUBSTITUTION, so the
+    two halves of this project treat censoring the same way.
+    """
     frame = read_csv(f"{DATA_DIR}/water_quality.csv")
     if frame is None:
         return None
     frame["date"] = pd.to_datetime(frame["SampleDate"], errors="coerce").dt.normalize()
-    frame["value"] = pd.to_numeric(frame["Result"], errors="coerce")
+    reported = pd.to_numeric(frame["Result"], errors="coerce")
+    qualifier = frame.get("ResultQualCode", pd.Series("", index=frame.index))
+    censored = qualifier.astype(str).str.strip().str.startswith("<")
+    frame["value"] = reported.where(~censored, reported / 2.0)
+    frame["nondetect"] = censored.fillna(False)
+    if int(censored.sum()):
+        print(f"  water_quality.csv: {int(censored.sum())}/{len(frame)} "
+              "results are non-detects (ResultQualCode '<') — substituted at "
+              "half the reported limit and flagged, not read as measurements")
     dropped = int(frame["value"].isna().sum())
     if dropped:
         print(f"  water_quality.csv: {dropped}/{len(frame)} results are not "
-              "numeric (non-detects and qualifiers) and are excluded")
+              "numeric and are excluded")
     frame = frame.dropna(subset=["date", "value"])
 
     mapping = map_stations(sites, frame)
@@ -1086,7 +1112,6 @@ def _load_ckan_wq(sites):
               "and are dropped")
     frame = frame.dropna(subset=["camera_name"])
     frame["source"] = "CKAN"
-    frame["nondetect"] = False
     return frame if not frame.empty else None
 
 

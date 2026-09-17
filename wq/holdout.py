@@ -190,6 +190,39 @@ def build(samples, sites, hypothesis=None, fraction=HOLDOUT_FRACTION,
     return rows, summary
 
 
+def grid_disjoint_training_stations(sites, held=None):
+    """Training stations that share an ERA5 grid cell with a test cluster.
+
+    A distance buffer removes contiguity, not covariate sharing. ERA5 is on a
+    0.1-degree grid -- about 11 km -- so a held-out beach and a training
+    station 2 km apart read the SAME rain series whatever the buffer is, and
+    every rain coefficient in this study is built on that series. A model that
+    scores well across such a split has been shown to generalise to a new
+    beach, not to new weather.
+
+    This is the stricter sensitivity: drop every training station whose
+    covariate cell is a cell some test cluster also sits in. Survive that and
+    "predicts a beach it has never seen" means the model never saw the
+    beach OR its rain.
+
+    Returns (keep_ids, dropped_ids). holdout_sites.csv is not touched.
+    """
+    from .covariates import cell_key
+    held = read_holdout() if held is None else held
+    frame = sites.copy()
+    frame["station_id"] = frame["station_id"].astype(str)
+    if held.empty:
+        return set(frame["station_id"]), set()
+    clusters = set(held["site_cluster"].astype(str))
+    frame = frame.dropna(subset=["lat", "lon"])
+    frame["cell"] = [cell_key(a, b) for a, b in zip(frame["lat"], frame["lon"])]
+    is_test = frame["site_cluster"].astype(str).isin(clusters)
+    test_cells = set(frame.loc[is_test, "cell"])
+    train = frame[~is_test]
+    dropped = set(train.loc[train["cell"].isin(test_cells), "station_id"])
+    return set(train["station_id"]) - dropped, dropped
+
+
 def buffered_training_stations(sites, buffer_km=TRAINING_BUFFER_KM,
                                held=None):
     """Training stations too close to a test cluster to count as unseen.
