@@ -23,6 +23,7 @@ Nothing here was chosen in response to a result.
 | 13 | **DECIDED** — NE fecal coliform scored against NSSP via a `programme` block (§4c i) | yes, re-fit |
 | 14 | **DECIDED** — the 22 Great Lakes stations excluded (§4c ii) | yes, re-fit |
 | 15 | **DECIDED** — evaluation drops training stations within **0.5 km** of a test cluster; 1.0 km as sensitivity (§6) | yes |
+| 16 | **DECIDED** — no satellite SST substitute; `water_temp_c` stays CO-OPS and is dropped for coverage (§4d) | yes |
 
 Items 10 and 11 are the ones that stop being free once Phase 2 runs.
 
@@ -193,6 +194,43 @@ Pacific 723.
 **DECIDED: excluded.** Listed in `wq/excluded_stations.csv` with a reason, and
 reported in the attrition census under their own outcome rather than quietly
 absent. Manifest scope amendment 2.
+
+## 4d. Water temperature is effectively absent, deliberately
+
+`water_temp_c` is a pre-registered predictor and it will be dropped by the
+coverage rule: CO-OPS supplies it for **1,037 of 2,792 gauged stations
+(37.1%)**, because gauges that report water level frequently do not report
+temperature. That is the gauge network, not a failed pull, which is why the
+covariate guard records it and never gates on it.
+
+A replacement was evaluated on 2026-09-17 and **declined**:
+
+* **Open-Meteo marine `sea_surface_temperature` — unusable.** The variable
+  exists on the endpoint this pipeline already calls, but it is forecast-only:
+  192 of 192 hourly values returned for the last seven days, **0 of 168 for a
+  2021 window**. No history, so no use to a ten-year study.
+* **NOAA ERDDAP `jplMURSST41` (MUR, 1 km, daily, global, 2002-present,
+  no key, no Open-Meteo quota) — works, and was declined anyway.** Raw
+  coverage at the exact station coordinate is 14 of 27 probed stations, failing
+  on estuaries (2/7) because of the satellite land mask; nudging to the
+  nearest water pixel recovers every one of them within 1.45 km, which would
+  take coverage to roughly 100% against a source 1.5 km away rather than a
+  gauge up to `MAX_TIDE_GAUGE_KM` = 50 km away.
+
+  It was declined on the second caveat: a water pixel 1.2 km from a New Jersey
+  shellfish station is bay or ocean water, and estuaries stratify and diverge
+  from the open water beside them. For the population that is 87% of this
+  study's fecal coliform, the number would be a regional proxy wearing a
+  local predictor's name. Two lesser caveats pointed the same way: MUR is
+  daily where every other covariate joins hourly when a sample carries a time,
+  and a satellite foundation-SST analysis is a different instrument from a
+  thermistor, which this pipeline's own rule about never mixing estimators
+  disfavours.
+
+**So the study proceeds with ten predictors in practice, not eleven.** Read
+D1's coverage table with that in hand: `water_temp_c` will show as `never`
+for most stations, and that is a fact about which gauges report temperature,
+not about the coast.
 
 ## 5. D6 headline
 
