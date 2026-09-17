@@ -89,20 +89,41 @@ def summarise(frame, keys):
     return pd.DataFrame(rows).sort_values(keys)
 
 
-def locate_prior_sites(sites, coefficients):
-    """Are the three prior beaches in this run at all?"""
+def locate_prior_sites(sites, coefficients, radius_km=1.0):
+    """Are the three prior beaches in this run, and under which identifier?
+
+    The nearest station by coordinate is NOT good enough, and California is
+    why. Carpinteria State Beach is listed as 21CABCH-823 and as
+    CABEACH_WQX-WP0000180 at the same point, 80 metres apart. The first is the
+    one whose name says "Carpinteria State Beach"; the second is the one with
+    1,412 samples. All 989 21CABCH stations carry zero rows in the Result
+    service, so a lookup that takes the closest match, or the first name
+    match, finds the empty twin and reports the beach as unfitted.
+
+    So both are reported: the nearest station of any kind, and the nearest one
+    that was actually FITTED, with the distance to each. When those two
+    disagree the row says so, which is the only way the duplicate shows up.
+    """
     fitted = set(coefficients["station_id"].astype(str))
     lat = pd.to_numeric(sites["lat"], errors="coerce")
     lon = pd.to_numeric(sites["lon"], errors="coerce")
+    is_fitted = sites["station_id"].astype(str).isin(fitted)
     rows = []
     for entry in PRIOR:
         token = entry["name"].split()[0]
         named = sites[sites["station_name"].astype(str)
                       .str.contains(token, case=False, na=False)]
         distance = _haversine_km(entry["lat"], entry["lon"], lat, lon)
-        nearest = int(np.nanargmin(distance.to_numpy()))
+        values = distance.to_numpy()
+        nearest = int(np.nanargmin(values))
         near = sites.iloc[nearest]
-        rows.append({
+
+        masked = np.where(is_fitted.to_numpy(), values, np.inf)
+        best_fitted = int(np.argmin(masked))
+        has_fitted = np.isfinite(masked[best_fitted])
+        fit_row = sites.iloc[best_fitted] if has_fitted else None
+
+        row = {
             "prior_site": entry["name"],
             "prior_state": entry["state"],
             "prior_finding": entry["prior"],
@@ -111,10 +132,21 @@ def locate_prior_sites(sites, coefficients):
             set(sites["state"].astype(str)),
             "nearest_station_id": near["station_id"],
             "nearest_station_name": near["station_name"],
-            "nearest_state": near["state"],
-            "nearest_km": round(float(distance.iloc[nearest]), 1),
+            "nearest_km": round(float(values[nearest]), 3),
             "nearest_was_fitted": str(near["station_id"]) in fitted,
-        })
+            "fitted_station_id": (fit_row["station_id"] if has_fitted
+                                  else None),
+            "fitted_station_name": (fit_row["station_name"] if has_fitted
+                                    else None),
+            "fitted_km": (round(float(masked[best_fitted]), 3)
+                          if has_fitted else np.nan),
+        }
+        row["is_the_prior_site"] = bool(
+            has_fitted and masked[best_fitted] <= radius_km)
+        row["duplicate_identifier"] = bool(
+            has_fitted and not row["nearest_was_fitted"]
+            and masked[best_fitted] <= radius_km)
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -160,6 +192,36 @@ def main():
         print("\n  NONE of the three prior sites is in this run. The states")
         print("  they sit in were not pulled, so this pass can neither")
         print("  replicate nor contradict any of the three findings.")
+    absent = located[~located["is_the_prior_site"]]
+    if not absent.empty:
+        print(f"\n  {len(absent)} of {len(located)} prior site(s) have no "
+              "fitted station within 1 km:")
+        for _, row in absent.iterrows():
+            print(f"    {row['prior_site']}: nearest fitted station is "
+                  f"{row['fitted_km']} km away")
+    dupes = located[located["duplicate_identifier"]]
+    if not dupes.empty:
+        print(f"\n  {len(dupes)} prior site(s) sit under TWO identifiers, and "
+              "the closer one was\n  not the fitted one — the name matches a "
+              "record with no samples:")
+        for _, row in dupes.iterrows():
+            print(f"    {row['prior_site']}: named "
+                  f"{row['nearest_station_id']} (unfitted), data under "
+                  f"{row['fitted_station_id']}")
+
+    # The prior findings are about rain, so print this run's rain coefficients
+    # for whichever stations actually carry the data.
+    ids = [i for i in located["fitted_station_id"].dropna().astype(str)]
+    if ids:
+        here = rain[rain["station_id"].astype(str).isin(ids)]
+        print("\nthis run's rain coefficients at those stations:")
+        if here.empty:
+            print("  (none of them produced a rain coefficient)")
+        else:
+            show = here[["station_id", "analyte", "predictor", "n_ctrl",
+                         "rho_ctrl", "p_ctrl", "bh"]]
+            print(show.sort_values(["station_id", "analyte", "predictor"])
+                  .round(3).to_string(index=False))
 
     print("\nstates actually in the run:")
     print(sites["state"].value_counts().to_string())
