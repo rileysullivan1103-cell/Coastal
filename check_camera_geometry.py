@@ -155,6 +155,16 @@ BANDS = 4
 # Fewer than this many mutually-agreeing features is not a rigid scene, it is a
 # coincidence. Two patches agreeing could both be on the same drifting fogbank.
 MIN_CLUSTER = 3
+# How far the two columns of the quarter table may part before the record is
+# said to have drifted away from its anchor: the share of frames registering
+# against the PREVIOUS frame, minus the share registering against the
+# REFERENCE. Measurement error hits both columns equally, so a persistent gap
+# is not error.
+DRIFT_GAP = 0.15
+# Below this share, the patch pass is not adding an independent measurement:
+# it is the coarse pass plus a small residual, and its agreement with the
+# coarse pass is arithmetic rather than evidence.
+INDEPENDENT_SHARE = 0.25
 # Features are taken from the top of the frame by default: land, roofline and
 # structure live there, and the beach and water -- which move for real reasons
 # -- live below. --land-fraction moves the line.
@@ -1341,6 +1351,45 @@ def agreeing_features(frame, tolerance=STEP_PX, minimum=MIN_CLUSTER):
     return best, [n for n in names if n not in best], distance_to(best)
 
 
+def drifted_quarters(quality, gap=DRIFT_GAP):
+    """Quarters that register against the previous frame but not the reference.
+
+    Measurement error hits both columns of the quality table equally -- a frame
+    too soft to match its neighbour is too soft to match the anchor. So a
+    persistent gap between them is not error. It is the record having moved
+    away from the anchor while consecutive frames stayed close to each other,
+    which is drift, and the quarter where the columns part is when it started.
+
+    Walton at --max-shift 112: 2024Q4 onward reads 36-76% against the reference
+    while holding 76-96% against the previous frame, and the parting is right
+    after the 2024-08-31 reference. A wider window recaptures those frames and
+    the gap closes, which hides the finding rather than answering it.
+    """
+    return quality[(quality["seq_ok"] - quality["direct_ok"]) > gap]
+
+
+def patch_independence(signal, coarse):
+    """How much of the patch answer is the patches' own, not the coarse pass's.
+
+    Each patch is cut from the coarse-corrected position and its residual is
+    added back to the coarse shift, so the patch offsets CONTAIN the coarse
+    offsets. When the residual is small beside the coarse shift, "both passes
+    agree" is arithmetic rather than corroboration, and saying so matters more
+    than the count of agreements.
+
+    Returns the median distance between the two passes' offsets as a share of
+    the offset the patches report, or NaN when they share no dates.
+    """
+    shared = signal.index.intersection(coarse.index)
+    if not len(shared):
+        return float("nan")
+    apart = np.hypot(
+        signal.loc[shared, "dx"].to_numpy() - coarse.loc[shared, "dx"].to_numpy(),
+        signal.loc[shared, "dy"].to_numpy() - coarse.loc[shared, "dy"].to_numpy())
+    return float(np.median(apart)) / max(
+        float(signal.loc[shared, "offset"].median()), 1e-9)
+
+
 def not_finer_than_the_record(given, derived):
     """A threshold or tolerance, never finer than what the record can measure.
 
@@ -2366,6 +2415,35 @@ def main():
                       "One that fails for a")
                 print("  while and then works is telling you when to look at "
                       "the camera.")
+                # THE TWO COLUMNS DIVERGING IS ITS OWN FINDING, and reading it
+                # off the table by eye is how it gets missed. A frame that
+                # registers against the one before it but NOT against the
+                # reference is not a bad frame: it is a frame that has moved
+                # away from the anchor. Measurement error has no dates in it;
+                # drift does, and the quarter where the columns part is the
+                # date it started.
+                parted = drifted_quarters(quality)
+                if len(parted):
+                    print(f"\n  IN {len(parted)} QUARTER"
+                          f"{'' if len(parted) == 1 else 'S'} THE RECORD "
+                          "REGISTERS AGAINST THE PREVIOUS FRAME BUT NOT")
+                    print("  AGAINST THE REFERENCE: "
+                          + ", ".join(f"{row['period']} "
+                                      f"({row['direct_ok']:.0%} vs "
+                                      f"{row['seq_ok']:.0%})"
+                                      for _, row in parted.iterrows()))
+                    print("  Consecutive frames still match, so the imagery is "
+                          "fine and the method")
+                    print("  works. What those frames no longer match is the "
+                          "ANCHOR. That is drift")
+                    print(f"  away from {dates[pick]:%Y-%m-%d}, not noise -- "
+                          "noise has no dates in it.")
+                    print("  A wider --max-shift will recapture them and hide "
+                          "it; the honest reads")
+                    print("  are to treat the parting quarter as a boundary, "
+                          "and to re-run with a")
+                    print("  reference inside the late stretch and see whether "
+                          "the columns swap.")
 
             if args.contact_sheet or not reliable:
                 weak = []
@@ -2597,6 +2675,35 @@ def main():
         print("\n" + "=" * 74)
         print("THE TWO PASSES, SIDE BY SIDE")
         print("=" * 74)
+        # HOW INDEPENDENT THESE TWO PASSES ARE DEPENDS ON THE NUMBERS. Each
+        # patch is cut from the coarse-corrected position and its residual is
+        # ADDED BACK to the coarse shift, so the patch offsets carry the coarse
+        # offsets inside them. When the residual is small beside the coarse
+        # shift, the patch pass is mostly re-reporting the coarse pass and
+        # "both passes agree" is closer to arithmetic than to corroboration.
+        # Walton at --max-shift 900: coarse median offset 192.61 px, patch
+        # median 193.48 px, patch-to-patch scatter about 40 px. Thirty-six of
+        # forty-two steps "seen by both" reads as strong agreement and is
+        # largely the same measurement twice.
+        share = patch_independence(signal, coarse)
+        if np.isfinite(share) and share < INDEPENDENT_SHARE:
+            print("NOT TWO INDEPENDENT MEASUREMENTS. Each patch was cut from "
+                  "the coarse-")
+            print("corrected position and its residual added back, so the "
+                  "patch offsets")
+            print(f"CONTAIN the coarse offsets. The residual the patches "
+                  f"contribute is about")
+            print(f"{share:.0%} of the offset they report, so agreement below "
+                  "is mostly the coarse")
+            print("pass being read back. The genuinely independent pair is "
+                  "whole-frame-against-")
+            print("reference versus frame-to-frame, and those disagree by the "
+                  "gap reported")
+            print("above. Use --no-coarse for a patch answer that owes the "
+                  "coarse pass nothing")
+            print("-- at the cost of a pass that cannot see a move bigger than "
+                  "half a patch.")
+            print("-" * 74)
         if not rows:
             print("Neither pass found a step. Nothing moved by more than each "
                   "pass could see.")

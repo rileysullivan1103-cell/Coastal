@@ -1858,6 +1858,96 @@ def test_a_resolution_that_tracks_the_window_is_not_a_resolution():
     check("a refused resolution cannot relax the agreement test",
           g.not_finer_than_the_record(g.AGREE_PX, float("nan")) == g.AGREE_PX)
 
+def test_drift_is_told_apart_from_noise_by_its_dates():
+    """The two columns of the quality table parting is its own finding.
+
+    A frame too soft to match its neighbour is too soft to match the anchor, so
+    measurement error moves both columns together. A record that keeps matching
+    the PREVIOUS frame while losing the REFERENCE has not got noisier -- it has
+    moved away from the anchor, and the quarter where the columns part is when.
+
+    Walton at --max-shift 112 showed exactly that, and the reason it matters is
+    that a wider window closes the gap: at 900 every quarter reads 94-100%
+    against the reference again. The wider window did not answer the question,
+    it recaptured the drifted frames and hid it.
+    """
+    walton = pd.DataFrame([
+        ("2023Q3", 83, 1.00, 0.99), ("2023Q4", 87, 0.93, 0.98),
+        ("2024Q1", 90, 0.91, 0.96), ("2024Q2", 90, 0.98, 1.00),
+        ("2024Q3", 71, 0.97, 0.96), ("2024Q4", 50, 0.46, 0.94),
+        ("2025Q1", 85, 0.36, 0.76), ("2025Q2", 80, 0.76, 0.96),
+        ("2025Q3", 83, 0.69, 0.95), ("2025Q4", 76, 0.66, 0.82),
+        ("2026Q1", 85, 0.64, 0.76), ("2026Q2", 77, 0.57, 0.79),
+        ("2026Q3", 67, 0.54, 0.96)],
+        columns=["period", "frames", "direct_ok", "seq_ok"])
+    parted = g.drifted_quarters(walton)
+    check("the quarters that lost the anchor are named",
+          list(parted["period"]) == ["2024Q4", "2025Q1", "2025Q2", "2025Q3",
+                                     "2025Q4", "2026Q2", "2026Q3"],
+          f"{list(parted['period'])}")
+    check("...and it starts in the quarter after the reference frame",
+          parted["period"].iloc[0] == "2024Q4")
+    check("2026Q1 is left out at a 12-point gap, under the threshold",
+          "2026Q1" not in list(parted["period"]),
+          f"64% vs 76%, gap 0.12 against {g.DRIFT_GAP}")
+
+    # The SAME record at a window wide enough to recapture the drift reports
+    # nothing, which is the trap: the gap closing is not the drift going away.
+    wide = walton.copy()
+    wide["direct_ok"] = [1.00, 0.99, 0.94, 1.00, 1.00, 0.98, 0.94,
+                         0.99, 0.95, 0.95, 0.98, 0.95, 1.00]
+    check("a wide window hides it, so the narrow run is the one that asks",
+          len(g.drifted_quarters(wide)) == 0,
+          f"{list(g.drifted_quarters(wide)['period'])}")
+
+    # A record that is simply soft loses both columns together and is NOT drift.
+    soft = walton.copy()
+    soft["seq_ok"] = soft["direct_ok"] + 0.02
+    check("a uniformly soft record is not called drift",
+          len(g.drifted_quarters(soft)) == 0)
+
+
+def test_a_pass_built_on_another_is_not_a_second_opinion():
+    """Patch offsets CONTAIN the coarse offsets, so their agreement is partly
+    arithmetic.
+
+    Each patch is cut from the coarse-corrected position and its residual is
+    added back. When the residual is small beside the coarse shift, "36 of 42
+    steps seen by both passes" reads as corroboration and is largely the same
+    measurement reported twice. Walton at --max-shift 900: coarse median offset
+    192.61 px, patch median 193.48 px.
+    """
+    dates = pd.date_range("2024-01-01", periods=60, freq="3D")
+    rng = np.random.default_rng(5)
+    walk = np.cumsum(rng.normal(0, 30, len(dates)))
+    coarse = pd.DataFrame({"dx": walk, "dy": walk * 0.4}, index=dates)
+    coarse["offset"] = np.hypot(coarse["dx"], coarse["dy"])
+
+    # The patch pass as it actually runs: the coarse shift plus a small residual.
+    downstream = coarse.copy()
+    downstream["dx"] += rng.normal(0, 4, len(dates))
+    downstream["dy"] += rng.normal(0, 4, len(dates))
+    downstream["offset"] = np.hypot(downstream["dx"], downstream["dy"])
+    share = g.patch_independence(downstream, coarse)
+    check("a pass that only adds a residual is flagged as not independent",
+          share < g.INDEPENDENT_SHARE,
+          f"the patches contribute {share:.0%} of what they report")
+
+    # A pass that measured the scene for itself lands somewhere else entirely.
+    independent = pd.DataFrame(
+        {"dx": rng.normal(0, 200, len(dates)),
+         "dy": rng.normal(0, 200, len(dates))}, index=dates)
+    independent["offset"] = np.hypot(independent["dx"], independent["dy"])
+    share = g.patch_independence(independent, coarse)
+    check("...and a genuinely separate measurement is not",
+          share >= g.INDEPENDENT_SHARE, f"{share:.0%}")
+
+    check("no shared dates is not silently a pass",
+          not np.isfinite(g.patch_independence(
+              independent.set_index(pd.date_range("2030-01-01",
+                                                  periods=len(dates), freq="3D")),
+              coarse)))
+
 def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
@@ -1895,7 +1985,9 @@ def main():
                  test_a_different_frame_size_is_dropped_not_cropped,
                  test_epochs_count_stills_not_just_samples,
                  test_the_agreement_tolerance_is_not_the_step_threshold,
-                 test_a_resolution_that_tracks_the_window_is_not_a_resolution):
+                 test_a_resolution_that_tracks_the_window_is_not_a_resolution,
+                 test_drift_is_told_apart_from_noise_by_its_dates,
+                 test_a_pass_built_on_another_is_not_a_second_opinion):
         test()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {', '.join(FAILURES)}"))

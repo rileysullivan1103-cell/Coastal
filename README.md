@@ -1581,6 +1581,58 @@ agreement tolerance — otherwise the agreement test is relaxed to 380 px and
 passes by being asked nothing, which is how six patches sitting 39–66 px apart
 were all kept.
 
+### The Walton window sweep, and what it actually settled
+
+The refusal above fired at 112 px and stayed silent at 900, which is the test
+working. The sweep it asked for:
+
+| `--max-shift` | two-route gap | resolution | ÷ window | largest offset ÷ box corner | overruled |
+|---|---|---|---|---|---|
+| 112 | 75.7 px | 131 px | **1.17** | 98% | 65% |
+| 150 | 83.9 px | 145 px | 0.97 | 71% | 55% |
+| 450 | 217.2 px | 376 px | 0.84 | **99%** | 6% |
+| 900 | 223.5 px | **387 px** | **0.43** | 60% | **0** |
+
+**Doubling the window from 450 to 900 moved the resolution by 3%.** It stopped
+following. So the ~390 px is a property of this record, not of the flag, and
+the reading that everything here was the search box was wrong — 450 was still
+clipping (99% of the way to the corner, which the overruled count of 6% did not
+show), and 900 is the first window that contains the record.
+
+What 900 says: Walton's frames sit a median 193 px from the reference and reach
+769 px, and a frame can only be measured to ±129 px. The record moves, and it
+cannot be resolved finely enough to cut into epochs — 41 "discontinuities" over
+three years at a 387 px threshold is the sparkline legend's own case, *a record
+that never settles is tall everywhere*.
+
+### Drift has dates in it; noise does not
+
+The quarter table carried the positive finding and nobody was reading it. At
+112 px Walton holds 76–96% against the previous frame while collapsing to
+36–76% against the reference, and the parting starts in 2024Q4 — the quarter
+after the 2024-08-31 reference frame.
+
+A frame too soft to match its neighbour is too soft to match the anchor, so
+measurement error moves both columns together. Only drift moves one. The run
+now names the quarters where they part and says what it means, because the
+alternative is what happened here: a wider window recaptures the drifted frames,
+the gap closes, every quarter reads 94–100% again, and the finding disappears
+without being answered.
+
+### A pass built on another pass is not a second opinion
+
+Each patch is cut from the coarse-corrected position and its residual is **added
+back** to the coarse shift, so the patch offsets *contain* the coarse offsets.
+At Walton the coarse median offset was 192.61 px and the patch median 193.48 px.
+"36 of 42 candidate moves are seen BY BOTH passes" reads as strong corroboration
+and was largely one measurement reported twice.
+
+The run now measures what the patches contribute — the median distance between
+the two passes' offsets, as a share of what the patches report — and when that
+is under 25% it says so before printing the table. The genuinely independent
+pair is whole-frame-against-reference versus frame-to-frame, and their
+disagreement is the gap already reported above.
+
 ### A step threshold and an agreement tolerance are not one knob
 
 `check_camera_geometry.py` used `--step-px` for both, and that was wrong in a
