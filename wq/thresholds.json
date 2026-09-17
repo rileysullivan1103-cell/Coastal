@@ -1,149 +1,153 @@
 {
- "_README": [
-  "Single-sample / statistical-threshold-value criteria for recreational",
-  "water, in counts per 100 mL. wq/fit.py reads this file; no threshold is",
-  "hardcoded anywhere in the code, and a lookup that finds no entry is",
-  "reported as 'no criterion' rather than silently defaulting to a number.",
-  "",
-  "Lookup key is (state, analyte, water_class). water_class is 'fresh' for",
-  "Great Lakes sites and 'marine' everywhere else, because the enterococci",
-  "criterion genuinely differs between them. A state with no entry falls",
-  "back to '_default', and every fitted row records which entry it used in",
-  "its threshold_source column, so a result computed against the federal",
-  "fallback is never mistaken for one computed against a state's own rule.",
-  "",
-  "EVERY ENTRY HERE CARRIES _verified: false. The values are transcribed",
-  "from the cited documents but were NOT checked against the live",
-  "regulation when this file was written, because outbound network access",
-  "was blocked in that session. Before publishing a result, re-read each",
-  "cited criterion, correct the number, and flip _verified. State beach",
-  "programs also change criteria; a 2012-RWQC state and a 1986-criteria",
-  "state will not agree, and that difference lands directly in the",
-  "exceedance-separation column.",
-  "",
-  "CFU and MPN are different estimators and are NOT interconvertible. The",
-  "criteria below are written in whichever unit the source states; the",
-  "pipeline compares a count to them without rescaling, and records the",
-  "sample's own unit alongside, so a CFU/MPN mismatch stays visible.",
-  "",
-  "VERIFICATION PASS 2026-09-16: California was checked against the regulation itself and all four of its values are correct. The _default block was checked against the 2012 RWQC and found to MIX EPA's two alternative magnitude sets -- see _default._source. No number was changed. What is still unverified is flagged entry by entry."
- ],
- "_default": {
-  "_source": "US EPA, 2012 Recreational Water Quality Criteria, EPA-820-F-12-058 (https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf), 36 per 1,000 magnitude set -- see _magnitude_set -- plus EPA 1976 and 1986 criteria where 2012 has no equivalent. _verified stays false for the BLOCK because fresh ENT, marine FECAL and marine TOTAL are still unchecked; the entries that were checked carry their own _verified and the date.",
-  "_verified": false,
-  "marine": {
-   "ENT": {
-    "threshold": 130,
-    "unit": "cfu/100mL",
-    "basis": "2012 RWQC STV for enterococci, 36 per 1,000 magnitude set (GM 35 / STV 130). Applies to marine and fresh alike -- EPA publishes one enterococci criterion for both. Verified 2026-09-16 against https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf",
-    "_verified": true,
-    "_verified_on": "2026-09-16"
-   },
-   "ECOLI": {
-    "threshold": 410,
-    "unit": "cfu/100mL",
-    "basis": "2012 RWQC STV for FRESH water E. coli, 36 per 1,000 magnitude set (GM 126 / STV 410). Verified 2026-09-16 against https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf. EPA publishes no marine E. coli criterion; applied here only as a fallback and flagged as such wherever it is used.",
-    "_verified": true,
-    "_verified_on": "2026-09-16"
-   },
-   "FECAL": {
-    "threshold": 400,
-    "unit": "cfu/100mL",
-    "basis": "EPA 1976 Quality Criteria for Water, fecal coliform single-sample bathing limit. Superseded federally but still in several state codes.",
-    "_verified": false
-   },
-   "TOTAL": {
-    "threshold": 10000,
-    "unit": "MPN/100mL",
-    "basis": "total coliform bathing-water limit as used in state codes; no current federal criterion",
-    "_verified": false
-   }
-  },
-  "fresh": {
-   "ENT": {
-    "threshold": 61,
-    "unit": "cfu/100mL",
-    "basis": "EPA 1986 Ambient Water Quality Criteria for Bacteria, EPA-440/5-84-002, freshwater enterococci single-sample maximum for a designated beach area",
-    "_verified": false
-   },
-   "ECOLI": {
-    "threshold": 235,
-    "unit": "cfu/100mL",
-    "basis": "EPA 1986 AWQC freshwater E. coli single-sample maximum for a designated beach area; also the 2012 RWQC Beach Action Value at the 36 per 1,000 illness rate. Both are 235. Value confirmed 2026-09-16. Note this is a BAV, not an STV -- a precautionary posting trigger, not the criterion itself.",
-    "_verified": true,
-    "_verified_on": "2026-09-16"
-   },
-   "FECAL": {
-    "threshold": 200,
-    "unit": "cfu/100mL",
-    "basis": "EPA 1976 fecal coliform freshwater recreational limit",
-    "_verified": false
-   },
-   "TOTAL": {
-    "threshold": 10000,
-    "unit": "MPN/100mL",
-    "basis": "state-code total coliform limit; no current federal criterion",
-    "_verified": false
-   }
-  },
-  "_magnitude_set": {
-   "chosen": "36 per 1,000",
-   "values": "enterococci GM 35 / STV 130; E. coli GM 126 / STV 410",
-   "alternative_not_chosen": "32 per 1,000: enterococci GM 30 / STV 110; E. coli GM 100 / STV 320",
-   "decided_on": "2026-09-16",
-   "reason": "EPA publishes the two sets as ALTERNATIVES, not a menu, and this block previously took marine ENT from the 32/1,000 set (110) and marine ECOLI from the 36/1,000 set (410). The 36/1,000 set was adopted because fresh ECOLI here is 235, which is the 36/1,000 Beach Action Value, so 36/1,000 makes the block internally consistent with the value already in it. marine ENT therefore moves 110 -> 130.",
-   "decided_before_any_california_coefficient_existed": true,
-   "still_outside_this_set": "fresh ENT 61 is EPA 1986, not a 2012 value at all; marine FECAL 400 is EPA 1976; marine TOTAL 10000 has no federal criterion. None of the three is affected by the 2012 magnitude set and none is verified."
-  }
- },
- "states": {
-  "CA": {
-   "_source": "California Code of Regulations Title 17, sections 7957-7961 (AB 411), single-sample standards for ocean water contact sports areas. California also adopted the 2012 RWQC enterococci objectives into the Ocean Plan (2019); where the two differ, AB 411 is what a beach posting decision is made against, which is the decision this column is modelling.",
-   "_verified": true,
-   "marine": {
-    "ENT": {
-     "threshold": 104,
-     "unit": "MPN/100mL",
-     "basis": "AB 411 single-sample standard",
-     "_verified": true,
-     "_verified_on": "2026-09-16"
+  "_README": [
+    "Single-sample / statistical-threshold-value criteria for recreational",
+    "water, in counts per 100 mL. wq/fit.py reads this file; no threshold is",
+    "hardcoded anywhere in the code, and a lookup that finds no entry is",
+    "reported as 'no criterion' rather than silently defaulting to a number.",
+    "",
+    "Lookup key is (state, analyte, water_class). water_class is 'fresh' for",
+    "Great Lakes sites and 'marine' everywhere else, because the enterococci",
+    "criterion genuinely differs between them. A state with no entry falls",
+    "back to '_default', and every fitted row records which entry it used in",
+    "its threshold_source column, so a result computed against the federal",
+    "fallback is never mistaken for one computed against a state's own rule.",
+    "",
+    "EVERY ENTRY HERE CARRIES _verified: false. The values are transcribed",
+    "from the cited documents but were NOT checked against the live",
+    "regulation when this file was written, because outbound network access",
+    "was blocked in that session. Before publishing a result, re-read each",
+    "cited criterion, correct the number, and flip _verified. State beach",
+    "programs also change criteria; a 2012-RWQC state and a 1986-criteria",
+    "state will not agree, and that difference lands directly in the",
+    "exceedance-separation column.",
+    "",
+    "CFU and MPN are different estimators and are NOT interconvertible. The",
+    "criteria below are written in whichever unit the source states; the",
+    "pipeline compares a count to them without rescaling, and records the",
+    "sample's own unit alongside, so a CFU/MPN mismatch stays visible.",
+    "",
+    "VERIFICATION PASS 2026-09-16: California was checked against the regulation itself and all four of its values are correct. The _default block was checked against the 2012 RWQC and found to MIX EPA's two alternative magnitude sets -- see _default._source. No number was changed. What is still unverified is flagged entry by entry.",
+    "SCOPE NOTE 2026-09-16: of the _default entries, only marine ENT, marine FECAL and fresh ECOLI are exercised by the current study. All 687 total-coliform pairs and all fitted Californian pairs use the CA block; there are no fresh-water enterococcus pairs at all. An entry's _verified flag matters in proportion to how many pairs it scores."
+  ],
+  "_default": {
+    "_source": "US EPA, 2012 Recreational Water Quality Criteria, EPA-820-F-12-058 (https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf), 36 per 1,000 magnitude set -- see _magnitude_set -- plus EPA 1976 and 1986 criteria where 2012 has no equivalent. _verified stays false for the BLOCK because fresh ENT could not be read off a primary table and marine TOTAL has no federal basis at all (marine FECAL was verified 2026-09-16); the entries that were checked carry their own _verified and the date.",
+    "_verified": false,
+    "marine": {
+      "ENT": {
+        "threshold": 130,
+        "unit": "cfu/100mL",
+        "basis": "2012 RWQC STV for enterococci, 36 per 1,000 magnitude set (GM 35 / STV 130). Applies to marine and fresh alike -- EPA publishes one enterococci criterion for both. Verified 2026-09-16 against https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf",
+        "_verified": true,
+        "_verified_on": "2026-09-16"
+      },
+      "ECOLI": {
+        "threshold": 410,
+        "unit": "cfu/100mL",
+        "basis": "2012 RWQC STV for FRESH water E. coli, 36 per 1,000 magnitude set (GM 126 / STV 410). Verified 2026-09-16 against https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf. EPA publishes no marine E. coli criterion; applied here only as a fallback and flagged as such wherever it is used.",
+        "_verified": true,
+        "_verified_on": "2026-09-16"
+      },
+      "FECAL": {
+        "threshold": 400,
+        "unit": "cfu/100mL",
+        "basis": "EPA 1976 (EPA 440/9-76-023, Quality Criteria for Water (1976)): fecal coliform for bathing waters is a log mean of 200/100 mL with NO MORE THAN 10% of samples in a 30-day period exceeding 400/100 mL. Verified 2026-09-16. So 400 is the 10%-exceedance value, not a single-sample maximum -- this file previously called it a single-sample bathing limit, which is how state codes apply it but not what the criterion says. Superseded federally by the 1986 and 2012 criteria and still in several state codes. This is the LIVE default: 1,692 fitted pairs outside California are scored against it.",
+        "_verified": true,
+        "_verified_on": "2026-09-16"
+      },
+      "TOTAL": {
+        "threshold": 10000,
+        "unit": "MPN/100mL",
+        "basis": "NO FEDERAL CRITERION EXISTS for total coliform in recreational water. 10,000/100 mL is a state-code value -- it is California's AB 411 permissive limb (17 CCR 7958) applied here as a national fallback, which means any non-Californian total-coliform exceedance scored against it is being judged by California's rule. Recorded rather than fixed because the current scope does not exercise it: all 687 fitted total-coliform pairs are Californian and use California's own entry, including its ratio rule. Revisit before any state without its own entry contributes total-coliform data.",
+        "_verified": false,
+        "_no_federal_criterion": true
+      }
     },
-    "ECOLI": {
-     "threshold": null,
-     "no_standard": true,
-     "unit": null,
-     "basis": "NO APPLICABLE STANDARD. 17 CCR 7958 lists only total coliform, fecal coliform and enterococcus; California has no ocean E. coli water-contact standard. Confirmed verbatim 2026-09-16 at https://www.law.cornell.edu/regulations/california/17-CCR-7958.",
-     "reason": "California sets no ocean E. coli standard",
-     "_verified": true,
-     "_verified_on": "2026-09-16"
+    "fresh": {
+      "ENT": {
+        "threshold": 61,
+        "unit": "cfu/100mL",
+        "basis": "EPA 1986 (EPA 440/5-84-002, Ambient Water Quality Criteria for Bacteria (1986)), freshwater enterococci single-sample maximum for a DESIGNATED BEACH AREA (the 75% confidence column of Table 4), against a steady-state geometric mean of 33. Value 61 is corroborated by EPA-published secondary sources but NOT verified against a machine-readable primary table: the scanned 1986 PDF does not parse and the NEPIS OCR of Table 4 (https://nepis.epa.gov/Exe/ZyPURL.cgi?Dockey=00001M74.TXT) is corrupt at exactly that row -- one extraction attempt on 2026-09-16 returned 126, which is E. coli's geometric mean misread across columns, and was rejected. Left _verified: false on purpose. Low stakes in the current scope: there are ZERO fresh-water enterococcus pairs in the study, so this entry is not exercised at all.",
+        "_verified": false,
+        "_verification_attempted_on": "2026-09-16"
+      },
+      "ECOLI": {
+        "threshold": 235,
+        "unit": "cfu/100mL",
+        "basis": "EPA 1986 AWQC freshwater E. coli single-sample maximum for a designated beach area; also the 2012 RWQC Beach Action Value at the 36 per 1,000 illness rate. Both are 235. Value confirmed 2026-09-16. Note this is a BAV, not an STV -- a precautionary posting trigger, not the criterion itself.",
+        "_verified": true,
+        "_verified_on": "2026-09-16"
+      },
+      "FECAL": {
+        "threshold": 200,
+        "unit": "cfu/100mL",
+        "basis": "EPA 1976 fecal coliform freshwater recreational limit",
+        "_verified": false
+      },
+      "TOTAL": {
+        "threshold": 10000,
+        "unit": "MPN/100mL",
+        "basis": "state-code total coliform limit; no current federal criterion",
+        "_verified": false
+      }
     },
-    "FECAL": {
-     "threshold": 400,
-     "unit": "MPN/100mL",
-     "basis": "AB 411 single-sample standard",
-     "_verified": true,
-     "_verified_on": "2026-09-16"
-    },
-    "TOTAL": {
-     "threshold": 10000,
-     "unit": "MPN/100mL",
-     "basis": "AB 411 single-sample standard, confirmed verbatim 2026-09-16. This is the PERMISSIVE limb; the stricter limb is in ratio_rule and is applied wherever a same-sample fecal result exists.",
-     "_verified": true,
-     "_verified_on": "2026-09-16",
-     "ratio_rule": {
-      "companion_analyte": "FECAL",
-      "ratio": "FECAL/TOTAL on the same sample",
-      "above": 0.1,
-      "threshold_when_above": 1000,
-      "unit": "MPN/100mL",
-      "basis": "17 CCR 7958(a)(1): '1,000 total coliform bacteria per 100 milliliters, if the ratio of fecal/total coliform bacteria exceeds 0.1'. Confirmed verbatim 2026-09-16 at https://www.law.cornell.edu/regulations/california/17-CCR-7958",
-      "_verified": true
-     }
+    "_magnitude_set": {
+      "chosen": "36 per 1,000",
+      "values": "enterococci GM 35 / STV 130; E. coli GM 126 / STV 410",
+      "alternative_not_chosen": "32 per 1,000: enterococci GM 30 / STV 110; E. coli GM 100 / STV 320",
+      "decided_on": "2026-09-16",
+      "reason": "EPA publishes the two sets as ALTERNATIVES, not a menu, and this block previously took marine ENT from the 32/1,000 set (110) and marine ECOLI from the 36/1,000 set (410). The 36/1,000 set was adopted because fresh ECOLI here is 235, which is the 36/1,000 Beach Action Value, so 36/1,000 makes the block internally consistent with the value already in it. marine ENT therefore moves 110 -> 130.",
+      "decided_before_any_california_coefficient_existed": true,
+      "still_outside_this_set": "fresh ENT 61 is EPA 1986, not a 2012 value; marine FECAL 400 is EPA 1976 and is the 10%-exceedance value, verified 2026-09-16; marine TOTAL 10,000 has no federal criterion at all. None is affected by the 2012 magnitude set."
     }
-   },
-   "_verified_on": "2026-09-16",
-   "_verified_against": "Cal. Code Regs. tit. 17, s 7958(a)(1), read verbatim at https://www.law.cornell.edu/regulations/california/17-CCR-7958. The regulation's single-sample list is: 1,000 total coliform/100 mL if the fecal/total ratio exceeds 0.1; 10,000 total coliform/100 mL; 400 fecal coliform/100 mL; 104 enterococcus/100 mL. All four values below match it exactly; none was changed."
   },
-  "_GREAT_LAKES_NOTE": "Great Lakes states (MI, WI, IL, IN, OH, PA, NY, MN) are served by the _default fresh block: E. coli 235/100 mL, which is the 1986 single-sample maximum most Great Lakes beach programs post against. Add a state block here wherever the state's own criterion differs."
- }
+  "states": {
+    "CA": {
+      "_source": "California Code of Regulations Title 17, sections 7957-7961 (AB 411), single-sample standards for ocean water contact sports areas. California also adopted the 2012 RWQC enterococci objectives into the Ocean Plan (2019); where the two differ, AB 411 is what a beach posting decision is made against, which is the decision this column is modelling.",
+      "_verified": true,
+      "marine": {
+        "ENT": {
+          "threshold": 104,
+          "unit": "MPN/100mL",
+          "basis": "AB 411 single-sample standard",
+          "_verified": true,
+          "_verified_on": "2026-09-16"
+        },
+        "ECOLI": {
+          "threshold": null,
+          "no_standard": true,
+          "unit": null,
+          "basis": "NO APPLICABLE STANDARD. 17 CCR 7958 lists only total coliform, fecal coliform and enterococcus; California has no ocean E. coli water-contact standard. Confirmed verbatim 2026-09-16 at https://www.law.cornell.edu/regulations/california/17-CCR-7958.",
+          "reason": "California sets no ocean E. coli standard",
+          "_verified": true,
+          "_verified_on": "2026-09-16"
+        },
+        "FECAL": {
+          "threshold": 400,
+          "unit": "MPN/100mL",
+          "basis": "AB 411 single-sample standard",
+          "_verified": true,
+          "_verified_on": "2026-09-16"
+        },
+        "TOTAL": {
+          "threshold": 10000,
+          "unit": "MPN/100mL",
+          "basis": "AB 411 single-sample standard, confirmed verbatim 2026-09-16. This is the PERMISSIVE limb; the stricter limb is in ratio_rule and is applied wherever a same-sample fecal result exists.",
+          "_verified": true,
+          "_verified_on": "2026-09-16",
+          "ratio_rule": {
+            "companion_analyte": "FECAL",
+            "ratio": "FECAL/TOTAL on the same sample",
+            "above": 0.1,
+            "threshold_when_above": 1000,
+            "unit": "MPN/100mL",
+            "basis": "17 CCR 7958(a)(1): '1,000 total coliform bacteria per 100 milliliters, if the ratio of fecal/total coliform bacteria exceeds 0.1'. Confirmed verbatim 2026-09-16 at https://www.law.cornell.edu/regulations/california/17-CCR-7958",
+            "_verified": true
+          }
+        }
+      },
+      "_verified_on": "2026-09-16",
+      "_verified_against": "Cal. Code Regs. tit. 17, s 7958(a)(1), read verbatim at https://www.law.cornell.edu/regulations/california/17-CCR-7958. The regulation's single-sample list is: 1,000 total coliform/100 mL if the fecal/total ratio exceeds 0.1; 10,000 total coliform/100 mL; 400 fecal coliform/100 mL; 104 enterococcus/100 mL. All four values below match it exactly; none was changed."
+    },
+    "_GREAT_LAKES_NOTE": "Great Lakes states (MI, WI, IL, IN, OH, PA, NY, MN) are served by the _default fresh block: E. coli 235/100 mL, which is the 1986 single-sample maximum most Great Lakes beach programs post against. Add a state block here wherever the state's own criterion differs."
+  }
 }
