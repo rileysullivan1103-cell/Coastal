@@ -34,6 +34,13 @@ ANCHORS = [
     (r"% of the \d+x\d+ frame is land", 1),
     # --- check_camera_geometry.py, whole-frame pass -----------------------
     (r"reference frame: \d{4}-\d{2}-\d{2}", 0),
+    (r"REFERENCE FORCED by --reference", 1),
+    (r"it scores [\d.]+ and ranks", 2),
+    (r"that is the nearest sampled frame to", 0),
+    (r"A reference in the bottom half", 3),
+    (r"grid cells of \d+px over rows", 0),
+    (r"REGISTERS AGAINST THE PREVIOUS FRAME BUT NOT", 1),
+    (r"NOT TWO INDEPENDENT MEASUREMENTS", 8),
     (r"registered \d+ of \d+ frames", 0),
     (r"median offset across the record", 0),
     (r"largest single-date offset", 0),

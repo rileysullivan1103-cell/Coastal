@@ -1948,6 +1948,80 @@ def test_a_pass_built_on_another_is_not_a_second_opinion():
                                                   periods=len(dates), freq="3D")),
               coarse)))
 
+def test_a_forced_reference_says_what_it_gave_up():
+    """Forcing the anchor is the drift test, and the one choice most able to
+    shape a run without showing that it did. So it shows it.
+    """
+    paths = [f"cam-2024-{m:02d}-01-200000Z.jpg" for m in range(1, 13)]
+    dates = list(pd.to_datetime([f"2024-{m:02d}-01" for m in range(1, 13)]))
+    # August is the record's own best anchor; December is the far end.
+    scores = sorted([(5.0 + (10.0 if i == 7 else 0.0) - abs(i - 7) * 0.3, i)
+                     for i in range(12)])
+
+    pick, forced = g.resolve_reference(paths, dates, None, scores)
+    check("with no flag the derived anchor is used and not announced as forced",
+          pick == 7 and not forced, f"pick={pick} forced={forced}")
+
+    pick, forced = g.resolve_reference(paths, dates, "2024-12-01", scores)
+    check("a date picks the nearest sampled frame and says it was forced",
+          pick == 11 and forced, f"pick={pick} forced={forced}")
+
+    # A date between samples resolves to the NEAREST one in either direction,
+    # not to the one before it: 2024-11-20 is 11 days from December and 19 from
+    # November, so it lands on December.
+    pick, _ = g.resolve_reference(paths, dates, "2024-11-20", scores)
+    check("...and a date between samples lands on the nearest frame either way",
+          pick == 11, f"pick={pick} ({dates[pick]:%Y-%m-%d})")
+
+    pick, forced = g.resolve_reference(paths, dates, "2024-03-01-2000", scores)
+    check("a filename fragment works too", pick == 2 and forced, f"pick={pick}")
+
+    # Asking for something that is not in the record fails loudly rather than
+    # quietly anchoring somewhere else.
+    try:
+        g.resolve_reference(paths, dates, "not-a-frame", scores)
+        check("an unresolvable reference is refused", False, "no exit")
+    except SystemExit as stop:
+        check("an unresolvable reference is refused",
+              "neither a date" in str(stop), str(stop)[:50])
+
+
+def test_the_agreement_test_is_not_floored_by_a_common_mode_error():
+    """Every patch is cut from the SAME coarse-corrected position, so the
+    whole-frame error cancels between any two of them.
+
+    Flooring a differential test by a common-mode error does not make it
+    kinder, it makes it vacuous. At Walton --max-shift 900 the floor raised the
+    tolerance to 390 px and kept 6 of 6 patches sitting 39-66 px apart; at 112,
+    where it did not apply, the same six were dropped and the run said what was
+    true. Under --survey the floor is worse still: every cell in the frame
+    passes a 390 px test and the survey reports the whole frame as rigid.
+    """
+    # Six patches with Walton's own scatter, on a record whose whole-frame
+    # registration is poor. None of them track together.
+    rng = np.random.default_rng(23)
+    dates = pd.date_range("2024-01-01", periods=50, freq="3D")
+    rows = []
+    for name, wander in zip("abcdef", (59, 41, 36, 64, 44, 44)):
+        for date in dates:
+            rows.append({"date": date, "feature": name,
+                         "dx": rng.normal(0, wander),
+                         "dy": rng.normal(0, wander)})
+    scattered = pd.DataFrame(rows)
+
+    kept, _, distance = g.agreeing_features(scattered, tolerance=g.AGREE_PX)
+    check("patches 36-64 px apart do not form a rigid group at the tolerance "
+          "asked for", not kept, f"kept {kept}")
+
+    floored = g.not_finer_than_the_record(g.AGREE_PX, 387.0)
+    kept, _, _ = g.agreeing_features(scattered, tolerance=floored)
+    check(f"...whereas a {floored:.0f} px floor would have kept every one",
+          len(kept) == 6, f"kept {sorted(kept)}")
+
+    # And the floor is still right where the error IS absolute: step thresholds.
+    check("the step threshold keeps its floor",
+          g.not_finer_than_the_record(0.5, 387.0) == 387.0)
+
 def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
@@ -1987,7 +2061,9 @@ def main():
                  test_the_agreement_tolerance_is_not_the_step_threshold,
                  test_a_resolution_that_tracks_the_window_is_not_a_resolution,
                  test_drift_is_told_apart_from_noise_by_its_dates,
-                 test_a_pass_built_on_another_is_not_a_second_opinion):
+                 test_a_pass_built_on_another_is_not_a_second_opinion,
+                 test_a_forced_reference_says_what_it_gave_up,
+                 test_the_agreement_test_is_not_floored_by_a_common_mode_error):
         test()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {', '.join(FAILURES)}"))

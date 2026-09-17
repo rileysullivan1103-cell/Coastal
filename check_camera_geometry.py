@@ -1098,6 +1098,108 @@ def crop(image, roi):
     return patch if patch.shape == (roi["h"], roi["w"]) else None
 
 
+def reference_scores(paths, probes=8, downsample=8):
+    """(score, index) for every usable frame, best last. See best_reference.
+
+    Split out from best_reference so a FORCED reference can be placed among
+    them. "I chose 2026-07-01 as the anchor" is a decision; "I chose it and it
+    scores 9.1 against the record's best of 41.2, ranking 812th of 1019" is a
+    decision anyone can argue with, which is the only kind worth printing.
+    """
+    images = [load_gray(path, downsample=downsample) for path in paths]
+    usable = [index for index, image in enumerate(images)
+              if image is not None and float(image.std()) >= BLANK_STD]
+    blank = sum(1 for image in images
+                if image is not None and float(image.std()) < BLANK_STD)
+    if blank:
+        print(f"  {blank} frames carry no scene (black, whiteout or dropped "
+              "feed) and cannot be\n  a reference or be registered")
+    if len(usable) < 3:
+        return []
+    shape = min((images[i].shape for i in usable), key=lambda s: (s[0], s[1]))
+    step = max(1, len(usable) // probes)
+    sample = usable[::step][:probes]
+    scores = []
+    for index in usable:
+        base = images[index][:shape[0], :shape[1]]
+        peaks = []
+        for other in sample:
+            if other == index:
+                continue
+            got = phase_shift(base, images[other][:shape[0], :shape[1]])
+            if got is not None:
+                peaks.append(got[2])  # (dy, dx, confidence, outside)
+        scores.append((float(np.median(peaks)) if peaks else 0.0, index))
+    return sorted(scores)
+
+
+def resolve_reference(paths, dates, wanted, scores):
+    """Index of the frame to anchor on, forced or derived, and say which.
+
+    A forced anchor is the single choice most able to shape a run without
+    showing that it did, so this prints what was given up: the frame actually
+    used, how far it is from the date asked for, and where it sits in the
+    record's own ranking.
+
+    Forcing one is nonetheless the direct test for drift. If a record has
+    walked away from its anchor, the quality table's two columns part AFTER the
+    anchor's date; moving the anchor to the far end should make them part
+    BEFORE it instead. Nothing else in this tool distinguishes "the camera
+    moved away from where it was" from "these frames are hard to register", and
+    a swap under a moved anchor is the difference.
+    """
+    rank = {index: place for place, (_, index) in enumerate(reversed(scores))}
+    score = dict((index, value) for value, index in scores)
+    derived = scores[-1][1] if scores else 0
+    if wanted is None:
+        return derived, False
+
+    try:
+        target = pd.Timestamp(wanted)
+    except ValueError:
+        target = None
+    if target is None:
+        matches = [i for i, path in enumerate(paths) if wanted in path]
+        if not matches:
+            sys.exit(f"--reference {wanted!r} is neither a date this tool can "
+                     f"read (YYYY-MM-DD) nor part of any sampled frame's "
+                     f"filename")
+        pick = matches[0]
+        away = None
+    else:
+        pick = min(range(len(dates)), key=lambda i: abs(dates[i] - target))
+        away = abs(dates[pick] - target).days
+
+    print("\n  REFERENCE FORCED by --reference, not derived.")
+    print(f"  using {dates[pick]:%Y-%m-%d} "
+          f"({os.path.basename(paths[pick])})")
+    if away:
+        # The sampling is every --every days, so the nearest frame to a date is
+        # rarely that date. Saying how far off it landed stops a run being read
+        # as anchored somewhere it is not.
+        print(f"  that is the nearest sampled frame to {target:%Y-%m-%d}, "
+              f"{away} day{'' if away == 1 else 's'} away")
+    if pick not in rank:
+        print("  That frame carries no scene of its own, so nothing will "
+              "register against it.")
+        print("  Pick another date.")
+        return pick, True
+    print(f"  it scores {score[pick]:.1f} and ranks {rank[pick] + 1} of "
+          f"{len(scores)} frames on how well")
+    print(f"  the rest of the record matches it; the derived pick would have "
+          f"been")
+    print(f"  {dates[derived]:%Y-%m-%d} at {score[derived]:.1f}.")
+    if rank[pick] > len(scores) // 2:
+        print("  A reference in the bottom half is a WORSE anchor for the "
+              "record as a whole,")
+        print("  and every offset below is measured from it. That is the "
+              "point when the")
+        print("  question is whether the record drifted away from the other "
+              "anchor -- and it")
+        print("  is a defect in any run where it is not.")
+    return pick, True
+
+
 def best_reference(paths, probes=8, downsample=8):
     """Index of the frame the REST OF THE RECORD can register against.
 
@@ -1120,31 +1222,8 @@ def best_reference(paths, probes=8, downsample=8):
     comparison is a few thousand small FFTs rather than a third pass over the
     JPEGs.
     """
-    images = [load_gray(path, downsample=downsample) for path in paths]
-    usable = [index for index, image in enumerate(images)
-              if image is not None and float(image.std()) >= BLANK_STD]
-    blank = sum(1 for image in images
-                if image is not None and float(image.std()) < BLANK_STD)
-    if blank:
-        print(f"  {blank} frames carry no scene (black, whiteout or dropped "
-              "feed) and cannot be\n  a reference or be registered")
-    if len(usable) < 3:
-        return 0
-    shape = min((images[i].shape for i in usable), key=lambda s: (s[0], s[1]))
-    step = max(1, len(usable) // probes)
-    sample = usable[::step][:probes]
-    scores = []
-    for index in usable:
-        base = images[index][:shape[0], :shape[1]]
-        peaks = []
-        for other in sample:
-            if other == index:
-                continue
-            got = phase_shift(base, images[other][:shape[0], :shape[1]])
-            if got is not None:
-                peaks.append(got[2])  # (dy, dx, confidence, outside)
-        scores.append((float(np.median(peaks)) if peaks else 0.0, index))
-    return max(scores)[1]
+    scores = reference_scores(paths, probes=probes, downsample=downsample)
+    return scores[-1][1] if scores else 0
 
 
 def track(paths, dates, rois, pick=0, min_confidence=MIN_CONFIDENCE,
@@ -2044,6 +2123,17 @@ def main():
                          "patches alone. Only useful for reproducing the "
                          "failure it exists to fix: a move bigger than half a "
                          "patch is invisible to a patch.")
+    ap.add_argument("--reference", metavar="DATE",
+                    help="anchor on this date (YYYY-MM-DD) or on the frame "
+                         "whose filename contains this text, instead of the "
+                         "frame the record matches best. Every offset is "
+                         "measured from the anchor, so this is the one choice "
+                         "most able to shape a run: the output says where the "
+                         "forced frame ranks and what the derived pick would "
+                         "have been. Its use is the drift test — move the "
+                         "anchor to the far end of the record and see whether "
+                         "the quality table's two columns part before it "
+                         "instead of after.")
     ap.add_argument("--survey", action="store_true",
                     help="ignore the feature picker: tile the WHOLE frame and "
                          "report which cells agree with each other. Use this "
@@ -2199,10 +2289,12 @@ def main():
             print(f"  {roi['name']:<6} x={roi['x']:>5} y={roi['y']:>5} "
                   f"{roi['w']}x{roi['h']}{extra}")
 
-    pick = best_reference(paths)
-    print(f"\n  reference frame: {dates[pick]:%Y-%m-%d} "
-          f"({os.path.basename(paths[pick])}) — of {len(paths)} frames, the "
-          "one\n  the rest of the record matches best")
+    scores = reference_scores(paths)
+    pick, forced = resolve_reference(paths, dates, args.reference, scores)
+    if not forced:
+        print(f"\n  reference frame: {dates[pick]:%Y-%m-%d} "
+              f"({os.path.basename(paths[pick])}) — of {len(paths)} frames, "
+              "the one\n  the rest of the record matches best")
     preview = wrote(draw_rois(paths[pick], rois,
                               os.path.join(OUT_DIR, f"candidates_{slug}.jpg")))
     if preview:
@@ -2210,8 +2302,9 @@ def main():
 
     coarse = None
     # The resolution the record derives for itself, in the coarse pass. It is a
-    # property of the frames, not of the pass, so the patch cross-check below is
-    # floored by it too rather than taking a flag at face value.
+    # property of the frames, so the patch pass's STEP THRESHOLD is floored by
+    # it rather than taking a flag at face value. It does NOT floor the patch
+    # agreement test -- see the note there.
     derived = float("nan")
     if not args.no_coarse:
         print("\n" + "=" * 74)
@@ -2298,10 +2391,9 @@ def main():
                     threshold = not_finer_than_the_record(args.step_px,
                                                            resolution)
                     wandering = resolution >= WANDER_SHARE * args.max_shift
-                    # A resolution this coarse must not be allowed to relax
-                    # the patch agreement test, which would then pass by
-                    # being asked nothing. `derived` is what floors that
-                    # test, so it stays unset here.
+                    # A resolution the search window decided is not a
+                    # resolution, so it does not get to raise the patch step
+                    # threshold either. `derived` is what floors that.
                     derived = float("nan") if wandering else resolution
                     print(f"  two routes over the same pair disagree by "
                           f"sqrt(3) x the error in one")
@@ -2495,16 +2587,30 @@ def main():
     # Which of those candidates were actually on the rigid scene. This is the
     # step that used to be my guess about the frame contents and is now the
     # record's own answer.
-    # The tolerance is floored by the record's own resolution for the same
-    # reason the step threshold is: two patches cannot be asked to agree more
-    # closely than either of them can be measured. Without the floor, a run
-    # that measures itself to +/-48 px would reject every patch in the frame
-    # for failing a 3 px test and call that a finding.
-    agree = not_finer_than_the_record(args.agree_px, derived)
-    if agree > args.agree_px:
-        print(f"\n  the {args.agree_px:.2g} px agreement tolerance is below "
-              f"the {derived:.2g} px this record\n  can resolve, so patches "
-              f"are required to agree to {agree:.2g} px instead")
+    # THE AGREEMENT TEST IS DIFFERENTIAL, SO THE RECORD'S OWN RESOLUTION IS
+    # THE WRONG FLOOR FOR IT -- and I floored it by that anyway, twice.
+    #
+    # The reasoning that put the floor here was: two patches cannot be asked to
+    # agree more closely than either can be measured, so a record that measures
+    # itself to +/-129 px would reject every patch in the frame for failing a
+    # 3 px test and call that a finding. That is wrong, because every patch is
+    # cut from the SAME coarse-corrected position on a given date. Whatever
+    # error the whole-frame registration made that day is common to all of
+    # them, and a comparison BETWEEN two patches subtracts it out. What is left
+    # is the patch-level error, which is small, and which is exactly the
+    # quantity the tolerance is supposed to bound.
+    #
+    # Flooring a differential test by a common-mode error does not make it
+    # kinder, it makes it vacuous. At Walton --max-shift 900 it raised the
+    # tolerance to 390 px and kept 6 of 6 patches sitting 39-66 px apart; at
+    # 112, where the floor did not apply, the same six patches were dropped and
+    # the run said what was true -- nothing in the searched region is rigid.
+    # Under --survey it would have been worse: every cell in the frame passing
+    # a 390 px test and the survey reporting the whole frame as one rigid body.
+    #
+    # So the tolerance is what was asked for. The step threshold keeps its
+    # floor, where the error IS absolute and the argument does hold.
+    agree = args.agree_px
     kept, rejected, distance = agreeing_features(frame, tolerance=agree)
     if 1 < len(rois) <= 20:
         print(f"\nagreement between candidates (median px apart over the "
