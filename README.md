@@ -1547,6 +1547,40 @@ against a difference. Using √3 there would understate the error by 22% and
 promise a resolution the data does not support. The step threshold is three
 times the *worst* of the available estimates, never the kindest.
 
+### A resolution that tracks the search window is not a resolution
+
+`--max-shift` is a prior about where the correlation peak is. If the peak is
+really on the scene, changing the window changes nothing but how many frames
+get overruled. If there is **no** dominant peak, the best position inside the
+box is found near the box — and then the two-route gap, the per-frame error,
+the resolution, the step threshold and every epoch built on them all scale
+with the flag instead of with the imagery.
+
+Walton nearly got this past the tool. The 150 px run overruled 55% of frames,
+so its own warning said the prior was wrong and told us to re-run at 450. We
+did, and the overruled count fell to 6% — which reads exactly like a prior
+being fixed. It was not:
+
+| `--max-shift` | two-route gap | resolution | resolution ÷ window | largest offset ÷ box corner |
+|---|---|---|---|---|
+| 150 | 83.9 px | 145 px | **0.97** | 0.71 (on the wall) |
+| 450 | 217.2 px | 376 px | **0.84** | **0.99** |
+
+Two windows, both saturated, the answer tracking the flag. Widening the box
+made the measurement three times *worse*, which is the opposite of what
+freeing a clamped peak does. It produced 43 epochs and every one of them was
+the search box.
+
+**The overruled count cannot catch this on its own** — it got better while the
+measurement got worse — so the ratio is now tested directly. When the smallest
+move a record claims to resolve is at least `WANDER_SHARE` (0.5) of the window
+it was given, the run says so loudly, withholds the epochs, and names the test:
+re-run at double and at a quarter of the window and see whether the resolution
+follows. A resolution refused this way is also barred from flooring the patch
+agreement tolerance — otherwise the agreement test is relaxed to 380 px and
+passes by being asked nothing, which is how six patches sitting 39–66 px apart
+were all kept.
+
 ### A step threshold and an agreement tolerance are not one knob
 
 `check_camera_geometry.py` used `--step-px` for both, and that was wrong in a

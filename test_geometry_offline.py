@@ -1817,6 +1817,47 @@ def test_the_agreement_tolerance_is_not_the_step_threshold():
           g.not_finer_than_the_record(3.0, float("nan")) == 3.0)
 
 
+def test_a_resolution_that_tracks_the_window_is_not_a_resolution():
+    """A search box that bounds the answer must not be reported as precision.
+
+    --max-shift is a prior about where the correlation peak is. If the peak is
+    really on the scene, changing the window changes only how many frames get
+    overruled. If there is no dominant peak, the best position inside the box
+    is found near the box, and the two-route gap then measures the WIDTH OF
+    THE BOX rather than the error of either route.
+
+    Walton made this concrete and nearly got away with it. At --max-shift 150
+    the resolution came out 145 px -- 0.97x the window -- and the largest
+    offset sat on the wall at 149.88. Re-running at 450 to test the prior
+    dropped the overruled count from 55% to 6%, which reads exactly like a
+    prior being fixed, and the resolution came out 376 px: 0.84x the new
+    window, largest offset 98.9% of the way to the box corner. Forty-three
+    epochs, every one of them the search box.
+
+    The overruled count alone cannot catch this -- it got BETTER while the
+    measurement got worse -- so the ratio is tested directly.
+    """
+    for window, gap in ((150.0, 83.9), (450.0, 217.2)):
+        _, resolution = g.noise_floor(gap)
+        check(f"a {window:.0f} px window returning a {resolution:.0f} px "
+              f"resolution is refused",
+              resolution >= g.WANDER_SHARE * window,
+              f"{resolution / window:.2f} x the window, "
+              f"limit {g.WANDER_SHARE}")
+
+    # A record that genuinely registers is not caught by it: 4 px of gap in a
+    # 150 px window is a real measurement and must survive.
+    _, resolution = g.noise_floor(4.0)
+    check("...and a record that really registers is not",
+          resolution < g.WANDER_SHARE * 150.0,
+          f"{resolution:.1f} px resolution in a 150 px window")
+
+    # The tolerance that floors the patch agreement test must NOT be raised by
+    # a resolution like that -- a test relaxed to 380 px passes by being asked
+    # nothing, which is how 6 of 6 patches sitting 39-66 px apart were kept.
+    check("a refused resolution cannot relax the agreement test",
+          g.not_finer_than_the_record(g.AGREE_PX, float("nan")) == g.AGREE_PX)
+
 def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
@@ -1853,7 +1894,8 @@ def main():
                  test_a_changed_frame_size_is_reported,
                  test_a_different_frame_size_is_dropped_not_cropped,
                  test_epochs_count_stills_not_just_samples,
-                 test_the_agreement_tolerance_is_not_the_step_threshold):
+                 test_the_agreement_tolerance_is_not_the_step_threshold,
+                 test_a_resolution_that_tracks_the_window_is_not_a_resolution):
         test()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {', '.join(FAILURES)}"))

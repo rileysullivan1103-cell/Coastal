@@ -151,12 +151,24 @@ MASKS = {
         "note": "shoreline FITTED from the fractional grid preview of "
                 "currituck_hampton_inn-2024-06-16-170015Z.jpg "
                 "(y = 0.513 - 0.019x, scatter 0.010, 1309 of 1469 columns) "
-                "plus a PROVISIONAL 0.06 margin, NOT YET MEASURED by "
-                "--mask-audit; the watermark box is measured from the same "
+                "plus a PROVISIONAL 0.06 margin; the watermark box is "
+                "measured from the same "
                 "frame at x 0.030-0.162, y 0.919-0.959. The bottom of this "
                 "frame is dune grass, which moves in wind: it is land, so it "
                 "stays in the mask, and the survey's agreement test is what "
-                "decides whether it tracks.",
+                "decides whether it tracks. "
+                "AUDITED over 1618 frames, 2022-01-05 to 2026-09-16: 4.23% of "
+                "the mask reads wet in >=25% of frames and reaches row 0.968 "
+                "at 10% of the row's width -- but those pixels average "
+                "RGB 81,56,38 (R-B +43), which is WARM, sand-coloured, not "
+                "sea. They are called water only for being cooler than the "
+                "sunlit rest of the mask, which is what a shaded dune face "
+                "and wet sand do. The measured-edge fit is degenerate "
+                "(y = 0.618 +0.139 x, scatter 0.175, 0 of 672 columns "
+                "rejected), so the audit offered no polygon and none was "
+                "drawn by hand. The margin therefore REMAINS PROVISIONAL: the "
+                "audit found no sea inside this mask, and no measurement to "
+                "replace the margin with.",
     },
 }
 

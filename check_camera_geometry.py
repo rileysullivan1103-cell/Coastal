@@ -111,6 +111,27 @@ PERFECT_MATCH = 1e6
 # reports how often the best peak anywhere was outside this window, so the
 # prior can be checked rather than trusted.
 MAX_SHIFT_PX = 150
+# THE RESOLUTION MUST NOT BE A FUNCTION OF THE FLAG. --max-shift decides how
+# much of the correlation surface may win. If the peak is really on the scene,
+# changing the window moves nothing but the count of frames overruled. If there
+# is NO dominant peak, the best position inside the box is found near the box,
+# and every number downstream -- the two-route gap, the per-frame error, the
+# resolution, the step threshold and the epochs built on it -- scales with the
+# window instead of with the imagery.
+#
+# Walton is the case that forced this. At --max-shift 150 the derived
+# resolution came out 145 px, 0.97x the window, and the largest offset sat on
+# the wall at 149.88. Re-run at 450 to test the prior -- the overruled count
+# duly fell from 55% to 6%, which looks like the prior being fixed -- and the
+# resolution came out 376 px, 0.84x the window, with the largest offset at
+# 629.56 px: 98.9% of the way to the corner of a 450 px box. Two windows, both
+# saturated, the answer tracking the flag. It produced 43 epochs and every one
+# of them was the search box.
+#
+# So: when the smallest move a record claims to resolve is this share of the
+# window it was given, the window is bounding the answer and there is no
+# measurement here to report.
+WANDER_SHARE = 0.5
 # A frame registers on the structure it contains, and fog removes structure
 # without removing the frame. Walton's contact sheet settles this: every frame
 # that failed to register against its neighbour is a whiteout, and the clear
@@ -2222,11 +2243,17 @@ def main():
                 for date, value in biggest.items():
                     print(f"    {date:%Y-%m-%d}  {value:8.1f} px")
                 # What the gap buys is a precision, not a pass/fail.
+                wandering = False
                 if np.isfinite(gap):
                     noise, resolution = noise_floor(gap)
-                    derived = resolution
                     threshold = not_finer_than_the_record(args.step_px,
                                                            resolution)
+                    wandering = resolution >= WANDER_SHARE * args.max_shift
+                    # A resolution this coarse must not be allowed to relax
+                    # the patch agreement test, which would then pass by
+                    # being asked nothing. `derived` is what floors that
+                    # test, so it stays unset here.
+                    derived = float("nan") if wandering else resolution
                     print(f"  two routes over the same pair disagree by "
                           f"sqrt(3) x the error in one")
                     print(f"  measurement, so this record measures a frame to "
@@ -2237,8 +2264,43 @@ def main():
                         print(f"  the {args.step_px:.2g} px step threshold is "
                               "below that floor, so steps are")
                         print(f"  searched at {threshold:.2g} px instead")
+                    if wandering:
+                        corner = args.max_shift * 2 ** 0.5
+                        print("\n" + "!" * 74)
+                        print(f"THAT RESOLUTION IS "
+                              f"{resolution / args.max_shift:.0%} OF THE "
+                              f"SEARCH WINDOW IT WAS GIVEN.")
+                        print("A window is a prior about where the peak is, "
+                              "not a measurement. When")
+                        print("the smallest move a record can resolve scales "
+                              "with the box it was")
+                        print("searched in, the box is bounding the answer: "
+                              "there is no dominant")
+                        print("peak on the scene, so the best position inside "
+                              "the window is found")
+                        print("near the window, and the gap between the two "
+                              "routes measures the")
+                        print("width of the box rather than the error of "
+                              "either route.")
+                        print(f"  the largest offset is "
+                              f"{coarse['offset'].max():.0f} px, against a "
+                              f"{corner:.0f} px box corner "
+                              f"({coarse['offset'].max() / corner:.0%} of the "
+                              f"way out)")
+                        print("THE TEST: re-run with --max-shift "
+                              f"{args.max_shift * 2:.0f} and with "
+                              f"--max-shift {args.max_shift // 4:.0f}.")
+                        print("If the resolution follows the window both "
+                              "ways, nothing here is")
+                        print("registering and no epoch table from this "
+                              "record means anything. If it")
+                        print("stops following, the window that stopped it is "
+                              "the one to use.")
+                        print("Either way: pool NOTHING across these dates "
+                              "until it is settled.")
+                        print("!" * 74)
                     steady = float(coarse["offset"].median())
-                    if steady > 2.0 * noise:
+                    if not wandering and steady > 2.0 * noise:
                         print(f"  the median offset of {steady:.0f} px is "
                               f"{steady / noise:.0f}x that error: the "
                               "record's")
@@ -2246,7 +2308,7 @@ def main():
                 else:
                     noise = resolution = float("nan")
                     threshold = args.step_px
-                reliable = bool(np.isfinite(gap))
+                reliable = bool(np.isfinite(gap)) and not wandering
                 covered = len(coarse) / max(len(paths), 1)
                 if reliable and covered < 0.7:
                     # A precision measured on the frames that registered says
@@ -2262,6 +2324,8 @@ def main():
                     print("  say which part. Treat any epoch here as provisional "
                           "until the")
                     print("  unregistered frames are explained.")
+                elif not reliable and wandering:
+                    pass   # already said, loudly, immediately above
                 elif not reliable:
                     print("\n" + "!" * 74)
                     print("TOO FEW PAIRS WERE MEASURED BOTH WAYS TO STATE A "

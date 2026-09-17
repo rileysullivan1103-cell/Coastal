@@ -25,7 +25,15 @@ import sys
 # the continuation: "the intrusion runs 0.414 of the frame height INTO the
 # land" is the second line of its print.
 ANCHORS = [
+    # --- the record itself ------------------------------------------------
+    (r"\d+ frames on disk, \d{4}", 0),
+    (r"THE RECORD HOLDS \d+ DIFFERENT FRAME SIZES", 4),
+    (r"^\s+\d+x\d+\s+[\d,]+ frames", 0),
+    (r"median [\d.]+, quartiles .*floor", 1),
+    (r"intended sample days produced no frame", 0),
+    (r"% of the \d+x\d+ frame is land", 1),
     # --- check_camera_geometry.py, whole-frame pass -----------------------
+    (r"reference frame: \d{4}-\d{2}-\d{2}", 0),
     (r"registered \d+ of \d+ frames", 0),
     (r"median offset across the record", 0),
     (r"largest single-date offset", 0),
@@ -54,6 +62,16 @@ ANCHORS = [
     (r"WARNING: every kept patch sits within", 2),
     (r"NOTE: the record moves further than half a", 2),
     (r"No epoch split can be claimed", 0),
+    (r"patch positions fell outside the moved frame", 0),
+    (r"consecutive pairs below confidence .*carried as zero", 0),
+    (r"the agreeing patches span", 0),
+    # --- the two passes against each other --------------------------------
+    (r"THE TWO PASSES, SIDE BY SIDE", 0),
+    (r"\d+ of \d+ candidate moves are seen BY BOTH passes", 2),
+    # --- the window that bounded the answer -------------------------------
+    (r"THAT RESOLUTION IS \d+% OF THE SEARCH WINDOW", 6),
+    (r"the largest offset is .* of the\s*$", 1),
+    (r"THE TEST: re-run with --max-shift", 4),
     # --- verdict ----------------------------------------------------------
     (r"No step larger than .* persists in", 0),
     (r"So the record is ONE epoch AT THIS RESOLUTION", 1),
@@ -89,6 +107,12 @@ ANCHORS = [
     (r"every sampled frame, labelled:", 0),
 ]
 
+# How many rows of an enumeration to keep before saying how many were cut.
+# Forty-three epochs is itself the finding; rows 6 to 40 are not, and pasting
+# them on costs the reader the part that mattered. The count line above the
+# list is always kept, so nothing is hidden by this -- only unrepeated.
+MAX_ROWS = 6
+
 # Blocks whose rows are worth keeping whole: an anchor, then every following
 # line that still matches the row shape.
 TABLES = [
@@ -96,6 +120,17 @@ TABLES = [
     (r"WHERE THE RECORD REGISTERS", r"^\s+(quarter|\S+\s+\d+\s)"),
     (r"largest single frame-to-frame step", r"^\s+\d{4}-\d{2}-\d{2}\s+[-\d.]+ px"),
     (r"the six worst frames", r"^\s+\d{4}-\d{2}-\d{2}\s"),
+    (r"intended sample days produced no frame",
+     r"^\s+\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}\s+\d+ days"),
+]
+
+# Enumerations to trim to MAX_ROWS. Same shape as TABLES, but the rows are a
+# list whose length is the point rather than a table to read across.
+LISTS = [
+    (r"candidate discontinuit", r"^\s+\d{4}-\d{2}-\d{2}\s+[-\d.]+ px ->"),
+    (r"^\d+ epochs:", r"^\s+\d+\. \d{4}-\d{2}-\d{2} to "),
+    (r"THE TWO PASSES, SIDE BY SIDE",
+     r"^\s+\d{4}-\d{2}-\d{2}\s+[\d.]+ px"),
 ]
 
 # Anything shouting is kept whether or not a pattern above knows about it.
@@ -106,8 +141,12 @@ LOUD = re.compile(r"\b(WARNING|ERROR|REFUS|WITHHELD|STOP|LEAK|Traceback|"
 NOT_LOUD = re.compile(r"cannot see a camera move that left the detector|"
                       r"Confidence cannot catch this")
 
+# A heading's underline is not content and is not the end of what follows it.
+SEPARATOR = re.compile(r"^\s*[=\-!]{3,}\s*$")
+
 ANCHORS = [(re.compile(p), n) for p, n in ANCHORS]
 TABLES = [(re.compile(a), re.compile(r)) for a, r in TABLES]
+LISTS = [(re.compile(a), re.compile(r)) for a, r in LISTS]
 
 
 def summarize(lines):
@@ -128,7 +167,32 @@ def summarize(lines):
                     keep[step] = row.match(lines[step]) is not None or keep[step]
                     step += 1
 
-    body = [lines[i].rstrip() for i in range(len(lines)) if keep[i]]
+    # Trim the long enumerations, saying how many rows were left out so the
+    # reader knows to go to the log rather than assuming that was all of them.
+    cut = {}
+    for index, line in enumerate(lines):
+        for anchor, row in LISTS:
+            if not anchor.search(line):
+                continue
+            rows = []
+            step = index + 1
+            while step < len(lines):
+                if row.match(lines[step]):
+                    rows.append(step)
+                elif lines[step].strip() and not SEPARATOR.match(lines[step]):
+                    break
+                step += 1
+            for position, where in enumerate(rows):
+                keep[where] = position < MAX_ROWS
+            if len(rows) > MAX_ROWS:
+                cut[rows[MAX_ROWS - 1]] = len(rows) - MAX_ROWS
+
+    body = []
+    for index in range(len(lines)):
+        if keep[index]:
+            body.append(lines[index].rstrip())
+        if index in cut:
+            body.append(f"    ... and {cut[index]} more (in the log)")
 
     # Whatever shouted and was not already captured. This is the part that
     # keeps the script honest: a warning added to either tool after this file
