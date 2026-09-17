@@ -34,6 +34,12 @@ from . import config
 REVIEW_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "beach_type_reviewed.csv")
 WORKLIST_PATH = os.path.join(config.DATA_DIR, "beach_type_worklist.csv")
+# A committed, reproducible subset of beaches to review, so the work is
+# finite and its composition is auditable. See draw_sample.
+SAMPLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "review", "beach_type_sample.csv")
+BEACH_TYPE_SAMPLE_SEED = 20260917
+BEACH_TYPE_SAMPLE_N = 300
 
 VALID = tuple(config.STRATA["beach_type"]["values"])
 IMAGERY = ("https://www.google.com/maps/@{lat},{lon},600m/data=!3m1!1e3")
@@ -72,8 +78,13 @@ def ambiguity(frame):
     return pd.Series(out, index=frame.index).fillna(1.0)
 
 
-def worklist(sites, spatial=None, limit=None):
+def worklist(sites, spatial=None, limit=None, sample=None):
     frame = sites.copy()
+    if sample is not None and not sample.empty:
+        keep = set(sample["station_id"].astype(str))
+        frame = frame[frame["station_id"].astype(str).isin(keep)]
+        print(f"  restricted to the committed sample: {len(frame)} beach(es) "
+              f"of {len(sites)} station(s)")
     if spatial is not None and not spatial.empty:
         keep = [c for c in ("land_fraction_5km", "embayment_ratio",
                             "curvature_1_per_km", "fetch_km_mean",
@@ -102,6 +113,54 @@ def worklist(sites, spatial=None, limit=None):
     out = frame[columns].sort_values(
         ["already_reviewed", "ambiguity"], ascending=[True, False])
     return out.head(limit) if limit else out
+
+
+def draw_sample(sites, n=BEACH_TYPE_SAMPLE_N, seed=BEACH_TYPE_SAMPLE_SEED):
+    """A reviewable subset: n site CLUSTERS, stratified by state.
+
+    beach_type is the one pre-registered stratum with no automatic fallback,
+    and it is currently assigned for zero of 3,575 stations, so the coverage
+    rule drops it. Reviewing 3,575 stations by eye is not going to happen;
+    reviewing a few hundred BEACHES might.
+
+    Clusters, not stations, because the label is a property of the beach --
+    Cowell Beach is 22 identifiers inside 472 m and they are all the same
+    sand. One representative station per cluster is offered for review.
+
+    Stratified by state and drawn from a recorded seed so the sample is
+    reproducible and its composition can be argued with. Nothing here assigns
+    a label; wq.review.ingest still requires an assigner and a date.
+    """
+    frame = sites.copy()
+    frame["station_id"] = frame["station_id"].astype(str)
+    if "site_cluster" not in frame.columns:
+        raise SystemExit(
+            "stations_stratified.csv has no site_cluster column — run "
+            "python -m wq.run_wq --strata first")
+    # The representative is the station the cluster is named after, which
+    # strata.site_clusters defines as the smallest station_id in it.
+    representatives = (frame.sort_values("station_id")
+                       .drop_duplicates("site_cluster", keep="first"))
+    rng = np.random.default_rng(seed)
+    picks = []
+    total = len(representatives)
+    for state, group in representatives.groupby("state", dropna=False):
+        share = len(group) / total if total else 0
+        take = int(round(n * share))
+        if len(group) and take == 0:
+            take = 1
+        take = min(take, len(group))
+        picks.extend(rng.choice(group["site_cluster"].to_numpy(), size=take,
+                                replace=False).tolist())
+    chosen = representatives[representatives["site_cluster"].isin(set(picks))]
+    return chosen.sort_values(["state", "site_cluster"])
+
+
+def read_sample(path=None):
+    path = path or SAMPLE_PATH
+    if not os.path.exists(path):
+        return None
+    return pd.read_csv(path, dtype={"station_id": str})
 
 
 def read_reviewed(path=None):
@@ -206,6 +265,15 @@ def main():
     parser.add_argument("--by", help="who assigned these labels")
     parser.add_argument("--on", help="ISO date of the assignment")
     parser.add_argument("--n", type=int, help="limit the worklist")
+    parser.add_argument("--draw-sample", action="store_true",
+                        help=f"draw {BEACH_TYPE_SAMPLE_N} site clusters, "
+                             "stratified by state from a recorded seed, and "
+                             "write the committed review sample")
+    parser.add_argument("--sample", action="store_true",
+                        help="restrict --worklist to the committed sample")
+    parser.add_argument("--all", action="store_true",
+                        help="--worklist over every station, ignoring the "
+                             "committed sample")
     args = parser.parse_args()
 
     sites_path = os.path.join(config.DATA_DIR, "stations_stratified.csv")
@@ -214,6 +282,21 @@ def main():
     sites = (pd.read_csv(sites_path, low_memory=False)
              if os.path.exists(sites_path) else None)
 
+    if args.draw_sample:
+        if sites is None:
+            sys.exit("no station table yet — run wq.run_wq --strata first")
+        chosen = draw_sample(sites)
+        os.makedirs(os.path.dirname(SAMPLE_PATH), exist_ok=True)
+        columns = [c for c in ("station_id", "site_cluster", "station_name",
+                               "state", "region", "lat", "lon")
+                   if c in chosen.columns]
+        chosen[columns].to_csv(SAMPLE_PATH, index=False)
+        print(f"wrote {SAMPLE_PATH}  ({len(chosen)} beach(es), seed "
+              f"{BEACH_TYPE_SAMPLE_SEED})")
+        print(chosen.groupby("state").size().rename("beaches").to_string())
+        print("\nNothing is labelled. Next:")
+        print("  python -m wq.review --worklist --sample")
+        return
     if args.ingest:
         ingest(args.ingest, args.by, args.on)
         return
@@ -229,7 +312,17 @@ def main():
         if spatial is None:
             print("  no site_covariates.csv — the worklist will not be sorted "
                   "by ambiguity. Run wq.run_wq --spatial first.")
-        table = worklist(sites, spatial, args.n)
+        sample = None if args.all else read_sample()
+        if sample is None and not args.all:
+            print("  no committed sample yet — the worklist covers every "
+                  "station. Draw one with:\n    python -m wq.review "
+                  "--draw-sample")
+        elif not args.sample and not args.all:
+            print("  a committed sample exists; pass --sample to review only "
+                  "those beaches, or --all to override")
+            sample = None
+        table = worklist(sites, spatial, args.n,
+                         sample if args.sample else None)
         os.makedirs(config.DATA_DIR, exist_ok=True)
         table.to_csv(WORKLIST_PATH, index=False)
         print(f"{len(table)} station(s) -> {WORKLIST_PATH}")

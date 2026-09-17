@@ -28,7 +28,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from wq import clean, config, holdout, manifest, pull, strata  # noqa: E402
+from wq import clean, config, holdout, manifest, pull, review, strata  # noqa: E402
 
 FAILURES = []
 
@@ -546,6 +546,27 @@ def test_the_holdout_is_drawn_before_anything_is_fitted():
           (holdout.file_sha256(holdout.HOLDOUT_PATH) or "")[:16] + "...")
 
 
+def test_the_review_directory_does_not_shadow_the_review_module():
+    """wq/review.py and wq/review/ are the same name. Python resolves that in
+    the module's favour ONLY while the directory has no __init__.py: a
+    namespace package loses to a module, a regular package wins. If one ever
+    appeared there, from wq import review would silently become the directory,
+    read_reviewed would vanish, and wq/strata.py would fail on beach_type --
+    the one stratum with no automatic fallback, so it would look like a data
+    problem."""
+    print("\n[review module vs directory]")
+    check("from wq import review gets the module, not the directory",
+          review.__file__.endswith("review.py"), review.__file__)
+    check("review.read_reviewed is reachable",
+          callable(getattr(review, "read_reviewed", None)))
+    directory = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "review")
+    if os.path.isdir(directory):
+        check("the directory has no __init__.py",
+              not os.path.exists(os.path.join(directory, "__init__.py")),
+              "adding one shadows wq/review.py")
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -563,7 +584,8 @@ def main():
                  test_thresholds_file_is_readable_and_cited,
                  test_flat_series_is_detected_without_a_qualifier,
                  test_site_clusters_label_a_beach_without_deleting_it,
-                 test_the_holdout_is_drawn_before_anything_is_fitted):
+                 test_the_holdout_is_drawn_before_anything_is_fitted,
+                 test_the_review_directory_does_not_shadow_the_review_module):
         test()
     print()
     if FAILURES:
