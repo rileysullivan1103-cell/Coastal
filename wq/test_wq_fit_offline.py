@@ -744,6 +744,53 @@ def test_ab411_ratio_rule():
               os.path.abspath(__file__)), "fit.py")).read())
 
 
+def test_an_unknowable_exceedance_label_is_not_a_negative():
+    """A total-coliform sample with no same-sample fecal result, sitting
+    BETWEEN the two AB 411 limbs, exceeds under one and not the other. Nothing
+    in the record says which applied. Scoring it as a negative would train a
+    classifier to reproduce a gap in the sampling programme."""
+    print("\n[unscorable exceedance labels]")
+    thresholds = fit.load_thresholds()
+    sites = pd.DataFrame([{"station_id": "CA-1", "state": "CA",
+                           "water_class": "marine"}])
+    rows = [
+        # no companion, below both limbs -> knowable negative
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-01",
+         "sampled_at": "2021-06-01T09:00", "value": 400.0},
+        # no companion, BETWEEN the limbs -> unknowable
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-02",
+         "sampled_at": "2021-06-02T09:00", "value": 5000.0},
+        # no companion, above both limbs -> knowable positive
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-03",
+         "sampled_at": "2021-06-03T09:00", "value": 40000.0},
+        # companion present and between the limbs -> knowable, ratio decides
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-04",
+         "sampled_at": "2021-06-04T09:00", "value": 5000.0},
+        {"station_id": "CA-1", "analyte": "FECAL", "date": "2021-06-04",
+         "sampled_at": "2021-06-04T09:00", "value": 1000.0},
+    ]
+    out = fit.apply_ratio_rules(pd.DataFrame(rows), sites, thresholds)
+    total = out[out["analyte"] == "TOTAL"].set_index("date")
+    check("below both limbs is scorable even with no companion",
+          bool(total.loc["2021-06-01", "exceedance_scorable"]))
+    check("BETWEEN the limbs with no companion is NOT scorable",
+          not bool(total.loc["2021-06-02", "exceedance_scorable"]),
+          "exceeds under 1,000, does not under 10,000")
+    check("above both limbs is scorable even with no companion",
+          bool(total.loc["2021-06-03", "exceedance_scorable"]))
+    check("a measured ratio makes it scorable again",
+          bool(total.loc["2021-06-04", "exceedance_scorable"])
+          and float(total.loc["2021-06-04", "exceedance_threshold"]) == 1000.0)
+
+    other = fit.apply_ratio_rules(
+        pd.DataFrame([{"station_id": "CA-1", "analyte": "ENT",
+                       "date": "2021-06-01", "sampled_at": "2021-06-01T09:00",
+                       "value": 50.0}]), sites, thresholds)
+    check("an analyte with one limb is always scorable",
+          bool(other["exceedance_scorable"].iloc[0]),
+          "there is only one number to be on one side of")
+
+
 def test_california_has_no_ocean_ecoli_standard():
     """17 CCR 7958 lists total coliform, fecal coliform and enterococcus and
     nothing else. Scoring Californian E. coli against EPA's FRESHWATER 410
@@ -803,6 +850,7 @@ def main():
                  test_multiple_testing_expectation,
                  test_per_site_table_has_what_was_asked_for,
                  test_ab411_ratio_rule,
+                 test_an_unknowable_exceedance_label_is_not_a_negative,
                  test_california_has_no_ocean_ecoli_standard):
         test()
     print()

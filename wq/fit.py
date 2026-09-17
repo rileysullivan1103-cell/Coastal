@@ -137,12 +137,21 @@ def apply_ratio_rules(joined, sites, thresholds):
       ratio_rule_applied        the stricter limb fired
       ratio_rule_unavailable    no same-sample companion result, so the
                                 permissive limb stands by default
+      exceedance_scorable       the exceedance label is knowable at all
 
-    The last column is the honest one. Where a total-coliform sample has no
-    fecal result off the same bottle, the ratio cannot be computed, the
-    10,000 limb stands, and the exceedance count is an UNDERCOUNT rather than
-    a measurement. Flagging it is the difference between "did not exceed" and
-    "could not be tested".
+    The last two columns are the honest ones. Where a total-coliform sample
+    has no fecal result off the same bottle, the ratio cannot be computed and
+    the 10,000 limb stands by default -- so the exceedance count is an
+    UNDERCOUNT rather than a measurement.
+
+    exceedance_scorable says how much of an undercount. A sample at 400 is
+    below both limbs and a sample at 40,000 is above both, so their labels are
+    known whatever the ratio was. A sample BETWEEN the two limbs with no
+    companion result is genuinely unknowable: it exceeds under the strict limb
+    and does not under the permissive one, and nothing in the record says
+    which applied. Those are not negatives. Scoring them as negatives is how a
+    classifier gets trained to reproduce a gap in the sampling programme, so
+    they are marked unscorable and Phase 2 can drop them.
     """
     frame = joined.copy()
     if frame.empty:
@@ -172,6 +181,9 @@ def apply_ratio_rules(joined, sites, thresholds):
     frame["ratio_value"] = np.nan
     frame["ratio_rule_applied"] = False
     frame["ratio_rule_unavailable"] = False
+    # Everything without a two-limb criterion is scorable by construction:
+    # there is only one number to be on one side of.
+    frame["exceedance_scorable"] = frame["exceedance_threshold"].notna()
 
     has_rule = pd.Series([r is not None for r in rules], index=frame.index)
     if not has_rule.any():
@@ -204,6 +216,14 @@ def apply_ratio_rules(joined, sites, thresholds):
         frame.loc[rows, "ratio_rule_unavailable"] = ratio.isna()
         strict_rows = rows & frame["ratio_rule_applied"]
         frame.loc[strict_rows, "exceedance_threshold"] = strict
+
+        # Ambiguous: no companion result, and the value falls between the two
+        # limbs, so the label depends entirely on the ratio nobody measured.
+        permissive = pd.to_numeric(frame.loc[rows, "exceedance_threshold"],
+                                   errors="coerce")
+        blind = frame.loc[rows, "ratio_rule_unavailable"].astype(bool)
+        between = (values[rows] > strict) & (values[rows] <= permissive)
+        frame.loc[rows, "exceedance_scorable"] = ~(blind & between.fillna(False))
     return frame
 
 
@@ -250,6 +270,9 @@ def fit_site_analyte(group, site, analyte, thresholds, strict=True):
         limits = pd.Series(value, index=group.index, dtype="float64")
     measured = pd.to_numeric(group["value"], errors="coerce")
     scoreable = limits.notna()
+    if "exceedance_scorable" in group.columns:
+        # A label that depends on a ratio nobody measured is not a negative.
+        scoreable = scoreable & group["exceedance_scorable"].fillna(True).astype(bool)
     exceeds = (measured > limits).where(scoreable)
     if not scoreable.any():
         exceeds = pd.Series(np.nan, index=group.index)
@@ -260,6 +283,9 @@ def fit_site_analyte(group, site, analyte, thresholds, strict=True):
     n_no_ratio = int(group.get("ratio_rule_unavailable",
                                pd.Series(False, index=group.index))
                      .fillna(False).astype(bool).sum())
+    n_ambiguous = int((~group.get("exceedance_scorable",
+                                  pd.Series(True, index=group.index))
+                       .fillna(True).astype(bool)).sum())
 
     rows = []
     for predictor in config.PREDICTORS:
@@ -318,6 +344,7 @@ def fit_site_analyte(group, site, analyte, thresholds, strict=True):
             "exceedance_reason": reason,
             "n_ratio_rule_applied": n_strict,
             "n_ratio_unavailable": n_no_ratio,
+            "n_exceedance_ambiguous": n_ambiguous,
         })
     return rows
 
