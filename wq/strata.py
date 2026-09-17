@@ -128,6 +128,92 @@ def tidal_range(sites, datums):
             pd.Series(gauges, index=sites.index, dtype="object"))
 
 
+# Two stations 50 metres apart on one beach, sampled by one agency on the same
+# mornings, are not two beaches. This is the radius at which they are called
+# one site cluster, and it is the same 150 m wq/clean.py already uses to decide
+# that two station records describe the same place.
+#
+# NOT in config.SPEC_KEYS, and deliberately so: the cluster is a LABEL. It
+# changes no coefficient, excludes no pair, and is not the unit D2 shuffles --
+# that unit is the station, as registered. The day the shuffle moves to the
+# cluster, this radius starts deciding p-values and belongs in the
+# pre-registered block with a re-registration to match.
+SITE_CLUSTER_RADIUS_KM = 0.15
+
+
+def site_clusters(sites, radius_km=SITE_CLUSTER_RADIUS_KM):
+    """Group stations that are the same stretch of beach. (labels, sizes).
+
+    The study counts stations, and a station is not an independent beach. The
+    five-state pass had sixteen NJDEP stations strung along two kilometres of
+    Atlantic City shoreline; California has twenty-two CABEACH_WQX stations
+    inside 472 metres at Cowell Beach, and Connecticut reports three separate
+    identifiers all named SILVER SANDS STATE PARK BEACH. Every one of those
+    counts once in D1's n_sites and gets its own draw in D2's shuffle.
+
+    What this is NOT is a duplicate detector. That was the first guess and the
+    data refused it: co-located same-organization pairs agree on a median 20%
+    of their (date, analyte, value) readings, against 1.7% for far-apart pairs
+    of the same organization -- far above chance, but nowhere near the
+    same-record agreement that wq.clean.dedupe_across_sources drops on. The
+    agreement is high because bacteria counts are read off discretised MPN
+    tables and neighbouring points share their weather, not because the rows
+    are copies. Dropping them would delete real samples. So nothing is
+    dropped; the non-independence is labelled instead.
+
+    Single linkage, because "the same beach" is a chain rather than a ball --
+    a row of sampling points along a shoreline is one beach even when its ends
+    are further apart than the radius. At 150 m that stays honest: the largest
+    cluster spans 472 m. At 500 m it chains two thousand stations together and
+    stops meaning anything.
+
+    The label is the lexicographically smallest station_id in the cluster, so
+    it is stable across runs and readable in a table.
+    """
+    if sites is None or sites.empty:
+        return (pd.Series(dtype="object"), pd.Series(dtype="int64"))
+    frame = sites.reset_index(drop=True)
+    lat = pd.to_numeric(frame.get("lat"), errors="coerce").to_numpy()
+    lon = pd.to_numeric(frame.get("lon"), errors="coerce").to_numpy()
+    ids = frame["station_id"].astype(str).to_numpy()
+    parent = list(range(len(frame)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(len(frame)):
+        if not (np.isfinite(lat[i]) and np.isfinite(lon[i])):
+            continue
+        distance = _haversine_km(lat[i], lon[i], lat[i + 1:], lon[i + 1:])
+        for offset in np.flatnonzero(distance <= radius_km):
+            a, b = find(i), find(i + 1 + int(offset))
+            if a != b:
+                parent[a] = b
+
+    groups = {}
+    for index in range(len(frame)):
+        groups.setdefault(find(index), []).append(index)
+    labels = np.empty(len(frame), dtype=object)
+    sizes = np.zeros(len(frame), dtype=int)
+    for members in groups.values():
+        name = min(ids[m] for m in members)
+        for m in members:
+            labels[m] = name
+            sizes[m] = len(members)
+    # A station with no coordinate is its own cluster: it cannot be shown to
+    # share a beach with anything, and lumping the unlocatable together would
+    # invent a beach that is not there.
+    for index in range(len(frame)):
+        if not (np.isfinite(lat[index]) and np.isfinite(lon[index])):
+            labels[index] = ids[index]
+            sizes[index] = 1
+    return (pd.Series(labels, index=sites.index),
+            pd.Series(sizes, index=sites.index))
+
+
 def load_overrides(path=None):
     """Hand-corrected values for anything except beach_type.
 
@@ -184,6 +270,13 @@ def assign(sites, datums=None, reviewed=None, spatial=None):
               "be dropped for coverage. Run: python -m wq.review --worklist")
 
     out["tidal_range_m"], out["datum_gauge"] = tidal_range(out, datums)
+
+    out["site_cluster"], out["site_cluster_n"] = site_clusters(out)
+    clustered = int((out["site_cluster_n"] > 1).sum())
+    n_clusters = int(out["site_cluster"].nunique())
+    print(f"  site_cluster: {len(out)} stations are {n_clusters} distinct "
+          f"beach(es) at {SITE_CLUSTER_RADIUS_KM * 1000:.0f} m; "
+          f"{clustered} station(s) share one with a neighbour")
 
     if spatial is not None and not spatial.empty:
         keep = [c for c in spatial.columns if c != "station_id"

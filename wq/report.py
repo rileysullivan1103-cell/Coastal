@@ -127,6 +127,53 @@ def usable_predictors(coefficients, floor=None):
     return best
 
 
+def report_site_clusters(coefficients, sites):
+    """How many independent beaches the fitted stations actually are.
+
+    D1 counts stations. A station is not a beach: California has 22
+    CABEACH_WQX identifiers inside 472 m at Cowell Beach, New Jersey has
+    sixteen NJDEP stations along two kilometres of Atlantic City, and
+    Connecticut reports three different identifiers all named SILVER SANDS
+    STATE PARK BEACH. Each of those counts once in every n_sites below and
+    gets its own draw in D2's shuffle.
+
+    This does not change any number. It prints the denominator D1 is missing,
+    which is the honest way to report it: the shuffle unit is the station, as
+    registered, and moving it to the cluster would be a different test needing
+    a different registration.
+    """
+    if sites is None or "site_cluster" not in sites.columns:
+        return None
+    fitted = set(coefficients["station_id"].astype(str))
+    here = sites[sites["station_id"].astype(str).isin(fitted)]
+    if here.empty:
+        return None
+    stations = len(here)
+    clusters = int(here["site_cluster"].nunique())
+    shared = int((pd.to_numeric(here["site_cluster_n"], errors="coerce")
+                  .fillna(1) > 1).sum())
+    print("\nhow many independent beaches these stations are:")
+    print(f"  fitted stations                 {stations:,}")
+    print(f"  distinct site clusters          {clusters:,}")
+    print(f"  stations sharing one with a neighbour  {shared:,} "
+          f"({shared / stations:.1%})")
+    if clusters < stations:
+        print(f"  n_sites below overstates independent beaches by "
+              f"{stations - clusters:,} ({1 - clusters / stations:.1%}).")
+    sizes = here.groupby("site_cluster").size().sort_values(ascending=False)
+    big = sizes[sizes > 1]
+    if not big.empty:
+        print(f"  largest cluster holds {int(big.iloc[0])} stations; "
+              f"{len(big)} cluster(s) hold more than one")
+        print("  These are NOT duplicate records — co-located stations agree "
+              "on a median\n  20% of their readings against 1.7% for distant "
+              "pairs of the same agency,\n  which is discretised MPN values "
+              "and shared weather, not copied rows.\n  Nothing is dropped. "
+              "They are simply not independent draws, and D2's\n  shuffle "
+              "treats them as if they were.")
+    return sizes
+
+
 def report_distributions(coefficients, column="rho_ctrl"):
     """D1. Every analyte/predictor pair, as a distribution across sites."""
     print("\n" + "=" * 78)
@@ -612,7 +659,8 @@ def per_site_table(coefficients, sites, nondetects, strata, column="rho_ctrl"):
     separation.columns = [f"auc_{c}" for c in separation.columns]
 
     table = wide.join(counts).join(separation).reset_index()
-    keep = ["station_id", "station_name", "state", "region"] + \
+    keep = ["station_id", "station_name", "state", "region",
+            "site_cluster", "site_cluster_n"] + \
            [s for s in strata if s not in ("region",)] + \
            ["shore_normal_source", "tide_station", "join_resolution"]
     columns = [c for c in keep if c in sites.columns or c == "station_id"]
@@ -800,6 +848,7 @@ def run(coefficients, sites, attrition, nondetects, strata, out_dir=None,
             print(f"\n  headline distribution excludes {len(coefficients) - len(headline)}"
                   f" coefficient rows from non-detect-flagged pairs")
 
+    report_site_clusters(headline, sites)
     table = report_distributions(headline)
     strata_table = report_by_stratum(headline, sites, strata,
                                      exploratory=exploratory)

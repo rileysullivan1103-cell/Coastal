@@ -439,6 +439,42 @@ def test_flat_series_is_detected_without_a_qualifier():
           "it describes a pair, it does not exclude one")
 
 
+def test_site_clusters_label_a_beach_without_deleting_it():
+    """Two stations 50 m apart on one beach are not two beaches. They are also
+    not duplicate records -- the data refused that reading -- so the cluster is
+    a label and nothing is dropped."""
+    print("\n[site clusters]")
+    sites = pd.DataFrame([
+        # one beach: three points strung 120 m apart, so single linkage joins
+        # the ends even though they are 240 m apart.
+        {"station_id": "B-2", "lat": 36.9620, "lon": -122.0230},
+        {"station_id": "B-1", "lat": 36.9620, "lon": -122.0216},
+        {"station_id": "B-3", "lat": 36.9620, "lon": -122.0244},
+        # a different beach, 3 km away
+        {"station_id": "C-1", "lat": 36.9880, "lon": -122.0230},
+        # no coordinate at all
+        {"station_id": "D-1", "lat": np.nan, "lon": np.nan},
+    ])
+    labels, sizes = strata.site_clusters(sites)
+    by_id = dict(zip(sites["station_id"], labels))
+    check("co-located stations share a cluster",
+          by_id["B-1"] == by_id["B-2"] == by_id["B-3"], by_id["B-1"])
+    check("single linkage joins the ends of a chain",
+          int(sizes.iloc[0]) == 3, f"{int(sizes.iloc[0])} stations")
+    check("a distant station is its own cluster",
+          by_id["C-1"] != by_id["B-1"])
+    check("the label is the smallest station_id in the cluster",
+          by_id["B-1"] == "B-1")
+    check("a station with no coordinate is its own cluster",
+          by_id["D-1"] == "D-1",
+          "lumping the unlocatable together would invent a beach")
+    check("nothing is dropped — one label per input row",
+          len(labels) == len(sites))
+    check("the cluster radius is not part of the frozen specification",
+          "SITE_CLUSTER_RADIUS_KM" not in config.SPEC_KEYS,
+          "it labels a station, it does not shuffle one")
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -454,7 +490,8 @@ def main():
                  test_coverage_rule_drops_before_fitting,
                  test_manifest_guard_catches_a_moved_goalpost,
                  test_thresholds_file_is_readable_and_cited,
-                 test_flat_series_is_detected_without_a_qualifier):
+                 test_flat_series_is_detected_without_a_qualifier,
+                 test_site_clusters_label_a_beach_without_deleting_it):
         test()
     print()
     if FAILURES:
