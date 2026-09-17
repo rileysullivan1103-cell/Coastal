@@ -342,8 +342,75 @@ def stage_covariates(args):
     joined, meta = covariates.build(wanted, samples, coops, overrides)
     if joined.empty:
         sys.exit("no site produced covariates")
+    _guard_degraded_covariates(joined, meta, args)
     _write(joined, JOINED)
     _write(meta, COVARIATE_META)
+
+
+def _guard_degraded_covariates(joined, meta, args):
+    """Refuse to replace a good covariate file with a worse one.
+
+    covariates.run()'s docstring states the problem plainly: a run that hits
+    the Open-Meteo daily quota at site 600 writes exactly the same tables as a
+    run that got everything. Every site after the breaker trips is built with
+    no rain, no wind and no waves; the coverage rule drops those covariates;
+    and the only record that anything went wrong is a line of scrollback.
+
+    Two independent signals, because either can happen without the other:
+    a host given up on mid-run, and covariate coverage going BACKWARDS on the
+    stations the previous file already held. The second is the one that
+    matters -- it is measured from the data rather than inferred from the
+    breaker -- and it is restricted to shared stations so that adding a state
+    does not look like a regression.
+
+    Nothing is deleted. The new frame is written beside the old one with a
+    .degraded suffix so it can be inspected, and the canonical file is left
+    exactly as it was.
+    """
+    tripped = covariates.unavailable_sources()
+    previous = None
+    path = _path(JOINED)
+    if os.path.exists(path):
+        previous = pd.read_csv(path, low_memory=False)
+    lost = covariates.regression_against(joined, previous)
+
+    if tripped:
+        print(f"\n  {len(tripped)} source(s) were given up on during this run:")
+        for host, reason in sorted(tripped.items()):
+            print(f"    {host}: {reason}")
+    if lost.empty:
+        if tripped:
+            print("  Coverage on the stations the previous file already held "
+                  "did NOT go\n  backwards, so the run is kept. Read the "
+                  "per-site source table for what\n  those hosts cost the "
+                  "NEW stations.")
+        return
+
+    print("\n" + "!" * 78)
+    print("COVARIATE COVERAGE WENT BACKWARDS — NOT WRITING")
+    print("!" * 78)
+    print("  On stations the previous covariate file already held, this run "
+          "produced\n  fewer values than that file did. Those stations' grid "
+          "cells are cached, so\n  a healthy re-run reproduces them exactly. "
+          "This is this run losing something\n  it already had — a spent "
+          "quota, a service that went down, or a pull that\n  stopped early.")
+    print()
+    print(lost.to_string(index=False))
+    degraded = path.replace(".csv", ".degraded.csv")
+    joined.to_csv(degraded, index=False)
+    print(f"\n  wrote the degraded frame to {degraded} for inspection")
+    print(f"  LEFT ALONE: {path}")
+    if getattr(args, "allow_degraded_covariates", False):
+        print("\n  --allow-degraded-covariates was given, so it is written "
+              "anyway and this\n  is on the record as a choice.")
+        return
+    sys.exit(
+        "\nStopping. The cached cells mean a re-run costs only what is "
+        "missing:\n"
+        "    python -m wq.cell_budget          # how many cells are still to buy\n"
+        "    python -m wq.run_wq --covariates  # resumes; cached cells are free\n"
+        "If the loss is real and expected, say so with "
+        "--allow-degraded-covariates.")
 
 
 def stage_fit(args):
@@ -444,6 +511,10 @@ def main():
                              "here' answers so they are asked again. For after "
                              "a run that was rate-limited: a refusal cached as "
                              "an absence never expires on its own.")
+    parser.add_argument("--allow-degraded-covariates", action="store_true",
+                        help="write the covariate file even when coverage "
+                             "went backwards against the previous one. For "
+                             "when the loss is real and expected.")
     parser.add_argument("--no-datums", action="store_true",
                         help="skip the CO-OPS datums pull (tidal_range_m is "
                              "then dropped by the coverage rule)")

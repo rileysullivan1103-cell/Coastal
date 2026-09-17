@@ -686,6 +686,52 @@ def test_a_cache_from_an_older_schema_is_not_an_answer():
         spatial.CACHE_DIR = kept
 
 
+def test_a_spent_quota_cannot_overwrite_a_good_covariate_file():
+    """The failure covariates.run()'s own docstring names: a run that hits the
+    daily quota at site 600 writes exactly the same tables as one that got
+    everything. Coverage on stations the previous file ALREADY held is the
+    evidence -- their cells are cached, so a healthy re-run reproduces them."""
+    print("\n[degraded covariates]")
+
+    def frame(stations, rain_share=1.0):
+        rows = []
+        for station in stations:
+            for i in range(10):
+                rows.append({
+                    "station_id": station,
+                    "rain_24h_mm": 1.0 if i < 10 * rain_share else np.nan,
+                    "wind_onshore_ms": 2.0,
+                })
+        return pd.DataFrame(rows)
+
+    old = frame(["A", "B"], rain_share=1.0)
+
+    healthy = frame(["A", "B"], rain_share=1.0)
+    check("an identical re-run is not a regression",
+          covariates.regression_against(healthy, old).empty)
+
+    starved = frame(["A", "B"], rain_share=0.3)
+    lost = covariates.regression_against(starved, old)
+    check("losing rain on stations the old file had IS a regression",
+          not lost.empty and "rain_24h_mm" in set(lost["predictor"]),
+          f"lost {float(lost['lost'].iloc[0]):.2f} coverage" if not lost.empty
+          else "nothing flagged")
+    check("a predictor that did not move is not flagged",
+          lost.empty or "wind_onshore_ms" not in set(lost["predictor"]))
+
+    # The false positive that would make the guard useless: adding a state
+    # whose stations genuinely have thinner coverage must NOT read as a
+    # regression, because the shared stations are untouched.
+    grown = pd.concat([frame(["A", "B"], rain_share=1.0),
+                       frame(["C", "D"], rain_share=0.0)], ignore_index=True)
+    check("adding worse-covered NEW stations is not a regression",
+          covariates.regression_against(grown, old).empty,
+          "the comparison is restricted to shared stations")
+
+    check("no previous file means nothing to regress against",
+          covariates.regression_against(healthy, None).empty)
+
+
 def main():
     for test in (test_grid_cell_sharing,
                  test_a_cached_nothing_can_be_read_back,
@@ -694,6 +740,7 @@ def main():
                  test_a_dead_source_is_given_up_on_and_said_out_loud,
                  test_a_rate_limited_wave_walk_does_not_claim_there_is_no_ocean,
                  test_a_cache_from_an_older_schema_is_not_an_answer,
+                 test_a_spent_quota_cannot_overwrite_a_good_covariate_file,
                  test_an_empty_layer_has_to_say_why,
                  test_shore_normal_priority,
                  test_wind_components,

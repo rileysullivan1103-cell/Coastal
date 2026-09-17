@@ -683,6 +683,63 @@ def build(sites, samples, coops_stations=None, overrides=None, start=None,
     return (pd.concat(joined, ignore_index=True), frame)
 
 
+def predictor_coverage(joined):
+    """Share of rows carrying a value, per predictor. The thing a degraded run
+    loses and a good one does not."""
+    if joined is None or joined.empty:
+        return pd.Series(dtype=float)
+    present = [c for c in config.PREDICTORS if c in joined.columns]
+    return joined[present].notna().mean()
+
+
+def regression_against(joined, previous, tolerance=0.01):
+    """Did this run lose covariate coverage on sites the previous run already had?
+
+    The failure this exists for is named in run()'s own docstring: a run that
+    hits Open-Meteo's daily quota at site 600 writes exactly the same tables as
+    one that got everything. The circuit breaker gives up on the host, every
+    remaining site is built with no rain, no wind and no waves, and the file
+    that lands looks structurally identical to a complete one. The coverage
+    rule then drops those covariates, the manifest records the drop as though
+    it were a fact about the coast, and nothing anywhere says "the quota ran
+    out".
+
+    Comparing overall coverage between the two files would be wrong whenever
+    the site set changes -- adding California legitimately moves every number,
+    because Pacific stations do not have the same gauge and buoy coverage as
+    Northeast ones. So the comparison is restricted to the stations present in
+    BOTH files. Their cells are cached, so a healthy re-run reproduces them
+    exactly; any real drop there is this run losing something it already had.
+
+    Returns a frame with one row per predictor that went backwards, empty when
+    nothing did.
+    """
+    if joined is None or joined.empty or previous is None or previous.empty:
+        return pd.DataFrame()
+    if "station_id" not in joined.columns or "station_id" not in previous.columns:
+        return pd.DataFrame()
+    shared = (set(joined["station_id"].astype(str))
+              & set(previous["station_id"].astype(str)))
+    if not shared:
+        return pd.DataFrame()
+    now = predictor_coverage(
+        joined[joined["station_id"].astype(str).isin(shared)])
+    before = predictor_coverage(
+        previous[previous["station_id"].astype(str).isin(shared)])
+    rows = []
+    for predictor in now.index:
+        if predictor not in before.index:
+            continue
+        drop = float(before[predictor]) - float(now[predictor])
+        if drop > tolerance:
+            rows.append({"predictor": predictor,
+                         "coverage_before": round(float(before[predictor]), 4),
+                         "coverage_now": round(float(now[predictor]), 4),
+                         "lost": round(drop, 4)})
+    return pd.DataFrame(rows).sort_values("lost", ascending=False) \
+        if rows else pd.DataFrame()
+
+
 def _report_refusals(notes):
     """Say, at the end, how much of this run was answered and how much was not.
 
