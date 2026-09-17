@@ -782,6 +782,62 @@ def test_a_quota_trip_inside_a_NEW_region_is_caught():
           set(era5["_missing_stations"]) == set(new_ones),
           ", ".join(era5["_missing_stations"]))
 
+    # A gauge that ANSWERED "no water level here" is an answer about the gauge
+    # network, not a failure of this run. A gauge never ASKED is the quota
+    # case and must still fail. Marine had this rule from the start; tide did
+    # not, and the asymmetry refused a sound build at 87.4%.
+    from wq.covariates import CACHE_DIR, _EMPTY_MARKER
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    dry = os.path.join(CACHE_DIR, "coops_water_level_TESTDRY.csv")
+    wet = os.path.join(CACHE_DIR, "coops_water_level_TESTWET.csv")
+    made = []
+    try:
+        if not os.path.exists(dry):
+            pd.DataFrame(columns=[_EMPTY_MARKER]).to_csv(dry, index=False)
+            made.append(dry)
+        if not os.path.exists(wet):
+            pd.DataFrame({"t": ["2021-01-01"], "level_m": [0.3]}).to_csv(
+                wet, index=False)
+            made.append(wet)
+        check("a gauge that answered 'no data' is dry",
+              covariates._tide_gauge_is_dry("TESTDRY"))
+        check("a gauge with data is not",
+              not covariates._tide_gauge_is_dry("TESTWET"))
+        check("a gauge NEVER ASKED is not dry — it must still fail",
+              not covariates._tide_gauge_is_dry("TESTNEVERFETCHED"),
+              "this is the spent-quota case")
+
+        meta_mixed = pd.DataFrame([
+            {"station_id": "A", "tide_station": "TESTWET"},
+            {"station_id": "B", "tide_station": "TESTDRY"},
+            {"station_id": "C", "tide_station": "TESTNEVERFETCHED"},
+            {"station_id": "D", "tide_station": None},
+        ])
+        four = pd.DataFrame([{"station_id": s, "lat": 34.0, "lon": -119.0,
+                              "state": "CA"} for s in "ABCD"])
+        rows = []
+        for s in "ABCD":
+            rows.append({"station_id": s, "date": "2021-01-01",
+                         "rain_24h_mm": 1.0, "temperature_2m": 2.0,
+                         "wind_onshore_ms": 0.5, "wave_height": 1.0,
+                         "wave_period": 8.0,
+                         "level_m": 0.3 if s == "A" else np.nan,
+                         "rate_m_per_hr": 0.1 if s == "A" else np.nan,
+                         "water_temp_c": np.nan})
+        cov = covariates.source_coverage(pd.DataFrame(rows), four, meta_mixed)
+        tide = cov.set_index("source").loc["tide"]
+        check("the dry gauge's station is not held against the build",
+              "B" not in set(tide["_missing_stations"]),
+              "it answered; there is no tide there")
+        check("the never-fetched gauge's station IS",
+              "C" in set(tide["_missing_stations"]),
+              "nobody asked, so this could be the quota")
+        check("a station with no gauge at all is not eligible either",
+              "D" not in set(tide["_missing_stations"]))
+    finally:
+        for path in made:
+            os.remove(path)
+
     # (b) a legitimate scope addition with full coverage passes
     healthy = frame(old_ones + new_ones, era5=True)
     full = covariates.source_coverage(healthy, sites, meta)

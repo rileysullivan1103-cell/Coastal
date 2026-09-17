@@ -713,6 +713,33 @@ def _marine_cell_is_dry(key):
         return False
 
 
+def _tide_gauge_is_dry(gauge):
+    """True only when CO-OPS has ANSWERED that this gauge has no water level.
+
+    The same polarity as _marine_cell_is_dry, and it has to be, because the
+    first version of this guard applied the rule to marine and not to tide.
+    Six gauges -- Chatham, Long Beach Fire Boat Pier, New Bedford Harbor,
+    Brandywine Shoal Light, Seavey Island, Reedy Point -- are listed as
+    water-level stations and answer "No data was found. This product may not
+    be offered at this station at the requested time." They serve 380 of the
+    3,194 gauged stations, and counting them as failures put the whole build
+    at 87.4% and stopped a fit that had nothing wrong with it.
+
+    A gauge with NO cache file is still eligible, and still fails. That is the
+    case a spent quota produces, and it is the one this guard exists to catch.
+    """
+    if not gauge or str(gauge) == "nan":
+        return False
+    path = os.path.join(CACHE_DIR, f"coops_water_level_{gauge}.csv")
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path) as handle:
+            return _EMPTY_MARKER in handle.readline()
+    except OSError:
+        return False
+
+
 def _eligible_stations(rule, stations, sites, meta):
     """Which stations this source is allowed to be judged on."""
     kind = rule.get("eligibility", "all")
@@ -723,7 +750,11 @@ def _eligible_stations(rule, stations, sites, meta):
             return set()
         gauged = meta[meta["tide_station"].notna()
                       & (meta["tide_station"].astype(str) != "")]
-        return set(gauged["station_id"].astype(str)) & set(stations)
+        # A gauge that has answered "no water level here" is an answer about
+        # the gauge network, exactly as an empty marine cell is an answer
+        # about the coast. A gauge never asked is not.
+        alive = gauged[~gauged["tide_station"].map(_tide_gauge_is_dry)]
+        return set(alive["station_id"].astype(str)) & set(stations)
     if kind == "cell_has_water":
         located = sites.set_index(sites["station_id"].astype(str))
         keep = set()

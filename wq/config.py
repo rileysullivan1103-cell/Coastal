@@ -250,10 +250,13 @@ SPEC_KEYS = (
 #               refusal (covariates._EMPTY_MARKER). Stations whose cell is
 #               cached as empty are not eligible and are not counted against
 #               this.
-#   tide        conditional. A station with no CO-OPS gauge within
-#               MAX_TIDE_GAUGE_KM has no tide covariate for a reason that is a
-#               fact about the coast. Only stations WITH an assigned gauge are
-#               eligible.
+#   tide        conditional, on the same polarity as marine. A station with
+#               no CO-OPS gauge within MAX_TIDE_GAUGE_KM is not eligible, and
+#               neither is one whose gauge has ANSWERED that it holds no water
+#               level -- six such gauges serve 380 stations here, and counting
+#               them as failures put a sound build at 87.4% and refused a fit
+#               that had nothing wrong with it. A gauge never ASKED is still
+#               eligible and still fails: that is the quota case.
 #   water_temp  not gated at all. Gauges that report water level frequently do
 #               not report temperature; it was populated for 31% of stations
 #               in the Northeast pass and that is the gauge network, not a
