@@ -2022,6 +2022,57 @@ def test_the_agreement_test_is_not_floored_by_a_common_mode_error():
     check("the step threshold keeps its floor",
           g.not_finer_than_the_record(0.5, 387.0) == 387.0)
 
+def test_two_runs_are_compared_on_where_they_lose_the_anchor():
+    """The drift test is a comparison, and eyeballing two tables is how it gets
+    missed.
+
+    If the record walked away from its anchor, the quarters that lose the
+    reference move to the OTHER end of the record when the anchor does. If the
+    same quarters part whichever anchor is used, those frames are simply hard
+    to register and drift is refuted. Both readings are stated outright rather
+    than left to the reader.
+    """
+    import summarize_run as s
+
+    def run(reference, forced, direct):
+        head = ["  peaks are searched within 112 px of no movement"]
+        head += ([f"  REFERENCE FORCED by --reference, not derived.",
+                  f"  using {reference} (cam.jpg)"] if forced else
+                 [f"  reference frame: {reference} (cam.jpg) — of 900 frames"])
+        head += ["  the two routes differ by a median of 75.7 px on the same pair",
+                 "WHERE THE RECORD REGISTERS  (share of frames whose peak beat chance)",
+                 "  quarter   frames   vs reference   vs previous frame"]
+        for period, value in zip(("2023Q3", "2024Q1", "2025Q1", "2026Q3"),
+                                 direct):
+            head.append(f"  {period}        80   {value:>11}%   {96:>16}%")
+        return head
+
+    moved = s.compare(run("2024-08-31", False, (99, 95, 36, 40)),
+                      run("2026-07-19", True, (33, 41, 90, 98)),
+                      ["early", "late"])
+    text = "\n".join(moved)
+    check("a parting that moves with the anchor is called drift",
+          "PARTING MOVED WITH THE ANCHOR" in text, text.splitlines()[-1][:60])
+    check("...and the forced anchor is reported as forced",
+          "(FORCED)" in text and "(derived)" in text)
+
+    stuck = s.compare(run("2024-08-31", False, (99, 95, 36, 40)),
+                      run("2026-07-19", True, (99, 95, 36, 40)),
+                      ["early", "late"])
+    text = "\n".join(stuck)
+    check("a parting that does not move refutes drift",
+          "Drift is refuted" in text, text.splitlines()[-1][:60])
+
+    # Two runs over different frames are not comparable, and saying so beats
+    # lining up quarters that are not the same quarters.
+    short = s.compare(run("2024-08-31", False, (99, 95, 36, 40)),
+                      run("2026-07-19", True, (33, 41)),
+                      ["early", "late"])
+    check("runs over different quarters are refused rather than aligned",
+          "not\n  comparable" in "\n".join(short)
+          or "are not" in " ".join(short) and "comparable" in " ".join(short),
+          " | ".join(short[-2:])[:70])
+
 def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
@@ -2063,7 +2114,8 @@ def main():
                  test_drift_is_told_apart_from_noise_by_its_dates,
                  test_a_pass_built_on_another_is_not_a_second_opinion,
                  test_a_forced_reference_says_what_it_gave_up,
-                 test_the_agreement_test_is_not_floored_by_a_common_mode_error):
+                 test_the_agreement_test_is_not_floored_by_a_common_mode_error,
+                 test_two_runs_are_compared_on_where_they_lose_the_anchor):
         test()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {', '.join(FAILURES)}"))

@@ -2732,8 +2732,14 @@ def main():
     # anything -- not the steps, and not their absence. The first Walton run
     # reported a 0.02 px median offset with 16.6 px of disagreement and then
     # called the record stable, which it had no basis for.
+    # Under --survey `kept` can run to hundreds of cell names, and a line that
+    # long buries the count that is the actual finding. Name them while naming
+    # them is useful; past that, say how many and let the ROI preview show
+    # WHERE, which is the question a survey is asked.
+    named = ", ".join(kept[:12]) + (f", +{len(kept) - 12} more"
+                                    if len(kept) > 12 else "")
     print(f"features kept: {len(kept)} of {len(rois)} candidates "
-          f"({', '.join(kept)})")
+          f"({named or 'none'})")
 
     # The kept features passed a MEDIAN agreement test, which a genuine camera
     # move does not break -- every rigid patch moves together -- but a zoom or

@@ -2,6 +2,7 @@
 
     python3 check_camera_geometry.py ... 2>&1 | tee run.log
     python3 summarize_run.py run.log
+    python3 summarize_run.py --compare one.log two.log
 
 Both tools print their reasoning as well as their numbers, on purpose: a
 number with no argument attached to it is how the first three Walton verdicts
@@ -19,6 +20,134 @@ is worse than no summary.
 
 import re
 import sys
+
+# --- comparing two runs -----------------------------------------------------
+# One run's quality table is a column of numbers. TWO runs' tables, on the same
+# frames with the anchor moved, are the drift test: if the record walked away
+# from its anchor, the quarters that lose the reference should move to the
+# OTHER end when the anchor does. Reading that off two tables by eye is how it
+# gets missed, so it is done here.
+
+DERIVED_REF = re.compile(r"reference frame: (\d{4}-\d{2}-\d{2})")
+FORCED_REF = re.compile(r"using (\d{4}-\d{2}-\d{2}) \(")
+WINDOW = re.compile(r"peaks are searched within (\d+) px")
+GAP = re.compile(r"routes differ by a median of ([\d.]+) px")
+RESOLUTION = re.compile(r"SMALLEST MOVE THIS RECORD CAN RESOLVE: (\S+) px")
+QUARTER = re.compile(r"^\s+(\d{4}Q\d)\s+(\d+)\s+(\d+)%\s+(\d+)%\s*$")
+WITHHELD = re.compile(r"are WITHHELD|THAT RESOLUTION IS")
+NO_GROUP = re.compile(r"No \d+ of (\d+) (?:patches|cells) agree")
+KEPT = re.compile(r"features kept: (\d+) of (\d+)")
+
+# The same threshold check_camera_geometry.py uses, kept here so a comparison
+# can be read without the tool at hand. If they ever disagree, that file wins.
+DRIFT_GAP = 15
+
+
+def read_run(lines):
+    """The few numbers a run has to be compared on."""
+    run = {"quarters": [], "reference": None, "forced": False,
+           "window": None, "gap": None, "resolution": None,
+           "withheld": False, "kept": None}
+    for line in lines:
+        found = FORCED_REF.search(line)
+        if found:
+            run["reference"], run["forced"] = found.group(1), True
+        elif DERIVED_REF.search(line) and not run["forced"]:
+            run["reference"] = DERIVED_REF.search(line).group(1)
+        for key, pattern in (("window", WINDOW), ("gap", GAP),
+                             ("resolution", RESOLUTION)):
+            found = pattern.search(line)
+            if found and run[key] is None:
+                run[key] = found.group(1)
+        if WITHHELD.search(line):
+            run["withheld"] = True
+        found = KEPT.search(line) or NO_GROUP.search(line)
+        if found:
+            run["kept"] = ("0 of " + found.group(1) if NO_GROUP.search(line)
+                           else f"{found.group(1)} of {found.group(2)}")
+        found = QUARTER.match(line)
+        if found:
+            run["quarters"].append((found.group(1), int(found.group(2)),
+                                    int(found.group(3)), int(found.group(4))))
+    return run
+
+
+def compare(first, second, names):
+    """Two runs side by side, and whether the drift moved with the anchor."""
+    runs = [read_run(first), read_run(second)]
+    out = ["TWO RUNS SIDE BY SIDE", ""]
+    for name, run in zip(names, runs):
+        anchor = run["reference"] or "?"
+        out.append(f"  {name}")
+        out.append(f"    anchor {anchor}"
+                   + ("  (FORCED)" if run["forced"] else "  (derived)")
+                   + f"   --max-shift {run['window'] or '?'}")
+        out.append(f"    two-route gap {run['gap'] or '?'} px, "
+                   f"resolution {run['resolution'] or '?'} px, "
+                   f"patches kept {run['kept'] or '?'}"
+                   + ("   EPOCHS WITHHELD" if run["withheld"] else ""))
+    out.append("")
+
+    periods = [q[0] for q in runs[0]["quarters"]]
+    if not periods or [q[0] for q in runs[1]["quarters"]] != periods:
+        out.append("  The two runs do not cover the same quarters, so their "
+                   "tables are not")
+        out.append("  comparable. Run both over the same frames.")
+        return out
+
+    out.append("  WHERE EACH RUN REGISTERS   (vs reference / vs previous "
+               "frame; * = parted)")
+    out.append(f"  quarter   {names[0][:22]:<22}  {names[1][:22]:<22}")
+    drift = ([], [])
+    for (period, _, a_dir, a_seq), (_, _, b_dir, b_seq) in zip(*[r["quarters"]
+                                                                for r in runs]):
+        marks = []
+        for index, (direct, seq) in enumerate(((a_dir, a_seq), (b_dir, b_seq))):
+            parted = seq - direct > DRIFT_GAP
+            if parted:
+                drift[index].append(period)
+            marks.append(f"{direct:>3}% / {seq:>3}%" + (" *" if parted else "  "))
+        out.append(f"  {period:<9} {marks[0]:<22}  {marks[1]:<22}")
+
+    out.append("")
+    if not drift[0] and not drift[1]:
+        out.append("  Neither run loses the anchor anywhere. There is no drift "
+                   "to see at these")
+        out.append("  windows -- which is also what a window wide enough to "
+                   "recapture it looks")
+        out.append("  like, so this is only an answer if the window is tight.")
+        return out
+    for name, parted in zip(names, drift):
+        out.append(f"  {name}: parts at "
+                   + (", ".join(parted) if parted else "nowhere"))
+    if drift[0] and drift[1]:
+        both = set(drift[0]) & set(drift[1])
+        if both == set(drift[0]) == set(drift[1]):
+            out.append("")
+            out.append("  THE SAME QUARTERS PART IN BOTH RUNS. Moving the "
+                       "anchor did not move the")
+            out.append("  parting, so this is NOT the record drifting away "
+                       "from an anchor -- it is")
+            out.append("  those frames being hard to register against "
+                       "anything. Drift is refuted.")
+        elif not both:
+            out.append("")
+            out.append("  THE PARTING MOVED WITH THE ANCHOR, and shares no "
+                       "quarter between the two")
+            out.append("  runs. Each anchor loses the far end of the record "
+                       "and keeps its own")
+            out.append("  neighbourhood, which is what drift looks like and "
+                       "nothing else does.")
+        else:
+            out.append("")
+            out.append(f"  The parting moved but {len(both)} quarter"
+                       f"{'' if len(both) == 1 else 's'} part in BOTH runs "
+                       f"({', '.join(sorted(both))}).")
+            out.append("  Those are hard to register against any anchor; the "
+                       "rest moved with it.")
+            out.append("  Drift in part of the record, unregisterable frames "
+                       "in the rest.")
+    return out
 
 # (pattern, extra lines to carry with it). The extra count exists because both
 # tools wrap a single print across several lines, and the number is often on
@@ -223,6 +352,15 @@ def summarize(lines):
 
 
 def main():
+    if len(sys.argv) > 3 and sys.argv[1] == "--compare":
+        runs = []
+        for path in sys.argv[2:4]:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                runs.append(handle.read().splitlines())
+        out = compare(runs[0], runs[1], [p.rsplit("/", 1)[-1]
+                                         for p in sys.argv[2:4]])
+        print("\n".join(out))
+        return
     if len(sys.argv) > 1 and sys.argv[1] not in ("-", "--help", "-h"):
         with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
             lines = handle.read().splitlines()
