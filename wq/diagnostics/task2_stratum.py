@@ -116,11 +116,16 @@ def small_level_stations(merged, sites, stratum=STRATUM):
     small = [level for level, count in sizes.items() if count < SMALL * 5]
     roster = (merged[merged[stratum].isin(small)][["station_id", stratum]]
               .drop_duplicates())
+    # The stratum itself is already on `roster`. Taking it from `sites` too
+    # makes the merge produce <stratum>_x and <stratum>_y, and every later
+    # reference to it raises KeyError -- which is exactly what happened the
+    # first time this ran on `region`, because region is in the list below and
+    # outfall_type never was.
     columns = [c for c in ("station_id", "station_name", "organization",
                            "state", "region", "lat", "lon", "outfall_permit",
                            "dist_to_outfall_m", "n_outfalls_within_2km",
                            "tide_station", "datum_gauge")
-               if c in sites.columns]
+               if c in sites.columns and c != stratum]
     detail = roster.merge(sites[columns], on="station_id", how="left")
     fitted = (merged.groupby("station_id")["analyte"].nunique()
               .rename("analytes_fitted").reset_index())
