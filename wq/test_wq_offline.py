@@ -28,7 +28,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from wq import clean, config, holdout, manifest, pull, review, strata  # noqa: E402
+from wq import clean, config, holdout, manifest, pull, review, scope, strata  # noqa: E402
 
 FAILURES = []
 
@@ -614,6 +614,55 @@ def test_the_report_does_not_spend_the_holdout_describing_it():
             holdout.HOLDOUT_PATH = original
 
 
+def test_study_scope_separates_beaches_from_growing_areas():
+    """The product is about beaches. Its largest analyte was not a beach
+    measurement: no BEACH Act station in the study reports fecal coliform, and
+    the fecal pairs are NSSP growing-area monitoring. The label has to say
+    which of its two halves is sourced and which is inferred."""
+    print("\n[study scope]")
+    sites = pd.DataFrame([
+        {"station_id": "B1", "site_type": "BEACH Program Site-Ocean",
+         "site_cluster": "B1", "organization": "o", "state": "CA"},
+        # co-located with B1 at 150 m: a CEDEN identifier for the same sand
+        {"station_id": "C1", "site_type": "Ocean", "site_cluster": "B1",
+         "organization": "CEDEN", "state": "CA"},
+        {"station_id": "S1", "site_type": "Estuary", "site_cluster": "S1",
+         "organization": "NJDEP_BMWM", "state": "NJ"},
+        {"station_id": "U1", "site_type": "Estuary", "site_cluster": "U1",
+         "organization": "USGS", "state": "CT"},
+    ])
+    samples = pd.DataFrame(
+        [{"station_id": "S1", "analyte": "FECAL"}] * 40
+        + [{"station_id": "U1", "analyte": "ECOLI"}] * 40
+        + [{"station_id": "B1", "analyte": "ENT"}] * 40)
+    table = scope.classify(sites, samples).set_index("station_id")
+
+    check("a BEACH Act location type is a beach, and it is SOURCED",
+          table.loc["B1", "study_scope"] == "beach"
+          and table.loc["B1", "scope_basis"].startswith("SOURCED"))
+    check("a station sharing its cluster is a beach too, also sourced",
+          table.loc["C1", "study_scope"] == "beach"
+          and "site_cluster" in table.loc["C1", "scope_basis"],
+          "this is what catches CEDEN's duplicate identifiers")
+    check("a non-beach reporting fecal coliform is shellfish, INFERRED",
+          table.loc["S1", "study_scope"] == "shellfish"
+          and table.loc["S1", "scope_basis"].startswith("INFERRED"),
+          "fecal coliform is the NSSP indicator, enterococcus the BEACH Act one")
+    check("everything else is unclassified, not quietly folded in",
+          table.loc["U1", "study_scope"] == "unclassified")
+    check("nothing is dropped", len(table) == len(sites))
+    check("the inferred label is never presented as sourced",
+          all(b.startswith("SOURCED") or b.startswith("INFERRED")
+              or b.startswith("neither") for b in table["scope_basis"]))
+
+    committed = scope.read()
+    if not committed.empty:
+        counts = committed["study_scope"].value_counts().to_dict()
+        check("the committed split is on disk and non-trivial",
+              counts.get("beach", 0) > 0 and counts.get("shellfish", 0) > 0,
+              str(counts))
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -633,7 +682,8 @@ def main():
                  test_site_clusters_label_a_beach_without_deleting_it,
                  test_the_holdout_is_drawn_before_anything_is_fitted,
                  test_the_review_directory_does_not_shadow_the_review_module,
-                 test_the_report_does_not_spend_the_holdout_describing_it):
+                 test_the_report_does_not_spend_the_holdout_describing_it,
+                 test_study_scope_separates_beaches_from_growing_areas):
         test()
     print()
     if FAILURES:

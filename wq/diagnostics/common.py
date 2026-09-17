@@ -35,9 +35,25 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 
-from wq import config, holdout  # noqa: E402
+from wq import config, holdout, scope as study_scope  # noqa: E402
 
 OUT_DIR = os.path.join(config.OUT_DIR, "diagnostics")
+# Set by --scope. A scoped run writes to its own tree so a beach-only number
+# can never overwrite, or be mistaken for, the pooled one.
+_SCOPE = "all"
+
+
+def set_scope(name):
+    """Point the outputs at this scope's tree. Returns the directory."""
+    global OUT_DIR, _SCOPE
+    _SCOPE = name or "all"
+    OUT_DIR = (os.path.join(config.OUT_DIR, "diagnostics") if _SCOPE == "all"
+               else os.path.join(config.OUT_DIR, f"{_SCOPE}_only"))
+    return OUT_DIR
+
+
+def current_scope():
+    return _SCOPE
 RAIN = ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm"]
 
 
@@ -149,6 +165,13 @@ def diagnostic_parser(description):
         help="KEEP the held-out clusters and the held-out months. Only valid "
              "as a deliberate one-shot evaluation; the default drops them.")
     parser.add_argument(
+        "--scope", default="all",
+        choices=["all", "beach", "shellfish", "unclassified"],
+        help="restrict to one study population. 'beach' is the product's "
+             "actual subject; 'shellfish' is NSSP growing-area monitoring, "
+             "which is a real result but a different one. Scoped runs write "
+             "to data/wq/out/<scope>_only/ and never touch the pooled files.")
+    parser.add_argument(
         "--include-hypothesis-sites", action="store_true",
         help="KEEP Santa Cruz Wharf and Carpinteria State Beach in the "
              "summary statistics. They are excluded by default because their "
@@ -216,3 +239,19 @@ def hypothesis_rows(frame):
         return frame.iloc[0:0]
     ids = set(sites["station_id"].astype(str))
     return frame[frame["station_id"].astype(str).isin(ids)]
+
+
+def apply_scope(frame, args, label="rows"):
+    """Restrict to the study population named by --scope, and say so."""
+    name = getattr(args, "scope", "all") or "all"
+    set_scope(name)
+    if name == "all":
+        return frame
+    before = len(frame)
+    out = study_scope.restrict(frame, name)
+    table = study_scope.read()
+    stations = int((table["study_scope"] == name).sum()) if not table.empty else 0
+    print(f"  scope={name}: {len(out):,} of {before:,} {label} "
+          f"({stations:,} stations). Pooled outputs are untouched; this run "
+          f"writes to {OUT_DIR}")
+    return out

@@ -188,6 +188,7 @@ def main():
     print("  hypothesis for Phase 2, not a result of this pass.")
     print("!" * 78)
 
+    coefficients = common.apply_scope(coefficients, args, "coefficient rows")
     coefficients = common.drop_hypothesis_sites(coefficients, args,
                                                 "coefficient rows")
     coefficients = common.drop_held_out(coefficients, args,

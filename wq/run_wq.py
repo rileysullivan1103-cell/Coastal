@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from . import (clean, config, covariates, fit, holdout, layers, manifest,
-               pull, report, review, spatial, strata)
+               pull, report, review, scope as study_scope, spatial, strata)
 
 CAFFEINATE_FLAG = "WQ_CAFFEINATED"
 
@@ -581,6 +581,24 @@ def stage_report(args):
     # coefficient for every station; only the report's view is narrowed, and
     # the attrition table is narrowed with it so its station counts still tie
     # to D1's n_sites.
+    # --scope restricts the population BEFORE anything else, and redirects the
+    # outputs, so a beach-only D1 can never overwrite the pooled one.
+    out_dir = config.OUT_DIR
+    scope_name = getattr(args, "scope", "all") or "all"
+    if scope_name != "all":
+        before_scope = len(coefficients)
+        coefficients = study_scope.restrict(coefficients, scope_name)
+        kept_ids = set(coefficients["station_id"].astype(str))
+        attrition = attrition[attrition["station_id"].astype(str).isin(kept_ids)]
+        out_dir = os.path.join(config.OUT_DIR, f"{scope_name}_only")
+        os.makedirs(out_dir, exist_ok=True)
+        print(f"\n  scope={scope_name}: {len(coefficients):,} of "
+              f"{before_scope:,} coefficient rows. The pooled outputs in "
+              f"{config.OUT_DIR}\n  are NOT touched; this run writes to "
+              f"{out_dir}")
+        if coefficients.empty:
+            sys.exit(f"no coefficients in scope {scope_name}")
+
     evaluate = getattr(args, "evaluate_holdout", False)
     before = len(coefficients)
     coefficients = holdout.drop_holdout(coefficients, evaluate_holdout=evaluate,
@@ -609,7 +627,7 @@ def stage_report(args):
         print(f"  {len(exploratory)} exploratory grouping(s) from a manifest "
               f"amendment: {', '.join(exploratory)}")
     report.run(coefficients, sites, attrition, shares, groupings + exploratory,
-               exploratory=exploratory)
+               out_dir=out_dir, exploratory=exploratory)
 
 
 # Order matters, and this is not the order it was first written in.
@@ -674,6 +692,11 @@ def main():
                              "here' answers so they are asked again. For after "
                              "a run that was rate-limited: a refusal cached as "
                              "an absence never expires on its own.")
+    parser.add_argument("--scope", default="all",
+                        choices=["all", "beach", "shellfish", "unclassified"],
+                        help="restrict --report to one study population. "
+                             "Scoped runs write to data/wq/out/<scope>_only/ "
+                             "and never touch the pooled outputs.")
     parser.add_argument("--evaluate-holdout", action="store_true",
                         help="let --report include the held-out clusters. "
                              "Only valid as a deliberate one-shot evaluation; "

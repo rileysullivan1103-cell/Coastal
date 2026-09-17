@@ -111,6 +111,7 @@ def main():
     print("=" * 78)
     print("TASK 0  RECONCILING coefficients.csv AGAINST D5's TEST COUNT")
     print("=" * 78)
+    coefficients = common.apply_scope(coefficients, args, "coefficient rows")
     coefficients = common.drop_hypothesis_sites(coefficients, args,
                                                 "coefficient rows")
     coefficients = common.drop_held_out(coefficients, args,

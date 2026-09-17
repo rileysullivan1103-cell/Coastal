@@ -167,6 +167,7 @@ def main():
     # The two guards, in this order. The hypothesis beaches come out because
     # they generated the hypothesis; the held-out clusters come out because a
     # number computed over them stops being held out.
+    every = common.apply_scope(every, args, "rain coefficient rows")
     rain = common.drop_hypothesis_sites(every, args, "rain coefficient rows")
     rain = common.drop_held_out(rain, args, label="rain coefficient rows")
 

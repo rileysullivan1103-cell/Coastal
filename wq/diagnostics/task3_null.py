@@ -210,6 +210,7 @@ def main():
     args = parser.parse_args()
 
     coefficients = common.load_coefficients()
+    coefficients = common.apply_scope(coefficients, args, "coefficient rows")
     coefficients = common.drop_hypothesis_sites(coefficients, args,
                                                 "coefficient rows")
     coefficients = common.drop_held_out(coefficients, args,
