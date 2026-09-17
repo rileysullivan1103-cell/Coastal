@@ -99,6 +99,32 @@ three times the measured error, so a step that clears it is three sigma on
 this record's own terms. If the record registers poorly, the derivation
 raises the threshold on its own and the run reports that it did.
 
+### CORRECTION, written after the run
+
+The paragraph above was true of the **coarse** route and of nothing else, and
+I did not check before asserting it. `--step-px` also set the patch-candidate
+agreement tolerance, the patch-route step threshold and the per-date
+trustworthiness test, none of which were floored by the derived resolution.
+So 0.5 did get out of the way in the route I was reasoning about, and in the
+same breath demanded that twelve patches on a 2560x1920 frame agree with each
+other to half a pixel over 336 dates.
+
+The run duly printed
+
+    agreement between candidates (median px apart over the record, threshold 0)
+    No 3 of 8 patches agree with each other to within 0 px.
+
+That is not a finding about Walton. It is the flag, and the `threshold 0` is
+0.5 rounded for display, which hid it further. **The patch cross-check from
+that run says nothing and should not be read.**
+
+The tool now has `--agree-px` for the tolerance (default 3.0, which is what
+`check_geometry_strict.py` already used), every threshold runs through one
+`not_finer_than_the_record` helper so the measured resolution can raise any of
+them, and sub-pixel values no longer print as `0`. Re-run with the command at
+the foot of this note; `--step-px 0.5` is still the right choice for the
+reasons given above, and it now only does the thing those reasons are about.
+
 ## Frame margins: `--top-margin 100`
 
 Walton's frames carry a composited banner across the top — roughly 70 px. A
@@ -155,9 +181,21 @@ is the report, not a gap in it.
 
     python3 check_camera_geometry.py \
       --camera walton-lighthouse-santa-cruz-ca \
-      --sample --every 3 --top-margin 100 --step-px 0.5 \
-      --contact-sheet --open
+      --sample --cached --every 3 --top-margin 100 --step-px 0.5 \
+      --max-shift 450 --contact-sheet --open
 
-`--max-shift` and `--min-clarity` are left at their defaults deliberately, per
-the arguments above. Add `--cached` on any re-run to work from the frames
-already on disk.
+`--min-clarity` is left at its default deliberately, per the argument above.
+`--agree-px` is left at its default because 3.0 is a tolerance on measurement
+error and nothing here has measured that error to be different.
+
+`--max-shift` is **no longer** at its default, and the reason is the test the
+section above said to apply. The 150 px run reported 185 of 336 frames with
+their tallest peak outside the window — 55%, not a handful — and its own
+warning said the prior is likely wrong and the epochs provisional. That is the
+prior failing its stated check, so the window is raised and the run repeated.
+450 px is 17.6% of the width and 23.4% of the height: wide enough that a real
+move of the size 55% of the frames are hinting at fits inside it, and still
+short of the far side of the frame.
+
+`--cached` is included because the frames are already on disk from the 150 px
+run; nothing is re-downloaded and the comparison is against the same imagery.

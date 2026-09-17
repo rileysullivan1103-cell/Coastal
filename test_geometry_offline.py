@@ -10,6 +10,8 @@ that matters is arithmetic on arrays, which is testable without a camera.
 
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 
 import numpy as np
@@ -1750,6 +1752,71 @@ def test_epochs_count_stills_not_just_samples():
           epochs[0]["stills"] != epochs[0]["frames"], epochs[0])
 
 
+def test_the_agreement_tolerance_is_not_the_step_threshold():
+    """Asking for a small step must not make the agreement test unpassable.
+
+    These are two different questions wearing one flag. "How big must a shift
+    be before I call it a move" is a threshold on the signal, and pushing it
+    below the record's own resolution is the right thing to do -- the derived
+    floor takes over and the run says so. "How close must two patches track
+    before I believe they are on one rigid body" is a tolerance on measurement
+    ERROR, and pushing THAT down does not make the test stricter. It makes it
+    impossible, and the run then reports "nothing in this frame is rigid" as a
+    finding about the camera when it is a finding about the flag.
+
+    The Walton density run hit exactly this: --step-px 0.5, chosen so the
+    coarse route's measured resolution would bind, also demanded half-pixel
+    agreement from twelve patches over 336 dates and reported that none agreed.
+    """
+    # Four patches on one rigid body, tracking together to within about 2 px
+    # of scatter, plus two patches on nothing.
+    rng = np.random.default_rng(11)
+    dates = pd.date_range("2023-01-01", periods=40, freq="7D")
+    truth_dx = np.linspace(0, 6, len(dates))
+    rows = []
+    for name in ("a", "b", "c", "d"):
+        for date, dx in zip(dates, truth_dx):
+            rows.append({"date": date, "feature": name,
+                         "dx": dx + rng.normal(0, 1.0),
+                         "dy": rng.normal(0, 1.0)})
+    for name in ("x", "y"):
+        for date in dates:
+            rows.append({"date": date, "feature": name,
+                         "dx": rng.normal(0, 40), "dy": rng.normal(0, 40)})
+    frame = pd.DataFrame(rows)
+
+    kept, _, _ = g.agreeing_features(frame, tolerance=0.5)
+    check("a half-pixel tolerance finds no rigid body in a rigid frame",
+          len(kept) == 0, f"kept {kept}")
+
+    kept, rejected, _ = g.agreeing_features(frame, tolerance=g.AGREE_PX)
+    check(f"...and the same frame at the {g.AGREE_PX:.0f} px tolerance "
+          "recovers all four",
+          sorted(kept) == ["a", "b", "c", "d"], f"kept {sorted(kept)}")
+    check("...and the two patches on nothing are still thrown out",
+          sorted(rejected) == ["x", "y"], f"rejected {sorted(rejected)}")
+
+    # The two knobs are separately settable, so a small --step-px can no longer
+    # reach the agreement test at all. The parser is built inside main(), so
+    # the only honest way to ask what flags exist is to ask the CLI.
+    helptext = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "check_camera_geometry.py"), "--help"],
+        capture_output=True, text=True).stdout
+    check("--agree-px exists as its own flag", "--agree-px" in helptext)
+    check("...and it says in the help that it is not a step size",
+          "NOT a step size" in " ".join(helptext.split()))
+
+    # And the floor: a value finer than the record can measure is raised to it,
+    # while a record that could not measure itself leaves the given value alone.
+    check("a tolerance finer than the record is raised to the record",
+          g.not_finer_than_the_record(0.5, 48.0) == 48.0)
+    check("...and one coarser than the record is left alone",
+          g.not_finer_than_the_record(10.0, 4.0) == 10.0)
+    check("...and an unmeasured record cannot raise anything",
+          g.not_finer_than_the_record(3.0, float("nan")) == 3.0)
+
+
 def main():
     for test in (test_phase_shift_recovers_a_known_offset,
                  test_features_are_chosen_on_land,
@@ -1785,7 +1852,8 @@ def main():
                  test_a_large_survey_still_finds_the_rigid_block,
                  test_a_changed_frame_size_is_reported,
                  test_a_different_frame_size_is_dropped_not_cropped,
-                 test_epochs_count_stills_not_just_samples):
+                 test_epochs_count_stills_not_just_samples,
+                 test_the_agreement_tolerance_is_not_the_step_threshold):
         test()
     print("\n" + ("ALL PASS" if not FAILURES
                   else f"{len(FAILURES)} FAILED: {', '.join(FAILURES)}"))

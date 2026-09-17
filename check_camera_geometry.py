@@ -141,6 +141,19 @@ LAND_FRACTION = 0.55
 
 # A shift is only a discontinuity if it is bigger than this and it persists.
 STEP_PX = 3.0
+# How close two patches must track each other before they count as being on the
+# same rigid body. This used to BE --step-px, and that was wrong: the two
+# numbers answer different questions. "How big must a shift be before I call it
+# a move" is a threshold on the signal, and it is right to push it below the
+# record's own resolution and let the derived floor take over. "How close must
+# two measurements of the same camera be before I believe they are measuring
+# one thing" is a tolerance on the ERROR, and pushing it down does not make the
+# test stricter -- it makes it unpassable, because nothing on a 2.5 MP frame
+# agrees to half a pixel across three hundred dates. Sharing one knob meant a
+# --step-px of 0.5, chosen so the coarse route's measured resolution would
+# bind, silently demanded half-pixel agreement from twelve patches and then
+# reported "no patches agree" as if the record had said it.
+AGREE_PX = 3.0
 PERSIST = 3          # samples on each side that must agree
 # Peak-to-sidelobe ratio: how far the correlation peak stands above the rest
 # of its own surface, in standard deviations. NOT the raw peak height, which
@@ -1307,6 +1320,20 @@ def agreeing_features(frame, tolerance=STEP_PX, minimum=MIN_CLUSTER):
     return best, [n for n in names if n not in best], distance_to(best)
 
 
+def not_finer_than_the_record(given, derived):
+    """A threshold or tolerance, never finer than what the record can measure.
+
+    Both the step threshold and the agreement tolerance are asked for on the
+    command line before anything has been measured, and both become nonsense
+    below the record's own resolution -- a step smaller than the error is not a
+    step, and patches cannot agree more closely than either can be read. So a
+    given value is a FLOOR, and the measured resolution raises it. `derived` is
+    NaN when the record could not measure itself, and then the given value is
+    all there is.
+    """
+    return max(given, derived) if np.isfinite(derived) else given
+
+
 def noise_floor(gap):
     """Turn the two-route disagreement into a per-measurement error.
 
@@ -1967,7 +1994,16 @@ def main():
     ap.add_argument("--bottom-margin", type=int, default=0,
                     help="ignore this many pixels at the bottom of the frame")
     ap.add_argument("--step-px", type=float, default=STEP_PX,
-                    help=f"a shift this large counts as a step (default {STEP_PX})")
+                    help=f"a shift this large counts as a step (default "
+                         f"{STEP_PX}). A value below the resolution the record "
+                         f"derives for itself is raised to it, and the run "
+                         f"says so.")
+    ap.add_argument("--agree-px", type=float, default=AGREE_PX,
+                    help=f"how far apart two patches may track and still count "
+                         f"as one rigid body (default {AGREE_PX}). This is a "
+                         f"tolerance on measurement error, NOT a step size; "
+                         f"lowering it does not find more moves, it refuses "
+                         f"more records.")
     args = ap.parse_args()
     global OPEN_IMAGES
     OPEN_IMAGES = args.open_images
@@ -2103,6 +2139,10 @@ def main():
         print(f"    {preview}")
 
     coarse = None
+    # The resolution the record derives for itself, in the coarse pass. It is a
+    # property of the frames, not of the pass, so the patch cross-check below is
+    # floored by it too rather than taking a flag at face value.
+    derived = float("nan")
     if not args.no_coarse:
         print("\n" + "=" * 74)
         print("WHOLE-FRAME REGISTRATION")
@@ -2184,7 +2224,9 @@ def main():
                 # What the gap buys is a precision, not a pass/fail.
                 if np.isfinite(gap):
                     noise, resolution = noise_floor(gap)
-                    threshold = max(args.step_px, resolution)
+                    derived = resolution
+                    threshold = not_finer_than_the_record(args.step_px,
+                                                           resolution)
                     print(f"  two routes over the same pair disagree by "
                           f"sqrt(3) x the error in one")
                     print(f"  measurement, so this record measures a frame to "
@@ -2192,9 +2234,9 @@ def main():
                     print(f"  SMALLEST MOVE THIS RECORD CAN RESOLVE: "
                           f"{resolution:.2g} px (3x that error)")
                     if threshold > args.step_px:
-                        print(f"  the {args.step_px:.0f} px step threshold is "
+                        print(f"  the {args.step_px:.2g} px step threshold is "
                               "below that floor, so steps are")
-                        print(f"  searched at {threshold:.0f} px instead")
+                        print(f"  searched at {threshold:.2g} px instead")
                     steady = float(coarse["offset"].median())
                     if steady > 2.0 * noise:
                         print(f"  the median offset of {steady:.0f} px is "
@@ -2311,10 +2353,20 @@ def main():
     # Which of those candidates were actually on the rigid scene. This is the
     # step that used to be my guess about the frame contents and is now the
     # record's own answer.
-    kept, rejected, distance = agreeing_features(frame, tolerance=args.step_px)
+    # The tolerance is floored by the record's own resolution for the same
+    # reason the step threshold is: two patches cannot be asked to agree more
+    # closely than either of them can be measured. Without the floor, a run
+    # that measures itself to +/-48 px would reject every patch in the frame
+    # for failing a 3 px test and call that a finding.
+    agree = not_finer_than_the_record(args.agree_px, derived)
+    if agree > args.agree_px:
+        print(f"\n  the {args.agree_px:.2g} px agreement tolerance is below "
+              f"the {derived:.2g} px this record\n  can resolve, so patches "
+              f"are required to agree to {agree:.2g} px instead")
+    kept, rejected, distance = agreeing_features(frame, tolerance=agree)
     if 1 < len(rois) <= 20:
         print(f"\nagreement between candidates (median px apart over the "
-              f"record, threshold {args.step_px:.0f})")
+              f"record, threshold {agree:.2g})")
         for roi in rois:
             name = roi["name"]
             apart = distance.get(name)
@@ -2331,7 +2383,7 @@ def main():
                    "compare")
         message = [
             f"\nNo {MIN_CLUSTER} of {len(rois)} patches agree with each other "
-            f"to within {args.step_px:.0f} px.",
+            f"to within {agree:.2g} px.",
             f"The closest any patch comes to the rest is {closest}.",
             "Nothing in the searched part of the frame is behaving like rigid "
             "structure, so",
@@ -2408,7 +2460,8 @@ def main():
     frame.to_csv(csv_path, index=False)
     wrote(csv_path)
     signal = agreeing_signal(frame)
-    steps = find_steps(signal[["dx", "dy"]], threshold=args.step_px)
+    patch_threshold = not_finer_than_the_record(args.step_px, derived)
+    steps = find_steps(signal[["dx", "dy"]], threshold=patch_threshold)
     wrote(plot(frame, signal, steps,
                os.path.join(OUT_DIR, f"geometry_{slug}.png")))
 
@@ -2426,7 +2479,7 @@ def main():
           f"(worst {signal['spread_max'].median():.2f} px)")
 
     # The whole method rests on the patches tracking one rigid scene. When
-    # they disagree by more than the size of the step being looked for, they
+    # they disagree by more than this record can measure a frame to, they
     # are not measuring a common thing and NEITHER answer below is worth
     # anything -- not the steps, and not their absence. The first Walton run
     # reported a 0.02 px median offset with 16.6 px of disagreement and then
@@ -2437,13 +2490,13 @@ def main():
     # The kept features passed a MEDIAN agreement test, which a genuine camera
     # move does not break -- every rigid patch moves together -- but a zoom or
     # a lens change does, because rigid patches then move by different amounts.
-    # So a per-date disagreement above the step threshold still invalidates the
-    # verdict even after the selection.
-    trustworthy = disagreement <= args.step_px
+    # So a per-date disagreement above the agreement tolerance still invalidates
+    # the verdict even after the selection.
+    trustworthy = disagreement <= agree
     if not trustworthy:
         print("\n" + "!" * 74)
         print(f"KEPT FEATURES STILL DISAGREE ({disagreement:.1f} px apart, "
-              f"against a {args.step_px:.0f} px step threshold).")
+              f"against a {agree:.2g} px agreement tolerance).")
         print("They passed the median agreement test and fail it date by date,")
         print("which is what a zoom or a lens change looks like: rigid points")
         print("move together under a pan and apart under a zoom. It is also")
@@ -2455,7 +2508,7 @@ def main():
     if not trustworthy and not steps:
         print("\nNo epoch split can be claimed from the patches — see above.")
     elif not steps:
-        report_record([], signal.index, slug, args.step_px,
+        report_record([], signal.index, slug, patch_threshold,
                       "the agreeing patches")
     elif not trustworthy:
         # Steps found among features that do not agree are steps in the
@@ -2468,7 +2521,7 @@ def main():
         print("describe the disagreement, not the camera. Fix the patches "
               "first.")
     else:
-        report_record(steps, signal.index, slug, args.step_px,
+        report_record(steps, signal.index, slug, patch_threshold,
                       "the agreeing patches")
 
     # The two passes measure the same camera by different means. The answer is

@@ -1547,6 +1547,32 @@ against a difference. Using √3 there would understate the error by 22% and
 promise a resolution the data does not support. The step threshold is three
 times the *worst* of the available estimates, never the kindest.
 
+### A step threshold and an agreement tolerance are not one knob
+
+`check_camera_geometry.py` used `--step-px` for both, and that was wrong in a
+way that only shows up when the flag is pushed down. *How big must a shift be
+before I call it a move* is a threshold on the **signal**, and pushing it below
+the record's own resolution is the right thing to do: the derived floor takes
+over and the run says which number it used. *How close must two patches track
+before I believe they are on one rigid body* is a tolerance on the **error**,
+and pushing that down does not make the test stricter — it makes it
+unpassable, because nothing on a 2.5 MP frame agrees to half a pixel across
+three hundred dates.
+
+The Walton density run hit exactly this. `--step-px 0.5` was chosen so the
+coarse route's measured resolution would bind — which it did, correctly — and
+the same 0.5 silently became the agreement tolerance, the patch-route step
+threshold and the per-date trustworthiness test, none of which are floored by
+anything in that route. The run printed `threshold 0` (0.5 rounded for display)
+and then `No 3 of 8 patches agree with each other to within 0 px`, which reads
+as a finding about the camera and was a finding about the flag.
+
+The tolerance is now `--agree-px`, defaulting to 3.0, which is what
+`check_geometry_strict.py` had already been doing with its own `AGREE_PX`.
+Both knobs run through one helper, `not_finer_than_the_record`, so **every**
+threshold in the tool is a floor the measured resolution can raise, and none of
+them prints a sub-pixel value as `0`.
+
 ### Two things measured here that are easy to get wrong
 
 **Do not difference the survivors.** Dropping weak frames and then calling
@@ -1690,6 +1716,17 @@ night frames are already skipped whole. Two diagnoses before this one were
 picked by reasoning and were both wrong, so the audit now also **prints the
 mean colour of the stubbornly-wet pixels**: the next run names the cause
 instead of the next guess.
+
+**And it reads the number it just printed.** The first version of that
+diagnostic ended on a fixed sentence about shadow, because shadow was the cause
+the one time it was written. It then printed that sentence at Hampton under
+`R-B +43` — the opposite sign — and said "R-B near zero" about a warm,
+sand-coloured patch. A diagnostic that names the same cause whatever it measures
+is the guess it was written to replace. The reading is now branched on the
+measured values: cool and lit is ocean and the mask reaches too far seaward;
+dark with no colour in it is shadow, an overlay bar or a night frame; warm is
+sand being called water only because it is cooler than the rest of the mask on
+those frames, and moving the mask landward there would cut dry land, not sea.
 
 **A fit is not a measurement until it is tight.** The first Sailfish audit fitted
 `y = 0.665 - 0.163x` at scatter 0.006 over 526 of 672 columns — a real shoreline,

@@ -1850,11 +1850,37 @@ def describe_wet(often_wet, colour, row):
         return
     pixels = colour[row][wet]
     red, green, blue = (float(np.median(pixels[:, i])) for i in range(3))
+    span, light = red - blue, max(red, green, blue)
     print(f"    what those pixels ARE, averaged over the record: "
-          f"RGB {red:.0f},{green:.0f},{blue:.0f}\n    (R-B {red - blue:+.0f}, "
-          f"brightest channel {max(red, green, blue):.0f}). Ocean here runs "
-          f"R-B about -40 at\n    ordinary brightness; near-black with R-B "
-          f"near zero is shadow or an overlay bar,\n    not water.")
+          f"RGB {red:.0f},{green:.0f},{blue:.0f}\n    (R-B {span:+.0f}, "
+          f"brightest channel {light:.0f}).")
+
+    # READ THE NUMBERS THAT WERE JUST PRINTED. The first version of this ended
+    # on a fixed sentence about shadow, because shadow was the cause the one
+    # time it was written. It then printed that sentence at Hampton under
+    # R-B +43 -- the opposite sign -- and said "R-B near zero" about a warm
+    # patch. A diagnostic that names the same cause whatever it measures is
+    # the guess it was written to replace.
+    if span <= -20.0 and light >= 60.0:
+        print("    That is COOL and lit: it looks like ocean. The mask reaches "
+              "further seaward\n    than the water actually allows, and the "
+              "edge needs moving landward.")
+    elif light < 60.0 and abs(span) < 15.0:
+        print(f"    That is near-black with almost no colour in it "
+              f"(R-B {span:+.0f}). Nothing that\n    dark can be judged by "
+              f"colour at all, so it reads as water for want of\n    "
+              f"anything else: a shadow, an overlay bar or a night frame, "
+              f"not the sea.")
+    elif span >= 15.0:
+        print("    That is WARM -- sand-coloured, not sea-coloured. It is "
+              "being called water\n    only because it is cooler than the "
+              "rest of the mask on those frames, which\n    is what wet "
+              "sand, a shadowed dune face or a darker band of beach does.\n"
+              "    Moving the mask landward would cut dry land, not sea.")
+    else:
+        print("    That is neither clearly sea-coloured nor clearly dark. "
+              "The discriminator\n    has no strong reading here, and this "
+              "reach is not evidence of an edge.")
 
 
 def draw_mask_preview(path, mask, out_path):
