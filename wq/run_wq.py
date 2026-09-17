@@ -33,8 +33,8 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from . import (clean, config, covariates, fit, layers, manifest, pull,
-               report, review, spatial, strata)
+from . import (clean, config, covariates, fit, holdout, layers, manifest,
+               pull, report, review, spatial, strata)
 
 CAFFEINATE_FLAG = "WQ_CAFFEINATED"
 
@@ -572,6 +572,36 @@ def stage_report(args):
         sites = sites.merge(meta[keep], on="station_id", how="left")
     if coefficients.empty:
         sys.exit("no coefficients to report — the fit produced nothing")
+
+    # D1-D6 describe the DEVELOPMENT set. Computing the pre-registered
+    # distribution over the held-out clusters would spend the holdout on a
+    # description -- once those beaches are in a printed IQR, whatever is
+    # decided next is decided partly on them, and the Phase 2 comparison they
+    # exist for is no longer clean. The fit itself still produces a
+    # coefficient for every station; only the report's view is narrowed, and
+    # the attrition table is narrowed with it so its station counts still tie
+    # to D1's n_sites.
+    evaluate = getattr(args, "evaluate_holdout", False)
+    before = len(coefficients)
+    coefficients = holdout.drop_holdout(coefficients, evaluate_holdout=evaluate,
+                                        quiet=True)
+    held = holdout.read_holdout()
+    if evaluate:
+        print(f"\n  --evaluate-holdout: D1-D6 below INCLUDE the "
+              f"{held['site_cluster'].nunique()} held-out cluster(s).")
+        print("  This is a held-out evaluation and must be reported as one, "
+              "once.")
+    elif len(coefficients) != before:
+        kept = set(coefficients["station_id"].astype(str))
+        attrition = attrition[attrition["station_id"].astype(str).isin(kept)]
+        print(f"\n  holdout: D1-D6 describe the development set — "
+              f"{before - len(coefficients):,} coefficient row(s) from "
+              f"{held['site_cluster'].nunique()} held-out cluster(s) are "
+              f"excluded\n  (seed {holdout.HOLDOUT_SEED}; "
+              "--evaluate-holdout to include them)")
+    if coefficients.empty:
+        sys.exit("every coefficient belongs to a held-out cluster — nothing "
+                 "to report on the development set")
     groupings = manifest.active_strata(payload)
     exploratory = [name for name in manifest.exploratory_covariates()
                    if name in sites.columns and name not in groupings]
@@ -644,6 +674,10 @@ def main():
                              "here' answers so they are asked again. For after "
                              "a run that was rate-limited: a refusal cached as "
                              "an absence never expires on its own.")
+    parser.add_argument("--evaluate-holdout", action="store_true",
+                        help="let --report include the held-out clusters. "
+                             "Only valid as a deliberate one-shot evaluation; "
+                             "the default describes the development set.")
     parser.add_argument("--allow-incomplete-covariates", action="store_true",
                         help="fit even though the covariate build did not "
                              "pass. Requires --why and writes an override "

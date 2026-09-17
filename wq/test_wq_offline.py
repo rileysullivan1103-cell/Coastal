@@ -567,6 +567,53 @@ def test_the_review_directory_does_not_shadow_the_review_module():
               "adding one shadows wq/review.py")
 
 
+def test_the_report_does_not_spend_the_holdout_describing_it():
+    """D1-D6 describe the development set.
+
+    The report used to read coefficients.csv straight off disk, which meant
+    the pre-registered distribution, the D2 permutation test and the D6
+    addressable count would all have been computed over the 617 held-out
+    clusters. Once those beaches are inside a printed IQR, whatever is decided
+    next is decided partly on them and the Phase 2 comparison they exist for
+    is no longer clean.
+    """
+    print("\n[report vs holdout]")
+    source = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "run_wq.py")).read()
+    stage = source[source.index("def stage_report"):]
+    stage = stage[:stage.index("\n# Order matters")]
+    check("stage_report applies the holdout guard",
+          "holdout.drop_holdout" in stage)
+    check("and it can be overridden deliberately",
+          "evaluate_holdout" in stage)
+    check("the attrition table is narrowed with it, so the counts tie",
+          "attrition = attrition[" in stage)
+
+    # coefficients.csv carries station_id and NO date and NO site_cluster, so
+    # the guard has to fall back to station ids and must not let the time
+    # holdout fire on a frame that has no dates in it.
+    frame = pd.DataFrame({"station_id": ["keep-1", "drop-1"],
+                          "analyte": ["ENT", "ENT"], "rho_ctrl": [0.3, 0.4]})
+    held = pd.DataFrame([{"station_id": "drop-1", "site_cluster": "drop-1",
+                          "state": "CA"}])
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "holdout.csv")
+        held.to_csv(path, index=False)
+        original = holdout.HOLDOUT_PATH
+        holdout.HOLDOUT_PATH = path
+        try:
+            kept = holdout.drop_holdout(frame, quiet=True)
+            check("a held-out station is dropped by id when there is no "
+                  "cluster column", list(kept["station_id"]) == ["keep-1"])
+            check("a frame with no date column survives the time holdout",
+                  len(kept) == 1, "the cutoff must not empty a dateless frame")
+            both = holdout.drop_holdout(frame, evaluate_holdout=True,
+                                        quiet=True)
+            check("--evaluate-holdout keeps it", len(both) == 2)
+        finally:
+            holdout.HOLDOUT_PATH = original
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -585,7 +632,8 @@ def main():
                  test_flat_series_is_detected_without_a_qualifier,
                  test_site_clusters_label_a_beach_without_deleting_it,
                  test_the_holdout_is_drawn_before_anything_is_fitted,
-                 test_the_review_directory_does_not_shadow_the_review_module):
+                 test_the_review_directory_does_not_shadow_the_review_module,
+                 test_the_report_does_not_spend_the_holdout_describing_it):
         test()
     print()
     if FAILURES:
