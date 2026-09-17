@@ -732,6 +732,110 @@ def test_a_spent_quota_cannot_overwrite_a_good_covariate_file():
           covariates.regression_against(healthy, None).empty)
 
 
+def test_a_quota_trip_inside_a_NEW_region_is_caught():
+    """The hole the absolute check closes.
+
+    regression_against compares only the stations a previous covariate file
+    already held. The 723 Californian stations were in no previous file, so a
+    quota trip that landed entirely inside California would have passed that
+    check by construction -- every station it could see was untouched.
+    """
+    print("\n[absolute covariate coverage]")
+    import hashlib
+    import json as _json
+    from wq import run_wq
+
+    def frame(stations, era5=True):
+        rows = []
+        for station in stations:
+            for i in range(10):
+                rows.append({
+                    "station_id": station, "date": f"2021-01-{i + 1:02d}",
+                    "rain_24h_mm": 1.0 if era5 else np.nan,
+                    "temperature_2m": 2.0 if era5 else np.nan,
+                    "wind_onshore_ms": 0.5 if era5 else np.nan,
+                    "wave_height": 1.0, "wave_period": 8.0,
+                    "level_m": 0.3, "rate_m_per_hr": 0.1,
+                    "water_temp_c": np.nan,
+                })
+        return pd.DataFrame(rows)
+
+    old_ones, new_ones = ["A", "B"], ["C", "D"]
+    sites = pd.DataFrame([{"station_id": s, "lat": 34.0 + i * 0.5,
+                           "lon": -119.0 - i * 0.5, "state": "CA"}
+                          for i, s in enumerate(old_ones + new_ones)])
+    meta = pd.DataFrame([{"station_id": s, "tide_station": "9410170"}
+                         for s in old_ones + new_ones])
+
+    # (a) quota trip on the NEW stations only
+    starved = pd.concat([frame(old_ones, era5=True),
+                         frame(new_ones, era5=False)], ignore_index=True)
+    previous = frame(old_ones, era5=True)
+    check("the old guard alone sees nothing wrong",
+          covariates.regression_against(starved, previous).empty,
+          "every station it can compare is untouched")
+    coverage = covariates.source_coverage(starved, sites, meta)
+    era5 = coverage.set_index("source").loc["era5"]
+    check("the absolute check catches it", not bool(era5["passed"]),
+          f"{era5['stations_with_data']}/{era5['eligible_stations']} stations")
+    check("and names the stations that went without",
+          set(era5["_missing_stations"]) == set(new_ones),
+          ", ".join(era5["_missing_stations"]))
+
+    # (b) a legitimate scope addition with full coverage passes
+    healthy = frame(old_ones + new_ones, era5=True)
+    full = covariates.source_coverage(healthy, sites, meta)
+    check("a complete build over MORE stations passes",
+          bool(full[full["required"].notna()]["passed"].all()),
+          ", ".join(f"{r['source']}={r['coverage']:.2f}"
+                    for _, r in full[full["required"].notna()].iterrows()))
+    check("an ungated source never fails the build",
+          bool(full.set_index("source").loc["water_temp", "passed"]),
+          "water_temp is recorded, not gated")
+
+    # the canonical file must survive a failing build untouched
+    with tempfile.TemporaryDirectory() as tmp:
+        original_dir = config.DATA_DIR
+        config.DATA_DIR = tmp
+        try:
+            canonical = os.path.join(tmp, run_wq.JOINED)
+            previous.to_csv(canonical, index=False)
+            before = hashlib.sha256(open(canonical, "rb").read()).hexdigest()
+            sites.to_csv(os.path.join(tmp, run_wq.STRATIFIED), index=False)
+
+            class Args:
+                allow_degraded_covariates = False
+            raised = False
+            try:
+                run_wq._guard_degraded_covariates(starved, meta, Args())
+            except SystemExit:
+                raised = True
+            after = hashlib.sha256(open(canonical, "rb").read()).hexdigest()
+            check("the failing build exits non-zero", raised)
+            check("the canonical file is byte-identical", before == after,
+                  before[:16] + "...")
+            check("the degraded frame is written beside it, for inspection",
+                  os.path.exists(canonical.replace(".csv", ".degraded.csv")))
+            status_path = os.path.join(tmp, run_wq.BUILD_STATUS)
+            check("a build status is written", os.path.exists(status_path))
+            if os.path.exists(status_path):
+                status = _json.load(open(status_path))
+                check("and it says FAIL", status["status"] == "FAIL",
+                      "; ".join(status["reasons"])[:70])
+                check("--fit refuses on it",
+                      _fit_refuses(run_wq, Args()))
+        finally:
+            config.DATA_DIR = original_dir
+
+
+def _fit_refuses(run_wq, args):
+    try:
+        run_wq._require_complete_covariates(args)
+    except SystemExit:
+        return True
+    return False
+
+
 def main():
     for test in (test_grid_cell_sharing,
                  test_a_cached_nothing_can_be_read_back,
@@ -741,6 +845,7 @@ def main():
                  test_a_rate_limited_wave_walk_does_not_claim_there_is_no_ocean,
                  test_a_cache_from_an_older_schema_is_not_an_answer,
                  test_a_spent_quota_cannot_overwrite_a_good_covariate_file,
+                 test_a_quota_trip_inside_a_NEW_region_is_caught,
                  test_an_empty_layer_has_to_say_why,
                  test_shore_normal_priority,
                  test_wind_components,

@@ -692,6 +692,136 @@ def predictor_coverage(joined):
     return joined[present].notna().mean()
 
 
+def _marine_cell_is_dry(key):
+    """True only when the cache holds positive evidence of no waves here.
+
+    The polarity matters more than anything else in this file. A cell cached
+    with _EMPTY_MARKER is Open-Meteo saying "there is no wave model output at
+    this point", which is a land cell and a fact about the coast. A cell with
+    NO cache file at all was never fetched -- which is exactly what a spent
+    quota looks like. Treating the second as evidence of dryness would let a
+    quota trip excuse itself from the very check built to catch it, so only
+    the first counts.
+    """
+    path = os.path.join(CACHE_DIR, f"marine_{key}.csv")
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path) as handle:
+            return _EMPTY_MARKER in handle.readline()
+    except OSError:
+        return False
+
+
+def _eligible_stations(rule, stations, sites, meta):
+    """Which stations this source is allowed to be judged on."""
+    kind = rule.get("eligibility", "all")
+    if kind == "all":
+        return set(stations)
+    if kind == "has_tide_gauge":
+        if meta is None or "tide_station" not in meta.columns:
+            return set()
+        gauged = meta[meta["tide_station"].notna()
+                      & (meta["tide_station"].astype(str) != "")]
+        return set(gauged["station_id"].astype(str)) & set(stations)
+    if kind == "cell_has_water":
+        located = sites.set_index(sites["station_id"].astype(str))
+        keep = set()
+        for station in stations:
+            if station not in located.index:
+                continue
+            row = located.loc[station]
+            lat, lon = row.get("lat"), row.get("lon")
+            if pd.isna(lat) or pd.isna(lon):
+                continue
+            if not _marine_cell_is_dry(cell_key(lat, lon)):
+                keep.add(station)
+        return keep
+    return set(stations)
+
+
+def source_coverage(joined, sites, meta=None,
+                    requirements=None):
+    """Per source: eligible stations, how many actually got data, and whether
+    that clears the bar. The ABSOLUTE check.
+
+    regression_against() asks "did this run lose anything it already had",
+    which is silent about stations no previous run held -- and the 723
+    Californian stations were in no previous file, so a quota trip landing
+    entirely inside California passed it by construction. This asks the other
+    question: of the stations in scope NOW, did every source that should have
+    answered actually answer?
+    """
+    requirements = requirements or config.COVARIATE_SOURCE_REQUIREMENTS
+    stations = set(joined["station_id"].astype(str)) if not joined.empty else set()
+    sites = sites.copy()
+    sites["station_id"] = sites["station_id"].astype(str)
+    rows = []
+    for name, rule in requirements.items():
+        eligible = _eligible_stations(rule, stations, sites, meta)
+        columns = [c for c in rule["predictors"] if c in joined.columns]
+        if columns and eligible:
+            present = joined[joined["station_id"].astype(str).isin(eligible)]
+            has_data = present.groupby(present["station_id"].astype(str))[columns] \
+                .apply(lambda block: bool(block.notna().any().any()))
+            covered = set(has_data[has_data].index)
+        else:
+            covered = set()
+        missing = sorted(eligible - covered)
+        threshold = rule.get("min_station_coverage")
+        share = (len(covered) / len(eligible)) if eligible else float("nan")
+        if threshold is None:
+            passed, note = True, "recorded, never gated"
+        elif not eligible:
+            # A gated source with nothing eligible is not a pass. It usually
+            # means the thing that decides eligibility never loaded -- the
+            # CO-OPS station list, say -- and a vacuous pass there would wave
+            # through a run with no tide data at all.
+            passed, note = False, ("no station is eligible, which is itself "
+                                   "suspect for a gated source")
+        else:
+            passed = share >= threshold
+            note = "" if passed else f"below {threshold:.0%}"
+        rows.append({
+            "source": name,
+            "eligibility": rule.get("eligibility", "all"),
+            "eligible_stations": len(eligible),
+            "stations_with_data": len(covered),
+            "stations_missing": len(missing),
+            "coverage": round(share, 4) if eligible else np.nan,
+            "required": threshold,
+            "passed": bool(passed),
+            "note": note,
+            "why": rule.get("why", ""),
+            "_missing_stations": missing,
+        })
+    return pd.DataFrame(rows)
+
+
+def missing_cells(coverage, sites):
+    """The grid cells behind the missing stations, per source. A run that lost
+    a contiguous block of cells lost a region, not a scatter of sites, and the
+    cell list is what says which."""
+    located = sites.copy()
+    located["station_id"] = located["station_id"].astype(str)
+    located = located.set_index("station_id")
+    rows = []
+    for _, entry in coverage.iterrows():
+        cells = {}
+        for station in entry["_missing_stations"]:
+            if station not in located.index:
+                continue
+            row = located.loc[station]
+            if pd.isna(row.get("lat")) or pd.isna(row.get("lon")):
+                continue
+            cells.setdefault(cell_key(row["lat"], row["lon"]), []).append(station)
+        for key, members in sorted(cells.items()):
+            rows.append({"source": entry["source"], "cell": key,
+                         "stations": len(members),
+                         "example_station": members[0]})
+    return pd.DataFrame(rows)
+
+
 def regression_against(joined, previous, tolerance=0.01):
     """Did this run lose covariate coverage on sites the previous run already had?
 

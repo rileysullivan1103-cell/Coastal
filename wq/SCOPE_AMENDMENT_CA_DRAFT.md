@@ -16,6 +16,7 @@ Nothing here was chosen in response to a result.
 | 7 | `outfall_type` retired as a Phase 2 grouping | yes |
 | 8 | `region` tested but reported as **descriptive, confounded** | yes |
 | 9 | D6 headline reported net of flat series and the permutation null; 0.30 primary | yes |
+| 9b | Covariate build must clear per-source coverage: ERA5 99% of all stations, marine 95% of wet cells, tide 95% of gauged stations, water temp ungated | yes |
 | 10 | Holdout = 20% of clusters + last 12 months, seed `20260916` | **NO — redrawing invalidates every comparison** |
 | 11 | Santa Cruz Wharf and Carpinteria excluded from replication statistics | **NO — they are already excluded from the holdout too** |
 
@@ -164,9 +165,6 @@ built to avoid.
 
 ## Still unresolved
 
-* The covariate guard's **absolute coverage check** has no pre-registered
-  threshold to use — see the note in the session report. Needed before
-  `--covariates` runs.
 * `beach_type` is 0 of 3,575 reviewed. It is the one stratum with no automatic
   fallback and plausibly the one that does what `outfall_type` failed to.
 * `_default` fresh ENT (61, EPA 1986), marine FECAL (400, EPA 1976) and marine

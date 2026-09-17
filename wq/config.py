@@ -229,6 +229,66 @@ SPEC_KEYS = (
 # the non-detect machinery cannot see it, so nondetect_fraction reads 0.00 and
 # the pair enters the headline, contributes no coefficient, and then counts
 # against D6 as a beach where prediction did not work.
+# What a covariate build has to achieve before its output may replace the
+# file already on disk. NOT in SPEC_KEYS: these gate whether a BUILD is
+# accepted, and change no coefficient, no pair and no floor. Nothing about the
+# pre-registered analysis moves if they move.
+#
+# They exist because the guard that came first compared coverage only against
+# the stations the previous file already held, and the 723 new Californian
+# stations were in no previous file. A quota trip landing entirely inside
+# California would have passed that check by construction.
+#
+# The asymmetry between the four is the whole design:
+#
+#   era5        unconditional, and nearly total. It is a reanalysis GRID --
+#               every coastal point on earth has a value, so a station with no
+#               ERA5 row did not fail to have weather, it failed to be asked.
+#               A gap here can only be the quota or the service.
+#   marine      conditional. Open-Meteo's wave model has no answer for a land
+#               cell, and the cache records that as an absence rather than a
+#               refusal (covariates._EMPTY_MARKER). Stations whose cell is
+#               cached as empty are not eligible and are not counted against
+#               this.
+#   tide        conditional. A station with no CO-OPS gauge within
+#               MAX_TIDE_GAUGE_KM has no tide covariate for a reason that is a
+#               fact about the coast. Only stations WITH an assigned gauge are
+#               eligible.
+#   water_temp  not gated at all. Gauges that report water level frequently do
+#               not report temperature; it was populated for 31% of stations
+#               in the Northeast pass and that is the gauge network, not a
+#               failure. Recorded in the status file, never a reason to refuse.
+#
+# A source with min_station_coverage None is recorded and never gates.
+COVARIATE_SOURCE_REQUIREMENTS = {
+    "era5": {
+        "predictors": ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm",
+                       "temperature_2m", "wind_onshore_ms",
+                       "wind_alongshore_ms"],
+        "eligibility": "all",
+        "min_station_coverage": 0.99,
+        "why": "a reanalysis grid has a value everywhere; a gap is a refusal",
+    },
+    "marine": {
+        "predictors": ["wave_height", "wave_period"],
+        "eligibility": "cell_has_water",
+        "min_station_coverage": 0.95,
+        "why": "no waves in a land cell is an answer, not a failure",
+    },
+    "tide": {
+        "predictors": ["level_m", "rate_m_per_hr"],
+        "eligibility": "has_tide_gauge",
+        "min_station_coverage": 0.95,
+        "why": "no gauge within MAX_TIDE_GAUGE_KM is a fact about the coast",
+    },
+    "water_temp": {
+        "predictors": ["water_temp_c"],
+        "eligibility": "has_tide_gauge",
+        "min_station_coverage": None,
+        "why": "water-level gauges often do not report temperature",
+    },
+}
+
 FLAT_SERIES_SHARE = 0.90
 
 REQUEST_PAUSE = 0.5

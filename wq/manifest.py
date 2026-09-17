@@ -406,6 +406,45 @@ def amend_scope(states, why, who, sites=None, path=None):
     return entry
 
 
+def record_override(kind, why, detail=None, path=None):
+    """Append an entry saying a guard was overridden, and by what.
+
+    An override that leaves no trace is the same as no guard. --fit refusing
+    to run on an incomplete covariate build can be forced, but forcing it
+    writes this, so a coefficient produced that way is identifiable later from
+    the manifest alone rather than from whoever remembers the evening.
+    """
+    path = path or config.MANIFEST_PATH
+    payload = read(path)
+    if payload is None:
+        sys.exit("no manifest to record an override against")
+    entries = _entries(payload)
+    entry = {
+        "entry": len(entries),
+        "kind": "override",
+        "exploratory": False,
+        "written_at": _now(),
+        "spec_hash": config.spec_hash(),
+        "override": kind,
+        "why": why,
+        "detail": detail or {},
+        "warning": ("A guard was bypassed. Every result produced after this "
+                    "entry was computed on inputs the pipeline had already "
+                    "judged incomplete, and must be reported that way."),
+    }
+    entries.append(entry)
+    with open(path, "w") as handle:
+        json.dump({"manifest_version": MANIFEST_VERSION, "entries": entries},
+                  handle, indent=2)
+    print(f"  recorded override {entry['entry']} in {path}")
+    return entry
+
+
+def overrides(payload=None):
+    payload = payload if payload is not None else read()
+    return [e for e in _entries(payload) if e.get("kind") == "override"]
+
+
 def scope_amendments(payload=None):
     """Every scope change on the record, oldest first."""
     payload = payload if payload is not None else read()

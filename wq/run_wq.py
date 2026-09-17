@@ -29,6 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -347,6 +348,40 @@ def stage_covariates(args):
     _write(meta, COVARIATE_META)
 
 
+BUILD_STATUS = "covariates_build_status.json"
+
+
+def _write_build_status(coverage, lost, passed, reasons):
+    """The record --fit reads. A build that half-happened has to leave a
+    machine-readable trace, because the tables it writes look exactly like a
+    complete run's and scrollback does not survive the night."""
+    payload = {
+        "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "status": "PASS" if passed else "FAIL",
+        "reasons": reasons,
+        "sources": [
+            {k: (None if (isinstance(v, float) and pd.isna(v)) else v)
+             for k, v in row.items() if not k.startswith("_")}
+            for _, row in coverage.iterrows()
+        ],
+        "coverage_regression": [] if lost is None or lost.empty
+        else lost.to_dict("records"),
+    }
+    path = _path(BUILD_STATUS)
+    with open(path, "w") as handle:
+        json.dump(payload, handle, indent=2)
+    print(f"wrote {path}  ({payload['status']})")
+    return payload
+
+
+def read_build_status():
+    path = _path(BUILD_STATUS)
+    if not os.path.exists(path):
+        return None
+    with open(path) as handle:
+        return json.load(handle)
+
+
 def _guard_degraded_covariates(joined, meta, args):
     """Refuse to replace a good covariate file with a worse one.
 
@@ -374,11 +409,55 @@ def _guard_degraded_covariates(joined, meta, args):
         previous = pd.read_csv(path, low_memory=False)
     lost = covariates.regression_against(joined, previous)
 
+    # The absolute check. regression_against only sees stations a previous
+    # file already held; this one judges the stations in scope NOW, which is
+    # the half that California falls in.
+    sites = _read(STRATIFIED, "run --strata first")
+    coverage = covariates.source_coverage(joined, sites, meta)
+    print("\ncovariate coverage, per source:")
+    print(coverage[[c for c in coverage.columns
+                    if not c.startswith("_")]].to_string(index=False))
+    failed = coverage[~coverage["passed"]]
+    reasons = []
+    if not failed.empty:
+        reasons.extend(
+            f"{row['source']}: {row['stations_with_data']}/"
+            f"{row['eligible_stations']} eligible stations have data"
+            + (f" ({row['coverage']:.1%} < {row['required']:.0%})"
+               if pd.notna(row["coverage"]) and row["required"] else "")
+            for _, row in failed.iterrows())
+    if not lost.empty:
+        reasons.extend(f"{row['predictor']}: coverage fell "
+                       f"{row['coverage_before']:.3f} -> {row['coverage_now']:.3f}"
+                       for _, row in lost.iterrows())
+    passed = failed.empty and lost.empty
+    _write_build_status(coverage, lost, passed, reasons)
+
+    if not failed.empty:
+        print("\n" + "!" * 78)
+        print("A REQUIRED COVARIATE SOURCE DID NOT ANSWER — NOT WRITING")
+        print("!" * 78)
+        for _, row in failed.iterrows():
+            print(f"\n  {row['source']}: {row['stations_missing']:,} of "
+                  f"{row['eligible_stations']:,} eligible station(s) have no "
+                  f"value.\n    eligibility: {row['eligibility']} — "
+                  f"{row['why']}")
+            if row["note"]:
+                print(f"    {row['note']}")
+        cells = covariates.missing_cells(failed, sites)
+        if not cells.empty:
+            print(f"\n  the {len(cells)} grid cell(s) behind them:")
+            print(cells.head(40).to_string(index=False))
+            if len(cells) > 40:
+                print(f"    ... and {len(cells) - 40} more")
+        sample = failed.iloc[0]["_missing_stations"][:12]
+        print(f"\n  example missing stations: {', '.join(sample)}")
+
     if tripped:
         print(f"\n  {len(tripped)} source(s) were given up on during this run:")
         for host, reason in sorted(tripped.items()):
             print(f"    {host}: {reason}")
-    if lost.empty:
+    if lost.empty and failed.empty:
         if tripped:
             print("  Coverage on the stations the previous file already held "
                   "did NOT go\n  backwards, so the run is kept. Read the "
@@ -386,16 +465,18 @@ def _guard_degraded_covariates(joined, meta, args):
                   "NEW stations.")
         return
 
-    print("\n" + "!" * 78)
-    print("COVARIATE COVERAGE WENT BACKWARDS — NOT WRITING")
-    print("!" * 78)
-    print("  On stations the previous covariate file already held, this run "
-          "produced\n  fewer values than that file did. Those stations' grid "
-          "cells are cached, so\n  a healthy re-run reproduces them exactly. "
-          "This is this run losing something\n  it already had — a spent "
-          "quota, a service that went down, or a pull that\n  stopped early.")
-    print()
-    print(lost.to_string(index=False))
+    if not lost.empty:
+        print("\n" + "!" * 78)
+        print("COVARIATE COVERAGE WENT BACKWARDS — NOT WRITING")
+        print("!" * 78)
+        print("  On stations the previous covariate file already held, this "
+              "run produced\n  fewer values than that file did. Those "
+              "stations' grid cells are cached, so\n  a healthy re-run "
+              "reproduces them exactly. This is this run losing something\n"
+              "  it already had — a spent quota, a service that went down, or "
+              "a pull that\n  stopped early.")
+        print()
+        print(lost.to_string(index=False))
     degraded = path.replace(".csv", ".degraded.csv")
     joined.to_csv(degraded, index=False)
     print(f"\n  wrote the degraded frame to {degraded} for inspection")
@@ -413,8 +494,60 @@ def _guard_degraded_covariates(joined, meta, args):
         "--allow-degraded-covariates.")
 
 
+def _require_complete_covariates(args):
+    """--fit will not run on a covariate build the pipeline judged incomplete.
+
+    The status file exists because the tables a half-finished build writes are
+    indistinguishable from a complete one's. Refusing here is the last place
+    that difference can still be acted on: once coefficients exist, a missing
+    rain column looks like a coast with no rain.
+    """
+    status = read_build_status()
+    if status is not None and status.get("status") == "PASS":
+        return
+    where = _path(BUILD_STATUS)
+    if status is None:
+        problem = (f"no {BUILD_STATUS} — the covariate stage has not been run "
+                   "since this guard existed")
+        reasons = []
+    else:
+        problem = f"{BUILD_STATUS} says {status.get('status')}"
+        reasons = status.get("reasons", [])
+    if not getattr(args, "allow_incomplete_covariates", False):
+        message = [f"\nRefusing to fit: {problem}.", f"  {where}"]
+        message.extend(f"    - {r}" for r in reasons)
+        message.append(
+            "\nA build that stopped early writes the same tables as one that "
+            "finished, so this\nis the last point at which the difference can "
+            "be acted on. Cached cells make a\nre-run cost only what is "
+            "missing:\n"
+            "    python -m wq.cell_budget\n"
+            "    python -m wq.run_wq --covariates\n"
+            "To fit anyway, on the record:\n"
+            "    python -m wq.run_wq --fit --allow-incomplete-covariates "
+            '--why "..."')
+        sys.exit("\n".join(message))
+    why = getattr(args, "why", None)
+    if not why:
+        sys.exit("--allow-incomplete-covariates requires --why: an override "
+                 "with no reason is indistinguishable from an accident")
+    print("\n" + "!" * 78)
+    print("FITTING ON AN INCOMPLETE COVARIATE BUILD")
+    print(f"  {problem}")
+    for reason in reasons:
+        print(f"    - {reason}")
+    print("  Every coefficient from this run was computed on inputs the")
+    print("  pipeline judged incomplete. Report it that way, or throw it away.")
+    print("!" * 78)
+    manifest.record_override(
+        "fit on incomplete covariates", why,
+        {"status_file": where, "reasons": reasons,
+         "status": None if status is None else status.get("status")})
+
+
 def stage_fit(args):
     print("\n=== FIT ===")
+    _require_complete_covariates(args)
     payload = manifest.require_manifest()
     sites = _read(STRATIFIED, "run --strata first")
     joined = _read(JOINED, "run --covariates first")
@@ -511,6 +644,12 @@ def main():
                              "here' answers so they are asked again. For after "
                              "a run that was rate-limited: a refusal cached as "
                              "an absence never expires on its own.")
+    parser.add_argument("--allow-incomplete-covariates", action="store_true",
+                        help="fit even though the covariate build did not "
+                             "pass. Requires --why and writes an override "
+                             "entry into the manifest.")
+    parser.add_argument("--why", help="reason for an override, recorded in "
+                                      "the manifest")
     parser.add_argument("--allow-degraded-covariates", action="store_true",
                         help="write the covariate file even when coverage "
                              "went backwards against the previous one. For "
