@@ -202,7 +202,7 @@ def check_against_fit(pairs, coefficients, tolerance=1e-6):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = common.diagnostic_parser(__doc__)
     parser.add_argument("--permutations", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None,
@@ -210,6 +210,10 @@ def main():
     args = parser.parse_args()
 
     coefficients = common.load_coefficients()
+    coefficients = common.drop_hypothesis_sites(coefficients, args,
+                                                "coefficient rows")
+    coefficients = common.drop_held_out(coefficients, args,
+                                        label="coefficient rows")
     head = common.headline(coefficients)
     wanted = set(zip(head["station_id"].astype(str), head["analyte"]))
     print("=" * 78)

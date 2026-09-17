@@ -49,6 +49,13 @@ off `wq/fit.py` and `wq/report.py` rather than restating them.
 * **BH is global.** `report_multiple_testing` runs one Benjamini-Hochberg
   step-up over all 24,596 headline tests. `common.bh_significant` reproduces
   that set, not a friendlier per-analyte one.
+* **Every task takes `--evaluate-holdout` and `--include-hypothesis-sites`.**
+  By default each one drops the 617 held-out site clusters, the samples after
+  2025-06-30, and the two hypothesis beaches (Santa Cruz Wharf, Carpinteria
+  State Beach). Those defaults are the point: a Phase 1 number computed over
+  the held-out clusters is not a held-out number any more, and a replication
+  statistic that includes the beaches which generated the hypothesis is
+  answering a question with itself. See `wq/holdout.py`.
 * **Task 2 takes `--stratum`.** It stress-tests whichever registered grouping
   you name; the outputs are named after it, so runs on different strata do not
   overwrite each other. It warns if the stratum is not in the manifest's active

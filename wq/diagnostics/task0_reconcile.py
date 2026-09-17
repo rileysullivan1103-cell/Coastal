@@ -102,6 +102,8 @@ def by_analyte(coefficients, attrition):
 
 
 def main():
+    parser = common.diagnostic_parser(__doc__)
+    args = parser.parse_args()
     coefficients = common.load_coefficients()
     nondetects = common.load_nondetects()
     attrition = common.load_attrition()
@@ -109,6 +111,10 @@ def main():
     print("=" * 78)
     print("TASK 0  RECONCILING coefficients.csv AGAINST D5's TEST COUNT")
     print("=" * 78)
+    coefficients = common.drop_hypothesis_sites(coefficients, args,
+                                                "coefficient rows")
+    coefficients = common.drop_held_out(coefficients, args,
+                                        label="coefficient rows")
     table, head = reconcile(coefficients, nondetects)
     print(f"\ncoefficients.csv rows: {len(coefficients):,}\n")
     print(table[["bucket", "rows", "pairs", "stations", "meaning"]]

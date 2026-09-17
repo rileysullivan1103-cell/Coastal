@@ -28,7 +28,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from wq import clean, config, manifest, pull, strata  # noqa: E402
+from wq import clean, config, holdout, manifest, pull, strata  # noqa: E402
 
 FAILURES = []
 
@@ -475,6 +475,77 @@ def test_site_clusters_label_a_beach_without_deleting_it():
           "it labels a station, it does not shuffle one")
 
 
+def test_the_holdout_is_drawn_before_anything_is_fitted():
+    """A test set chosen after seeing a score is not a test set. The split is
+    drawn from a recorded seed, on CLUSTERS not stations, and the hypothesis
+    beaches are kept out of it."""
+    print("\n[holdout]")
+    rng = np.random.default_rng(1)
+    rows, sites = [], []
+    for c in range(60):
+        cluster = f"C{c:03d}"
+        state = "CA" if c % 3 == 0 else "NJ"
+        for k in range(2):
+            station = f"{cluster}-{k}"
+            sites.append({"station_id": station, "site_cluster": cluster,
+                          "state": state, "station_name": station})
+            for i in range(40):
+                rows.append({"station_id": station, "analyte": "ENT",
+                             "date": f"2021-{1 + i % 12:02d}-15"})
+    samples = pd.DataFrame(rows)
+    sites = pd.DataFrame(sites)
+    hypothesis = pd.DataFrame([{"station_id": "C000-0", "site_cluster": "C000",
+                                "label": "hypothesis"}])
+
+    first, summary = holdout.build(samples, sites, hypothesis)
+    again, _ = holdout.build(samples, sites, hypothesis)
+    check("the same seed draws the same split",
+          sorted(first["site_cluster"]) == sorted(again["site_cluster"]))
+    different, _ = holdout.build(samples, sites, hypothesis, seed=999)
+    check("a different seed draws a different one",
+          sorted(first["site_cluster"]) != sorted(different["site_cluster"]))
+
+    held = set(first["site_cluster"])
+    check("roughly the requested fraction is held out",
+          0.15 <= len(held) / 60 <= 0.25, f"{len(held)}/60")
+    check("the hypothesis cluster is NOT in the test set",
+          "C000" not in held)
+    check("whole clusters move together, never half a beach",
+          all(first[first["site_cluster"] == c]["station_id"].nunique() == 2
+              for c in held))
+    state_of = (sites.drop_duplicates("site_cluster")
+                .set_index("site_cluster")["state"].to_dict())
+    check("both states are represented",
+          {state_of[c] for c in held} == {"CA", "NJ"},
+          "stratification kept neither state out")
+
+    # the guard itself
+    frame = pd.DataFrame({"station_id": ["C000-0", f"{sorted(held)[0]}-0"],
+                          "site_cluster": ["C000", sorted(held)[0]]})
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "holdout.csv")
+        first.to_csv(path, index=False)
+        original = holdout.HOLDOUT_PATH
+        holdout.HOLDOUT_PATH = path
+        try:
+            kept = holdout.drop_holdout(frame, quiet=True)
+            check("the guard drops held-out clusters", len(kept) == 1)
+            all_rows = holdout.drop_holdout(frame, evaluate_holdout=True,
+                                            quiet=True)
+            check("--evaluate-holdout keeps them", len(all_rows) == 2)
+        finally:
+            holdout.HOLDOUT_PATH = original
+
+    cutoff = holdout.time_cutoff(pd.DataFrame(
+        {"date": pd.date_range("2020-01-01", "2026-06-30", freq="ME")}))
+    check("the time holdout is the most recent 12 months",
+          str(cutoff.date()) == "2025-06-30", str(cutoff.date()))
+    check("the committed split is the one on disk",
+          holdout.file_sha256(holdout.HOLDOUT_PATH) is not None,
+          (holdout.file_sha256(holdout.HOLDOUT_PATH) or "")[:16] + "...")
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -491,7 +562,8 @@ def main():
                  test_manifest_guard_catches_a_moved_goalpost,
                  test_thresholds_file_is_readable_and_cited,
                  test_flat_series_is_detected_without_a_qualifier,
-                 test_site_clusters_label_a_beach_without_deleting_it):
+                 test_site_clusters_label_a_beach_without_deleting_it,
+                 test_the_holdout_is_drawn_before_anything_is_fitted):
         test()
     print()
     if FAILURES:

@@ -151,15 +151,24 @@ def locate_prior_sites(sites, coefficients, radius_km=1.0):
 
 
 def main():
+    parser = common.diagnostic_parser(__doc__)
+    args = parser.parse_args()
+
     coefficients = common.load_coefficients()
     sites = common.load_sites()
-    rain = rain_rows(coefficients)
+    every = rain_rows(coefficients)
 
     print("=" * 78)
     print("TASK 1  RAIN vs BACTERIA, ACROSS EVERY FITTED SITE")
     print("=" * 78)
-    print("BH is the pipeline's: one step-up over all 24,596 headline tests,")
+    print("BH is the pipeline's: one step-up over ALL headline tests,")
     print("not over the rain rows alone.")
+
+    # The two guards, in this order. The hypothesis beaches come out because
+    # they generated the hypothesis; the held-out clusters come out because a
+    # number computed over them stops being held out.
+    rain = common.drop_hypothesis_sites(every, args, "rain coefficient rows")
+    rain = common.drop_held_out(rain, args, label="rain coefficient rows")
 
     overall = summarise(rain, ["analyte", "predictor"])
     print("\nby analyte and rain window:")
@@ -211,9 +220,22 @@ def main():
 
     # The prior findings are about rain, so print this run's rain coefficients
     # for whichever stations actually carry the data.
+    # Reported from the UNFILTERED frame: these are the sites the statistics
+    # above deliberately exclude, and the whole point is to see them.
+    hypothesis = common.hypothesis_rows(every)
+    if not hypothesis.empty:
+        print(f"\nTHE HYPOTHESIS BEACHES ({hypothesis['station_id'].nunique()} "
+              "stations), excluded from every statistic above:")
+        print(summarise(hypothesis, ["analyte", "predictor"])
+              .round(3).to_string(index=False))
+        print("  These are the beaches the prior findings came from. They "
+              "cannot replicate\n  a hypothesis they generated; they are here "
+              "to be looked at, not counted.")
+        common.write(hypothesis, "task1_hypothesis_site_rain.csv")
+
     ids = [i for i in located["fitted_station_id"].dropna().astype(str)]
     if ids:
-        here = rain[rain["station_id"].astype(str).isin(ids)]
+        here = every[every["station_id"].astype(str).isin(ids)]
         print("\nthis run's rain coefficients at those stations:")
         if here.empty:
             print("  (none of them produced a rain coefficient)")

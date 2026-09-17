@@ -153,7 +153,7 @@ def shared_attributes(detail, stratum=STRATUM):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = common.diagnostic_parser(__doc__)
     parser.add_argument("--stratum", default=STRATUM,
                         help="which pre-registered grouping to stress-test "
                              f"(default {STRATUM})")
@@ -183,6 +183,10 @@ def main():
     print("  hypothesis for Phase 2, not a result of this pass.")
     print("!" * 78)
 
+    coefficients = common.drop_hypothesis_sites(coefficients, args,
+                                                "coefficient rows")
+    coefficients = common.drop_held_out(coefficients, args,
+                                        label="coefficient rows")
     merged = build_merged(coefficients, sites, stratum=stratum)
     sizes = level_sizes(merged, stratum)
     print(f"\nstations per {stratum} level (fitted stations only):")

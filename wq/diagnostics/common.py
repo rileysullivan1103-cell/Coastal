@@ -25,6 +25,7 @@ what a number means:
                 so this module exposes the pipeline's version and labels it.
 """
 
+import argparse
 import os
 import sys
 
@@ -34,7 +35,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 
-from wq import config  # noqa: E402
+from wq import config, holdout  # noqa: E402
 
 OUT_DIR = os.path.join(config.OUT_DIR, "diagnostics")
 RAIN = ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm"]
@@ -138,3 +139,80 @@ def rho_summary(values):
     q25, q75 = float(series.quantile(0.25)), float(series.quantile(0.75))
     return {"n": int(len(series)), "median": float(series.median()),
             "q25": q25, "q75": q75, "iqr": q75 - q25}
+
+
+def diagnostic_parser(description):
+    """Every diagnostic takes the same two guards, so none can forget one."""
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--evaluate-holdout", action="store_true",
+        help="KEEP the held-out clusters and the held-out months. Only valid "
+             "as a deliberate one-shot evaluation; the default drops them.")
+    parser.add_argument(
+        "--include-hypothesis-sites", action="store_true",
+        help="KEEP Santa Cruz Wharf and Carpinteria State Beach in the "
+             "summary statistics. They are excluded by default because their "
+             "prior findings are what this pass is testing.")
+    return parser
+
+
+def drop_held_out(frame, args=None, samples=None, label="rows"):
+    """The holdout guard, as every diagnostic must apply it.
+
+    Phase 1 diagnostics describe the DEVELOPMENT data. A number computed over
+    the held-out clusters is not a held-out number any more -- it has been
+    looked at, and whatever is decided next is decided partly on it. So the
+    default is to drop them, and keeping them takes a flag that says so out
+    loud.
+    """
+    evaluate = bool(getattr(args, "evaluate_holdout", False))
+    before = len(frame)
+    out = holdout.drop_holdout(frame, evaluate_holdout=evaluate,
+                               samples=samples, quiet=True)
+    if evaluate:
+        print(f"  --evaluate-holdout: KEEPING all {before:,} {label}, "
+              "held-out clusters included.")
+        print("  This is a held-out evaluation and must be reported as one.")
+    elif len(out) != before:
+        held = holdout.read_holdout()
+        print(f"  holdout guard: dropped {before - len(out):,} of "
+              f"{before:,} {label} "
+              f"({held['site_cluster'].nunique()} held-out cluster(s), "
+              f"seed {holdout.HOLDOUT_SEED})")
+    return out
+
+
+def drop_hypothesis_sites(frame, args=None, label="rows"):
+    """Santa Cruz Wharf and Carpinteria, out of the summary statistics.
+
+    These two beaches are the reason the prior findings exist. Leaving them in
+    a replication statistic asks whether the sites that generated a hypothesis
+    support it, which they do by construction. They are reported individually
+    instead, and the list is committed (wq/hypothesis_sites.csv) rather than
+    typed into a script, so the exclusion is auditable and cannot drift.
+    """
+    if bool(getattr(args, "include_hypothesis_sites", False)):
+        print("  --include-hypothesis-sites: the hypothesis beaches are IN "
+              "the statistics below.")
+        return frame
+    sites = holdout.read_hypothesis_sites()
+    if sites.empty or "station_id" not in frame.columns:
+        return frame
+    ids = set(sites["station_id"].astype(str))
+    out = frame[~frame["station_id"].astype(str).isin(ids)]
+    if len(out) != len(frame):
+        print(f"  hypothesis-site guard: dropped {len(frame) - len(out):,} of "
+              f"{len(frame):,} {label} "
+              f"({sites['site_cluster'].nunique()} cluster(s), "
+              f"{len(ids)} station(s)) — reported separately, never in the "
+              "replication statistics")
+    return out
+
+
+def hypothesis_rows(frame):
+    """Just the hypothesis beaches, for the separate report."""
+    sites = holdout.read_hypothesis_sites()
+    if sites.empty or "station_id" not in frame.columns:
+        return frame.iloc[0:0]
+    ids = set(sites["station_id"].astype(str))
+    return frame[frame["station_id"].astype(str).isin(ids)]
