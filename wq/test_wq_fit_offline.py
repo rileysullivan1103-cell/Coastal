@@ -886,6 +886,52 @@ def test_california_has_no_ocean_ecoli_standard():
           first["n_ctrl"] > 0 and not pd.isna(first["rho_ctrl"]))
 
 
+def test_a_verdict_needs_an_effect_not_just_a_p_value():
+    """The report printed "region narrows the IQR ... that is the headline"
+    for a narrowing of 1.5% at p=0.000. With 2,591 sites a p-value detects an
+    effect far too small to act on, and the canned verdict read the p alone."""
+    print("\n[D2 verdict gate]")
+    import io, contextlib
+
+    def verdict(iqr_ratio, chance, p, sites, smallest):
+        row = pd.Series({"stratum": "region", "iqr_ratio": iqr_ratio,
+                         "chance_ratio": chance, "p": p, "sites": sites,
+                         "smallest_level": smallest})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            report._report_stratum_verdict(row)
+        return buf.getvalue()
+
+    # THE REGION CASE, as it actually came out of the CA-amended run.
+    out = verdict(0.985, 0.998, 0.000, 2591, 556)
+    check("the region case is no longer called the headline",
+          "THAT IS THE HEADLINE" not in out)
+    check("it is called detectable but too small to act on",
+          "TOO SMALL TO ACT ON" in out)
+    check("and it still prints both numbers",
+          "1.5%" in out and "0.000" in out, out.strip().splitlines()[0][:60])
+
+    # a real effect: big narrowing, significant, no tiny level
+    out = verdict(0.60, 0.98, 0.001, 2000, 500)
+    check("a 40% narrowing on a well-populated stratum IS the headline",
+          "THAT IS THE HEADLINE" in out)
+
+    # outfall_type's shape: large narrowing carried by a 2-station level
+    out = verdict(0.834, 0.982, 0.000, 2303, 2)
+    check("a large narrowing carried by a tiny level is NOT the headline",
+          "THAT IS THE HEADLINE" not in out and "smallest level" in out,
+          "2 stations of 2,303 is 0.1%")
+
+    check("the bars are outside the frozen specification",
+          "STRATUM_MIN_NARROWING" not in config.SPEC_KEYS
+          and "STRATUM_MIN_SMALLEST_LEVEL_SHARE" not in config.SPEC_KEYS,
+          "they gate wording, not arithmetic")
+    check("the narrowing bar is derived, not round-numbered",
+          0 < config.STRATUM_MIN_NARROWING < 1,
+          f"{config.STRATUM_MIN_NARROWING:.0%} of a 0.25 IQR = "
+          f"{0.25 * config.STRATUM_MIN_NARROWING:.3f} rho")
+
+
 def main():
     for test in (test_distribution_is_recovered_not_averaged,
                  test_every_coefficient_carries_its_n,
@@ -901,6 +947,7 @@ def main():
                  test_no_usable_predictor_is_counted,
                  test_multiple_testing_expectation,
                  test_per_site_table_has_what_was_asked_for,
+                 test_a_verdict_needs_an_effect_not_just_a_p_value,
                  test_ab411_ratio_rule,
                  test_a_shellfish_station_is_not_judged_as_a_beach,
                  test_excluded_stations_are_reported_not_vanished,

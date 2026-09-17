@@ -401,21 +401,8 @@ def report_by_stratum(coefficients, sites, strata, column="rho_ctrl",
               "explains the spread.")
         return table
     leader = real.sort_values("p").iloc[0]
-    if leader["p"] <= 0.05 and leader["iqr_ratio"] < leader["chance_ratio"]:
-        print(f"\n  {leader['stratum']} narrows the IQR to "
-              f"{leader['iqr_ratio']:.2f} of the overall spread, against "
-              f"{leader['chance_ratio']:.2f} for a shuffle of the same group "
-              f"sizes drawn once per site (p={leader['p']:.3f}). That is the "
-              "headline: the coefficient varies by site type, and site type "
-              "is knowable in advance.")
-        smallest = leader.get("smallest_level")
-        if smallest is not None and smallest < 10:
-            print(f"  READ IT WITH THIS: the smallest level of "
-                  f"{leader['stratum']} holds {int(smallest)} station(s) of "
-                  f"{int(leader['sites'])}. The shuffle controls for that "
-                  "SIZE; it cannot control for anything else those stations "
-                  "share. Treat this as a hypothesis for a pass with more "
-                  "sites in that level, not a settled result.")
+    if leader["p"] <= config.ALPHA and leader["iqr_ratio"] < leader["chance_ratio"]:
+        _report_stratum_verdict(leader)
     else:
         print(f"\n  No stratum narrows the spread by more than an arbitrary "
               f"split of the same sizes would. Best was {leader['stratum']} "
@@ -423,6 +410,55 @@ def report_by_stratum(coefficients, sites, strata, column="rho_ctrl",
               "variation is NOT explained by the strata registered in A2, "
               "and the next pass should not assume it is.")
     return table
+
+
+def _report_stratum_verdict(leader):
+    """Say what the leading stratum has actually shown, on three tests.
+
+    A p-value alone is not a finding here and this is the place that used to
+    pretend otherwise: it printed "that is the headline" for a narrowing of
+    1.5% at p=0.000, because with 2,591 sites significance is cheap. A stratum
+    is reported as explaining the spread only if it narrows the IQR by at
+    least config.STRATUM_MIN_NARROWING, AND clears alpha, AND its smallest
+    level holds at least STRATUM_MIN_SMALLEST_LEVEL_SHARE of the stations.
+    Otherwise the numbers are printed with the plain reading attached.
+    """
+    narrowing = 1.0 - float(leader["iqr_ratio"])
+    sites = float(leader.get("sites") or 0)
+    smallest = float(leader.get("smallest_level") or 0)
+    share = (smallest / sites) if sites else 0.0
+    big_enough = narrowing >= config.STRATUM_MIN_NARROWING
+    level_ok = share >= config.STRATUM_MIN_SMALLEST_LEVEL_SHARE
+
+    print(f"\n  {leader['stratum']}: within-stratum IQR is "
+          f"{leader['iqr_ratio']:.3f} of the overall spread — a "
+          f"{narrowing:.1%} narrowing — against {leader['chance_ratio']:.3f} "
+          f"for a shuffle of the same group sizes (p={leader['p']:.3f}).")
+    print(f"  Its smallest level holds {int(smallest)} of {int(sites)} "
+          f"stations ({share:.1%}).")
+
+    if big_enough and level_ok:
+        print(f"\n  THAT IS THE HEADLINE: the narrowing clears the "
+              f"{config.STRATUM_MIN_NARROWING:.0%} reporting bar, the "
+              "p-value clears alpha, and no single\n  small level is "
+              "carrying it. The coefficient varies by site type, and site "
+              "type is\n  knowable in advance.")
+        return
+    print("\n  STATISTICALLY DETECTABLE, TOO SMALL TO ACT ON.")
+    if not big_enough:
+        print(f"    The narrowing is {narrowing:.1%}, under the "
+              f"{config.STRATUM_MIN_NARROWING:.0%} bar. On a typical D1 IQR "
+              f"of 0.25 that is about\n    {0.25 * narrowing:.3f} in rho "
+              "units — less than one standard error of a single site's own\n"
+              "    coefficient at the median n. A p-value this small says the "
+              "sample is large,\n    not that the effect is.")
+    if not level_ok:
+        print(f"    Its smallest level is {share:.1%} of stations, under the "
+              f"{config.STRATUM_MIN_SMALLEST_LEVEL_SHARE:.0%} bar. The "
+              "shuffle controls for\n    that SIZE and for nothing else "
+              "those particular stations share.")
+    print("    Report it as a difference that exists, not as an explanation "
+          "of the spread.")
 
 
 def _median_iqr_ratio(cells):
@@ -534,7 +570,30 @@ def report_sign_agreement(coefficients, column="rho_ctrl"):
               .to_string(index=False))
     print("\n  A predictor can agree in sign at 95% of sites and still be")
     print("  useless everywhere, if the magnitudes are all near zero. Read D1.")
+    _report_sign_without_magnitude(coefficients, table, column)
     return table
+
+
+def _report_sign_without_magnitude(coefficients, table, column):
+    """Name the predictors whose agreement is high and whose effect is not.
+
+    The caution above has always been printed and has always been generic, so
+    it reads as boilerplate and gets skipped. These are the rows it is about.
+    """
+    medians = (coefficients.groupby(["analyte", "predictor"])[column]
+               .median().abs().rename("abs_median").reset_index())
+    merged = table.merge(medians, on=["analyte", "predictor"], how="left")
+    floor = config.USABLE_RHO_FLOOR_LENIENT
+    hollow = merged[(merged["agreement"] >= 0.8)
+                    & (merged["abs_median"] < floor)]
+    if hollow.empty:
+        return
+    print(f"\n  {len(hollow)} predictor(s) agree in sign at 90%+ of sites "
+          f"while their median |rho|\n  is under {floor:.2f} — consistent "
+          "direction, no usable magnitude:")
+    print(hollow.sort_values("agreement", ascending=False)
+          [["analyte", "predictor", "n_sites", "share_positive",
+            "abs_median"]].round(3).head(12).to_string(index=False))
 
 
 def report_multiple_testing(coefficients):

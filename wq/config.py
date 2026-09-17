@@ -292,6 +292,44 @@ COVARIATE_SOURCE_REQUIREMENTS = {
     },
 }
 
+# D2 (reporting, NOT specification): what a stratum has to achieve before the
+# report says it EXPLAINS the spread rather than merely differing from a
+# shuffle. Outside SPEC_KEYS -- these gate wording, not arithmetic. Every
+# number D2 prints is unchanged; only the sentence under the table moves.
+#
+# They exist because the report said "region narrows the IQR ... that is the
+# headline" for a narrowing of 1.5% at p=0.000. With 2,591 sites a p-value
+# detects an effect far too small to act on, and the canned verdict read the
+# p-value alone.
+#
+# STRATUM_MIN_NARROWING is derived from the D1 spread rather than chosen
+# round. The rain IQRs in D1 run 0.17 to 0.26, so take 0.25 as the working
+# spread. Three anchors bracket it:
+#
+#   0.10 in rho units  the gap between the two pre-registered decision floors
+#                      (USABLE_RHO_FLOOR 0.30 and its lenient 0.20). A
+#                      narrowing that shifts a site across that gap is one
+#                      that could change a decision. Against a 0.25 IQR that
+#                      is a 40% narrowing.
+#   0.129 in rho units one standard error of a single site's rho at the median
+#                      n_ctrl of 63 (1/sqrt(n-3)). A stratum narrowing the
+#                      spread by less than one site's own measurement error is
+#                      telling you less than one more sample would.
+#   0.025 in rho units what a 10% narrowing actually buys on a 0.25 IQR.
+#
+# So 10% is the floor for REPORTING a stratum as explanatory, not the bar for
+# acting on one: below it there is certainly nothing there, above it there
+# might be, and the 40% figure is what would actually move a decision. The
+# report prints the observed narrowing either way, so the reader can apply
+# whichever bar they need.
+STRATUM_MIN_NARROWING = 0.10
+
+# A level holding a handful of stations cannot support a claim about a
+# population, however the shuffle scores it: outfall_type's headline came from
+# a level of 2 stations in 2,558, which is 0.08%. The shuffle controls for the
+# SIZE of a small level and for nothing else its members share.
+STRATUM_MIN_SMALLEST_LEVEL_SHARE = 0.05
+
 FLAT_SERIES_SHARE = 0.90
 
 REQUEST_PAUSE = 0.5
