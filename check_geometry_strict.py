@@ -982,8 +982,24 @@ def main():
     if args.cached:
         slug, paths, dates = geo.cached_frames(args.camera)
     else:
-        slug, paths, dates = geo.sample_frames(args.camera, args.every,
-                                               args.hour, args.limit)
+        # A DROPPED CONNECTION IS NOT A CRASH, and it should not read as one.
+        # Enumerating 1,716 days takes a long while, and a Wi-Fi drop at day
+        # 826 threw a raw urllib traceback -- which looks like the tool broke
+        # rather than the network. Every frame already fetched is on disk, so
+        # the recovery is one flag, and it is worth saying so plainly.
+        try:
+            slug, paths, dates = geo.sample_frames(args.camera, args.every,
+                                                   args.hour, args.limit)
+        except Exception as error:
+            if not any(word in type(error).__name__
+                       for word in ("Connection", "Timeout", "Resolution")):
+                raise
+            sys.exit(
+                f"\nThe network dropped partway through ({type(error).__name__})."
+                "\nNothing is lost: every frame fetched so far is on disk.\n\n"
+                "  Re-run the same command to carry on from where it stopped,\n"
+                "  or add --cached to work from what is already downloaded and\n"
+                "  skip the network entirely.")
     order = np.argsort(dates)
     paths = [paths[i] for i in order]
     dates = [dates[i] for i in order]
