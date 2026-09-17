@@ -120,3 +120,54 @@ and the sampling distribution at that n is wide enough to produce a confident
 wrong sign about once in 350 draws, or once in six if the effective n is
 smaller than the reported one. The national fit exists precisely because that
 is not a basis for a claim.
+
+---
+
+# Addendum: Virginia Beach audited, and it fails too
+
+Virginia's results were pulled on 2026-09-17 (10/10 chunks, no failures — the
+timeout fix made this cheap). The deck's only cross-coast claim can now be
+checked, and it does not survive.
+
+`21VABCH-VA824084`, enterococcus, ERA5 rain at its own cell:
+
+| | deck | full record |
+|---|---|---|
+| n | 96 | **181** |
+| window | 2023-04-03 → 2025-08-27 | 2017-05-16 → 2025-09-30 |
+| 24h | **+0.32** | **+0.087** (p=0.25) |
+| 48h | — | +0.054 (p=0.47) |
+| 72h | — | +0.046 (p=0.54) |
+
+Not significant at any window. The same shape as the other two: a short window
+roughly doubling an effect that is small or absent over the full record.
+
+It is also tie-limited, and undeclared: **106 of 181 values (58.6%) sit on
+1.0**, there are 12 distinct values in the whole series, and **zero** declared
+non-detects. A "1" that appears in 59% of samples is a detection limit, not a
+measurement, and WQP's Virginia feed does not say so — the same gap found in
+California's `CABEACH_WQX` feed.
+
+## All three deck beach findings, audited
+
+| beach | deck | full record | verdict |
+|---|---|---|---|
+| Carpinteria | TOTAL −0.32 | **+0.198** (n=471) | wrong sign |
+| Santa Cruz | +0.45 × 3 analytes | **+0.332** ENT only; FECAL +0.149 | one analyte, half the size |
+| Virginia Beach | ENT +0.32 | **+0.087** n.s. (n=181) | does not replicate |
+
+Three for three. The common cause is not a code defect in any of them: it is
+that each was a one-to-two-year window at a single station, and at n in the
+tens the sampling distribution of rho is wide enough to produce confident
+numbers that nine years of the same beach do not support.
+
+**The cross-coast claim should be struck.** Virginia Beach was the only
+non-Californian beach figure in the deck, and on its own full record it is
+indistinguishable from zero.
+
+## One operational note
+
+`data/wq/raw/results_VA_*.csv` now exist. `pull.load_raw_results` with no
+`--states` reads every chunk on disk, so the next unrestricted `--clean` will
+pull Virginia into the study population without anyone asking for it. Either
+pass `--states` explicitly or amend the scope deliberately.
