@@ -695,9 +695,11 @@ def report_flat_in_d6(best, nondetects, floor=None):
     both = int((without & is_flat).sum())
     total = int(without.sum())
     print(f"\n  of the {total:,} pair(s) with nothing clearing "
-          f"{floor:.2f}, {both:,} ({both / total:.1%}) sit on a")
-    print("  FLAT SERIES — one value, or the method's floor repeated. Those "
-          "are not")
+          f"{floor:.2f}, {both:,} ({both / total:.1%}) sit on a series")
+    print(f"  that could not move: one value, or at least "
+          f"{config.FLAT_SERIES_SHARE:.1%} of samples on the same one. A rank")
+    print("  correlation there is decided by the small minority that varied. "
+          "Those are not")
     print("  beaches where a prediction failed; they are beaches where the "
           "outcome")
     print(f"  never moved. The comparable count is {total - both:,}.")
@@ -731,7 +733,8 @@ def per_site_table(coefficients, sites, nondetects, strata, column="rho_ctrl"):
                         ("station_id", "analyte", "n", "nondetect_fraction",
                          "nondetect_flag", "n_methods", "mixed_estimators",
                          "flat_series_flag", "constant_series",
-                         "floor_pinned", "modal_share")
+                         "floor_pinned", "at_floor", "modal_share",
+                         "n_distinct_values", "modal_value")
                         if c in nondetects.columns]],
             on=["station_id", "analyte"], how="left")
     best = usable_predictors(coefficients)
@@ -872,7 +875,10 @@ def report_flat_series(subset):
     print(f"      of those, one value only      {constant:,}")
     print(f"      not flagged as non-detect     {undeclared:,}")
     print(f"    threshold                       "
-          f"{config.FLAT_SERIES_SHARE:.0%} of samples on the series minimum")
+          f"{config.FLAT_SERIES_SHARE:.1%} of samples on ONE value")
+    at_floor = int(flat.get("at_floor", pd.Series(dtype=bool)).fillna(False).sum())
+    print(f"      of those, the pile-up is at the series minimum  {at_floor:,}"
+          if at_floor else "")
     print("    These are NOT excluded. Their n is real and their outcome is")
     print("    not: whatever coefficient they carry rests on the few samples")
     print("    that left the floor. Read D6 with the line it prints about them.")

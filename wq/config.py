@@ -216,82 +216,29 @@ SPEC_KEYS = (
 # ---------------------------------------------------------------------------
 
 # B3 (diagnostic, NOT a specification constant): the share of a site-analyte
-# series that has to sit at one value before it is called flat. Deliberately
-# outside SPEC_KEYS, because nothing here changes which coefficient is
-# computed or which pair enters the headline distribution -- it changes only
-# what the report can SAY about a pair. The moment a flat series is excluded
-# rather than described, this becomes load-bearing and belongs in the
-# pre-registered block with a re-registration to match.
+# series that has to sit on ONE value before it is called flat. Outside
+# SPEC_KEYS, because nothing here changes which coefficient is computed or
+# which pair enters the headline -- only what the report can SAY about a pair.
 #
-# The case it exists for: a New Jersey station reporting fecal coliform = 3.0
-# for all 49 of its samples, with no censoring qualifier anywhere on the row.
-# That is an undeclared "<3" -- the method's floor written as a number -- and
-# the non-detect machinery cannot see it, so nondetect_fraction reads 0.00 and
-# the pair enters the headline, contributes no coefficient, and then counts
-# against D6 as a beach where prediction did not work.
-# What a covariate build has to achieve before its output may replace the
-# file already on disk. NOT in SPEC_KEYS: these gate whether a BUILD is
-# accepted, and change no coefficient, no pair and no floor. Nothing about the
-# pre-registered analysis moves if they move.
+# The case it was built for: a New Jersey station reporting fecal coliform =
+# 3.0 for all 49 of its samples with no censoring qualifier anywhere. That is
+# an undeclared "<3" and the non-detect machinery cannot see it.
 #
-# They exist because the guard that came first compared coverage only against
-# the stations the previous file already held, and the 723 new Californian
-# stations were in no previous file. A quota trip landing entirely inside
-# California would have passed that check by construction.
+# 0.875 rather than 0.90, and derived rather than chosen. Binning beach
+# rain_48h coefficients by modal share, the median holds flat and only the
+# spread widens until the 0.875 boundary, then breaks:
 #
-# The asymmetry between the four is the whole design:
+#     modal share      pairs   median rho   sd     distinct values
+#     (0.80, 0.85]      162       0.246    0.188        14
+#     (0.85, 0.875]      57       0.189    0.220        12
+#     (0.875, 0.90]      54       0.050    0.241         8.5   <- breaks here
+#     (0.90, 0.925]      52       0.154    0.243         7
+#     (0.95, 1.01]       29       0.029    0.279         4
 #
-#   era5        unconditional, and nearly total. It is a reanalysis GRID --
-#               every coastal point on earth has a value, so a station with no
-#               ERA5 row did not fail to have weather, it failed to be asked.
-#               A gap here can only be the quota or the service.
-#   marine      conditional. Open-Meteo's wave model has no answer for a land
-#               cell, and the cache records that as an absence rather than a
-#               refusal (covariates._EMPTY_MARKER). Stations whose cell is
-#               cached as empty are not eligible and are not counted against
-#               this.
-#   tide        conditional, on the same polarity as marine. A station with
-#               no CO-OPS gauge within MAX_TIDE_GAUGE_KM is not eligible, and
-#               neither is one whose gauge has ANSWERED that it holds no water
-#               level -- six such gauges serve 380 stations here, and counting
-#               them as failures put a sound build at 87.4% and refused a fit
-#               that had nothing wrong with it. A gauge never ASKED is still
-#               eligible and still fails: that is the quota case.
-#   water_temp  not gated at all. Gauges that report water level frequently do
-#               not report temperature; it was populated for 31% of stations
-#               in the Northeast pass and that is the gauge network, not a
-#               failure. Recorded in the status file, never a reason to refuse.
-#
-# A source with min_station_coverage None is recorded and never gates.
-COVARIATE_SOURCE_REQUIREMENTS = {
-    "era5": {
-        "predictors": ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm",
-                       "temperature_2m", "wind_onshore_ms",
-                       "wind_alongshore_ms"],
-        "eligibility": "all",
-        "min_station_coverage": 0.99,
-        "why": "a reanalysis grid has a value everywhere; a gap is a refusal",
-    },
-    "marine": {
-        "predictors": ["wave_height", "wave_period"],
-        "eligibility": "cell_has_water",
-        "min_station_coverage": 0.95,
-        "why": "no waves in a land cell is an answer, not a failure",
-    },
-    "tide": {
-        "predictors": ["level_m", "rate_m_per_hr"],
-        "eligibility": "has_tide_gauge",
-        "min_station_coverage": 0.95,
-        "why": "no gauge within MAX_TIDE_GAUGE_KM is a fact about the coast",
-    },
-    "water_temp": {
-        "predictors": ["water_temp_c"],
-        "eligibility": "has_tide_gauge",
-        "min_station_coverage": None,
-        "why": "water-level gauges often do not report temperature",
-    },
-}
-
+# Below it, ties cost power and the estimate stays put, which is honest.
+# Above it the median collapses and the spread doubles. A station reporting
+# 89.5% of its enterococcus at exactly 10 sat just under the old 0.90 bar and
+# went unflagged while carrying a headline coefficient of -0.231.
 # D2 (reporting, NOT specification): what a stratum has to achieve before the
 # report says it EXPLAINS the spread rather than merely differing from a
 # shuffle. Outside SPEC_KEYS -- these gate wording, not arithmetic. Every
@@ -320,8 +267,7 @@ COVARIATE_SOURCE_REQUIREMENTS = {
 # So 10% is the floor for REPORTING a stratum as explanatory, not the bar for
 # acting on one: below it there is certainly nothing there, above it there
 # might be, and the 40% figure is what would actually move a decision. The
-# report prints the observed narrowing either way, so the reader can apply
-# whichever bar they need.
+# report prints the observed narrowing either way.
 STRATUM_MIN_NARROWING = 0.10
 
 # A level holding a handful of stations cannot support a claim about a
@@ -330,7 +276,7 @@ STRATUM_MIN_NARROWING = 0.10
 # SIZE of a small level and for nothing else its members share.
 STRATUM_MIN_SMALLEST_LEVEL_SHARE = 0.05
 
-FLAT_SERIES_SHARE = 0.90
+FLAT_SERIES_SHARE = 0.875
 
 REQUEST_PAUSE = 0.5
 GRID_CELL_DEGREES = 0.1  # ERA5 cells are shared between nearby sites

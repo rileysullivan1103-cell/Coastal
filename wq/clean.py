@@ -527,10 +527,17 @@ def _flag_flat_series(out):
     out["modal_share"] = pd.to_numeric(out["modal_count"], errors="coerce") / n
     out["constant_series"] = pd.to_numeric(
         out["n_distinct_values"], errors="coerce").fillna(0) <= 1
-    at_floor = np.isclose(pd.to_numeric(out["modal_value"], errors="coerce"),
-                          pd.to_numeric(out["min_value"], errors="coerce"),
-                          equal_nan=False)
-    out["floor_pinned"] = (out["modal_share"] >= config.FLAT_SERIES_SHARE) & at_floor
+    # The modal value USED to have to equal the series minimum. That let a
+    # Carpinteria enterococcus series through -- 73.6% of 470 samples at
+    # exactly 10, which California's own export says is 67% censored -- on the
+    # strength of a single stray 0 that moved the minimum off the mode. What
+    # limits a rank correlation is the pile-up itself, wherever it sits, so
+    # the pile-up is what is tested. at_floor is kept as its own column
+    # because a pile-up AT the minimum is the one that means censoring.
+    out["at_floor"] = np.isclose(
+        pd.to_numeric(out["modal_value"], errors="coerce"),
+        pd.to_numeric(out["min_value"], errors="coerce"), equal_nan=False)
+    out["floor_pinned"] = out["modal_share"] >= config.FLAT_SERIES_SHARE
     out["flat_series_flag"] = out["constant_series"] | out["floor_pinned"]
     # A flat series that was never declared as censored is the case worth
     # separating: where the qualifier IS present, B3's existing columns

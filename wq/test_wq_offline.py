@@ -416,6 +416,14 @@ def test_flat_series_is_detected_without_a_qualifier():
     rows += [{"station_id": "D", "analyte": "FECAL", "value": 5.0,
               "nondetect": True, "over_range": False, "method": "m",
               "estimator": "MPN"} for _ in range(40)]
+    # E: Carpinteria's shape -- a heavy pile-up that is NOT the minimum,
+    # because one stray low sample moved the minimum off the mode.
+    rows += [{"station_id": "E", "analyte": "ENT", "value": 10.0,
+              "nondetect": False, "over_range": False, "method": "m",
+              "estimator": "MPN"} for _ in range(45)]
+    rows += [{"station_id": "E", "analyte": "ENT", "value": v,
+              "nondetect": False, "over_range": False, "method": "m",
+              "estimator": "MPN"} for v in (0.0, 20.0, 40.0, 80.0, 160.0)]
     shares = clean.nondetect_shares(pd.DataFrame(rows)).set_index("station_id")
 
     check("a constant series is flagged",
@@ -429,6 +437,9 @@ def test_flat_series_is_detected_without_a_qualifier():
           bool(shares.loc["B", "floor_pinned"])
           and not bool(shares.loc["B", "constant_series"]),
           f"modal share {float(shares.loc['B', 'modal_share']):.2f}")
+    check("the pile-up is what is tested, not whether it sits at the minimum",
+          bool(shares.loc["E", "floor_pinned"]) and not bool(shares.loc["E", "at_floor"]),
+          "a stray low value must not un-flag a 90%-tied series")
     check("a series that actually varies is NOT flagged",
           not bool(shares.loc["C", "flat_series_flag"]))
     check("a DECLARED non-detect floor is flat but not undeclared",

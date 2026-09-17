@@ -490,6 +490,21 @@ def run(joined, sites, nondetects=None, strict=True, payload=None):
             print(f"  [{index}/{len(stations)}] stations fitted")
 
     coefficients = pd.DataFrame(rows)
+    # A coefficient is never reported without its n. A RANK coefficient is not
+    # reported without its tie structure either: n=220 on a series holding 13
+    # distinct values is not the study n=220 suggests, and nothing downstream
+    # could see that before.
+    if not coefficients.empty and nondetects is not None and not nondetects.empty:
+        carry = [c for c in ("station_id", "analyte", "modal_share",
+                             "n_distinct_values", "modal_value",
+                             "floor_pinned", "at_floor")
+                 if c in nondetects.columns]
+        if len(carry) > 2:
+            shares = nondetects[carry].copy()
+            shares["station_id"] = shares["station_id"].astype(str)
+            coefficients["station_id"] = coefficients["station_id"].astype(str)
+            coefficients = coefficients.merge(shares, on=["station_id", "analyte"],
+                                              how="left")
     table = pd.DataFrame(attrition)
     if not coefficients.empty:
         # Nothing may leave this function without its n beside it.
