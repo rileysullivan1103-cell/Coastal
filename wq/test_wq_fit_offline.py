@@ -687,6 +687,106 @@ def test_d1_says_which_stations_a_predictor_covers():
           "READ D1 WITH THIS" not in quiet.getvalue())
 
 
+def test_ab411_ratio_rule():
+    """C4 / 17 CCR 7958: total coliform is 10,000 per 100 mL, and 1,000 when
+    the fecal/total ratio on the SAME sample exceeds 0.1. Both limbs live in
+    wq/thresholds.json; neither number appears in wq/fit.py."""
+    print("\n[AB 411 ratio rule]")
+    thresholds = fit.load_thresholds()
+    sites = pd.DataFrame([{"station_id": "CA-1", "state": "CA",
+                           "water_class": "marine"}])
+    rows = [
+        # ratio 0.20 -> stricter limb
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-01",
+         "sampled_at": "2021-06-01T09:00", "value": 5000.0},
+        {"station_id": "CA-1", "analyte": "FECAL", "date": "2021-06-01",
+         "sampled_at": "2021-06-01T09:00", "value": 1000.0},
+        # ratio 0.02 -> permissive limb stands
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-02",
+         "sampled_at": "2021-06-02T09:00", "value": 5000.0},
+        {"station_id": "CA-1", "analyte": "FECAL", "date": "2021-06-02",
+         "sampled_at": "2021-06-02T09:00", "value": 100.0},
+        # no fecal companion at all -> permissive limb, flagged
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-03",
+         "sampled_at": "2021-06-03T09:00", "value": 5000.0},
+        # same DAY, different bottle -> must NOT pair
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-04",
+         "sampled_at": "2021-06-04T09:00", "value": 5000.0},
+        {"station_id": "CA-1", "analyte": "FECAL", "date": "2021-06-04",
+         "sampled_at": "2021-06-04T16:00", "value": 4000.0},
+        # date-only (midnight = no time reported) -> pairs on the date
+        {"station_id": "CA-1", "analyte": "TOTAL", "date": "2021-06-05",
+         "sampled_at": "2021-06-05T00:00", "value": 5000.0},
+        {"station_id": "CA-1", "analyte": "FECAL", "date": "2021-06-05",
+         "sampled_at": "2021-06-05T00:00", "value": 2000.0},
+    ]
+    out = fit.apply_ratio_rules(pd.DataFrame(rows), sites, thresholds)
+    total = out[out["analyte"] == "TOTAL"].set_index("date")
+
+    check("ratio over 0.1 drops the limit to the stricter limb",
+          float(total.loc["2021-06-01", "exceedance_threshold"]) == 1000.0,
+          f"ratio {float(total.loc['2021-06-01', 'ratio_value']):.2f}")
+    check("ratio under 0.1 leaves the permissive limb standing",
+          float(total.loc["2021-06-02", "exceedance_threshold"]) == 10000.0)
+    check("no companion result is flagged, not silently permissive",
+          bool(total.loc["2021-06-03", "ratio_rule_unavailable"])
+          and float(total.loc["2021-06-03", "exceedance_threshold"]) == 10000.0)
+    check("a different bottle the same day does NOT pair",
+          bool(total.loc["2021-06-04", "ratio_rule_unavailable"]),
+          "two grabs at one station are two samples")
+    check("a date-only pair still pairs, on the date",
+          float(total.loc["2021-06-05", "exceedance_threshold"]) == 1000.0,
+          "midnight means no time reported, as join_samples also assumes")
+    check("neither limb is hardcoded in fit.py",
+          "10000" not in open(os.path.join(os.path.dirname(
+              os.path.abspath(__file__)), "fit.py")).read()
+          and "1000," not in open(os.path.join(os.path.dirname(
+              os.path.abspath(__file__)), "fit.py")).read())
+
+
+def test_california_has_no_ocean_ecoli_standard():
+    """17 CCR 7958 lists total coliform, fecal coliform and enterococcus and
+    nothing else. Scoring Californian E. coli against EPA's FRESHWATER 410
+    would manufacture exceedances against a rule no beach is posted on."""
+    print("\n[CA marine E. coli]")
+    thresholds = fit.load_thresholds()
+    value, unit, source = fit.threshold_for(thresholds, "CA", "ECOLI", "marine")
+    check("no threshold is returned", value is None and unit is None)
+    check("and it does NOT fall through to the federal default",
+          "_default" not in source, source)
+    check("the source says why", "no applicable standard" in source, source)
+
+    federal = fit.threshold_for(thresholds, "NJ", "ECOLI", "marine")
+    check("a state without the marker still gets the federal fallback",
+          federal[0] is not None and "_default" in federal[2], str(federal))
+
+    ent = fit.threshold_for(thresholds, "CA", "ENT", "marine")
+    check("California's other analytes are unaffected",
+          ent[0] == 104 and ent[2] == "CA:marine", str(ent))
+
+    # and the fit reports it rather than dropping the rows
+    sites = pd.DataFrame([{"station_id": "CA-1", "state": "CA",
+                           "water_class": "marine", "lat": 34.0, "lon": -119.0}])
+    rng = np.random.default_rng(0)
+    n = 40
+    group = pd.DataFrame({
+        "station_id": "CA-1", "analyte": "ECOLI",
+        "date": pd.date_range("2021-01-01", periods=n, freq="7D"),
+        "value": rng.lognormal(3, 1, n),
+        "rain_24h_mm": rng.random(n),
+    })
+    group["log_value"] = np.log10(group["value"])
+    rows = fit.fit_site_analyte(group, sites.iloc[0], "ECOLI", thresholds)
+    first = rows[0]
+    check("the exceedance column is NA, not a number",
+          pd.isna(first["auc_exceedance"]))
+    check("the row records the reason",
+          "no applicable standard" in str(first["exceedance_reason"]),
+          str(first["exceedance_reason"]))
+    check("the coefficient itself is unaffected",
+          first["n_ctrl"] > 0 and not pd.isna(first["rho_ctrl"]))
+
+
 def main():
     for test in (test_distribution_is_recovered_not_averaged,
                  test_every_coefficient_carries_its_n,
@@ -701,7 +801,9 @@ def main():
                  test_d1_says_which_stations_a_predictor_covers,
                  test_no_usable_predictor_is_counted,
                  test_multiple_testing_expectation,
-                 test_per_site_table_has_what_was_asked_for):
+                 test_per_site_table_has_what_was_asked_for,
+                 test_ab411_ratio_rule,
+                 test_california_has_no_ocean_ecoli_standard):
         test()
     print()
     if FAILURES:

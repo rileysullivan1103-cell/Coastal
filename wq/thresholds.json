@@ -29,21 +29,22 @@
   "VERIFICATION PASS 2026-09-16: California was checked against the regulation itself and all four of its values are correct. The _default block was checked against the 2012 RWQC and found to MIX EPA's two alternative magnitude sets -- see _default._source. No number was changed. What is still unverified is flagged entry by entry."
  ],
  "_default": {
-  "_source": "US EPA, 2012 Recreational Water Quality Criteria, EPA-820-F-12-058, plus EPA 1976 and 1986 criteria where 2012 has no equivalent. CORRECTED 2026-09-16: this field previously said the 2012 values were taken 'at the 36/1000 illness rate'. They are not all from one set. EPA publishes two ALTERNATIVE magnitude sets and they are not a menu -- 36 per 1,000 is enterococci GM 35 / STV 130 with E. coli GM 126 / STV 410; 32 per 1,000 is enterococci GM 30 / STV 110 with E. coli GM 100 / STV 320. The marine ENT entry below (110) is from the 32/1000 set and the marine ECOLI entry (410) is from the 36/1000 set, so this block currently MIXES them. Neither number was changed here, because choosing a set changes every exceedance column and is a decision, not a transcription fix.",
+  "_source": "US EPA, 2012 Recreational Water Quality Criteria, EPA-820-F-12-058 (https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf), 36 per 1,000 magnitude set -- see _magnitude_set -- plus EPA 1976 and 1986 criteria where 2012 has no equivalent. _verified stays false for the BLOCK because fresh ENT, marine FECAL and marine TOTAL are still unchecked; the entries that were checked carry their own _verified and the date.",
   "_verified": false,
   "marine": {
    "ENT": {
-    "threshold": 110,
+    "threshold": 130,
     "unit": "cfu/100mL",
-    "basis": "2012 RWQC STV, enterococci marine, from the 30/110 magnitude set = the 32 per 1,000 illness rate. Value confirmed 2026-09-16. The 36 per 1,000 alternative is 130.",
+    "basis": "2012 RWQC STV for enterococci, 36 per 1,000 magnitude set (GM 35 / STV 130). Applies to marine and fresh alike -- EPA publishes one enterococci criterion for both. Verified 2026-09-16 against https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf",
     "_verified": true,
     "_verified_on": "2026-09-16"
    },
    "ECOLI": {
     "threshold": 410,
     "unit": "cfu/100mL",
-    "basis": "2012 RWQC STV for FRESH water, from the 126/410 magnitude set = the 36 per 1,000 illness rate. Value confirmed 2026-09-16. Applied to marine only as a fallback and flagged; the 32/1000 alternative is 320. EPA publishes no marine E. coli criterion at all.",
-    "_verified": false
+    "basis": "2012 RWQC STV for FRESH water E. coli, 36 per 1,000 magnitude set (GM 126 / STV 410). Verified 2026-09-16 against https://www.epa.gov/sites/default/files/2015-10/documents/rwqc2012.pdf. EPA publishes no marine E. coli criterion; applied here only as a fallback and flagged as such wherever it is used.",
+    "_verified": true,
+    "_verified_on": "2026-09-16"
    },
    "FECAL": {
     "threshold": 400,
@@ -85,7 +86,15 @@
     "_verified": false
    }
   },
-  "_mixed_magnitude_sets": true
+  "_magnitude_set": {
+   "chosen": "36 per 1,000",
+   "values": "enterococci GM 35 / STV 130; E. coli GM 126 / STV 410",
+   "alternative_not_chosen": "32 per 1,000: enterococci GM 30 / STV 110; E. coli GM 100 / STV 320",
+   "decided_on": "2026-09-16",
+   "reason": "EPA publishes the two sets as ALTERNATIVES, not a menu, and this block previously took marine ENT from the 32/1,000 set (110) and marine ECOLI from the 36/1,000 set (410). The 36/1,000 set was adopted because fresh ECOLI here is 235, which is the 36/1,000 Beach Action Value, so 36/1,000 makes the block internally consistent with the value already in it. marine ENT therefore moves 110 -> 130.",
+   "decided_before_any_california_coefficient_existed": true,
+   "still_outside_this_set": "fresh ENT 61 is EPA 1986, not a 2012 value at all; marine FECAL 400 is EPA 1976; marine TOTAL 10000 has no federal criterion. None of the three is affected by the 2012 magnitude set and none is verified."
+  }
  },
  "states": {
   "CA": {
@@ -100,10 +109,13 @@
      "_verified_on": "2026-09-16"
     },
     "ECOLI": {
-     "threshold": 235,
-     "unit": "MPN/100mL",
-     "basis": "not an AB 411 ocean standard; carried from the freshwater criterion and flagged. CONFIRMED ABSENT from 17 CCR 7958 on 2026-09-16: the regulation lists only total coliform, fecal coliform and enterococcus. Every California E. coli exceedance below is scored against a freshwater number no ocean posting decision uses.",
-     "_verified": false
+     "threshold": null,
+     "no_standard": true,
+     "unit": null,
+     "basis": "NO APPLICABLE STANDARD. 17 CCR 7958 lists only total coliform, fecal coliform and enterococcus; California has no ocean E. coli water-contact standard. Confirmed verbatim 2026-09-16 at https://www.law.cornell.edu/regulations/california/17-CCR-7958.",
+     "reason": "California sets no ocean E. coli standard",
+     "_verified": true,
+     "_verified_on": "2026-09-16"
     },
     "FECAL": {
      "threshold": 400,
@@ -115,9 +127,18 @@
     "TOTAL": {
      "threshold": 10000,
      "unit": "MPN/100mL",
-     "basis": "AB 411 single-sample standard, confirmed verbatim 2026-09-16. The regulation's companion rule drops this to 1,000/100 mL when the fecal/total ratio exceeds 0.1. That rule needs both analytes on the SAME sample and is still NOT applied -- see wq/fit.py. California now has both analytes at many stations, so it is implementable; until it is, every California total-coliform exceedance is scored against the permissive limb of a two-limb standard and is an UNDERCOUNT.",
+     "basis": "AB 411 single-sample standard, confirmed verbatim 2026-09-16. This is the PERMISSIVE limb; the stricter limb is in ratio_rule and is applied wherever a same-sample fecal result exists.",
      "_verified": true,
-     "_verified_on": "2026-09-16"
+     "_verified_on": "2026-09-16",
+     "ratio_rule": {
+      "companion_analyte": "FECAL",
+      "ratio": "FECAL/TOTAL on the same sample",
+      "above": 0.1,
+      "threshold_when_above": 1000,
+      "unit": "MPN/100mL",
+      "basis": "17 CCR 7958(a)(1): '1,000 total coliform bacteria per 100 milliliters, if the ratio of fecal/total coliform bacteria exceeds 0.1'. Confirmed verbatim 2026-09-16 at https://www.law.cornell.edu/regulations/california/17-CCR-7958",
+      "_verified": true
+     }
     }
    },
    "_verified_on": "2026-09-16",

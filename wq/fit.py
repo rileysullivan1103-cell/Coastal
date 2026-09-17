@@ -52,23 +52,159 @@ def load_thresholds(path=None):
         return json.load(handle)
 
 
-def threshold_for(thresholds, state, analyte, water_class):
-    """(value, unit, source_label). A missing entry returns (None, None,
-    'no criterion') and the site is reported as unscoreable rather than being
-    compared against a number nobody chose."""
+def threshold_entry(thresholds, state, analyte, water_class):
+    """(entry, source_label) for the criterion that applies here.
+
+    Split out of threshold_for so the ratio rule and the no-standard marker
+    read the SAME entry the threshold came from. Two lookups drifting apart is
+    how a site ends up scored against one state's number and explained with
+    another's.
+    """
     state = str(state or "").upper()
     states = thresholds.get("states", {})
     if state in states and isinstance(states[state], dict):
-        block = states[state].get(water_class, {})
-        entry = block.get(analyte)
+        entry = states[state].get(water_class, {}).get(analyte)
         if entry:
-            return (entry.get("threshold"), entry.get("unit"),
-                    f"{state}:{water_class}")
-    block = thresholds.get("_default", {}).get(water_class, {})
-    entry = block.get(analyte)
+            return entry, f"{state}:{water_class}"
+    entry = thresholds.get("_default", {}).get(water_class, {}).get(analyte)
     if entry:
-        return entry.get("threshold"), entry.get("unit"), f"_default:{water_class}"
-    return None, None, "no criterion"
+        return entry, f"_default:{water_class}"
+    return None, "no criterion"
+
+
+def threshold_for(thresholds, state, analyte, water_class):
+    """(value, unit, source_label). A missing entry returns (None, None,
+    'no criterion') and the site is reported as unscoreable rather than being
+    compared against a number nobody chose.
+
+    An entry carrying no_standard is NOT a missing entry. It is a state saying
+    there is no criterion for this analyte in this water, and it must not fall
+    through to the federal default -- California has no ocean E. coli
+    standard, and scoring Californian E. coli against EPA's FRESHWATER number
+    would manufacture exceedances against a rule no beach is posted on.
+    """
+    entry, source = threshold_entry(thresholds, state, analyte, water_class)
+    if entry is None:
+        return None, None, "no criterion"
+    if entry.get("no_standard"):
+        return None, None, f"{source}:no applicable standard"
+    return entry.get("threshold"), entry.get("unit"), source
+
+
+def ratio_rule_for(thresholds, state, analyte, water_class):
+    """The stricter limb of a two-limb criterion, or None.
+
+    17 CCR 7958 sets total coliform at 10,000/100 mL, and at 1,000/100 mL when
+    the fecal/total ratio on the same sample exceeds 0.1. Both limbs live in
+    wq/thresholds.json; none of those numbers appears in this file, which is
+    the rule the whole module is built on.
+    """
+    entry, _ = threshold_entry(thresholds, state, analyte, water_class)
+    return (entry or {}).get("ratio_rule")
+
+
+def same_sample_key(frame):
+    """Which rows came off ONE bottle, for pairing two analytes.
+
+    A ratio rule needs both analytes measured on the same sample, not merely
+    on the same day: a morning and an afternoon grab at one station are two
+    samples and their ratio is not a ratio of anything.
+
+    The key is (station_id, sampled_at) when a real time was reported, and
+    (station_id, date) when one was not. Midnight counts as "no time
+    reported", which is not a guess -- wq.covariates.join_samples already
+    treats a 00:00 stamp as a date rather than an hour, for the same reason:
+    agencies that report date-only arrive as midnight, and an hourly join at
+    that stamp attaches the small hours' conditions to a morning sample. The
+    two modules now agree on what a timestamp means.
+    """
+    stamps = pd.to_datetime(frame.get("sampled_at"), errors="coerce", utc=True)
+    has_time = stamps.notna() & ~((stamps.dt.hour == 0)
+                                  & (stamps.dt.minute == 0))
+    dates = pd.to_datetime(frame["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    stamp_text = stamps.dt.strftime("%Y-%m-%dT%H:%M")
+    when = stamp_text.where(has_time, dates)
+    return frame["station_id"].astype(str) + "|" + when.astype(str)
+
+
+def apply_ratio_rules(joined, sites, thresholds):
+    """Per-row exceedance thresholds, where a criterion has two limbs.
+
+    Returns a copy of `joined` carrying:
+
+      exceedance_threshold      the limit THIS row is scored against
+      ratio_value               the companion ratio, where one could be formed
+      ratio_rule_applied        the stricter limb fired
+      ratio_rule_unavailable    no same-sample companion result, so the
+                                permissive limb stands by default
+
+    The last column is the honest one. Where a total-coliform sample has no
+    fecal result off the same bottle, the ratio cannot be computed, the
+    10,000 limb stands, and the exceedance count is an UNDERCOUNT rather than
+    a measurement. Flagging it is the difference between "did not exceed" and
+    "could not be tested".
+    """
+    frame = joined.copy()
+    if frame.empty:
+        for column in ("exceedance_threshold", "ratio_value"):
+            frame[column] = np.nan
+        for column in ("ratio_rule_applied", "ratio_rule_unavailable"):
+            frame[column] = False
+        return frame
+
+    meta = {}
+    if sites is not None and not sites.empty:
+        for _, site in sites.iterrows():
+            meta[str(site.get("station_id"))] = (
+                site.get("state"), site.get("water_class", "marine"))
+    stations = frame["station_id"].astype(str)
+    states = stations.map(lambda s: meta.get(s, (None, "marine"))[0])
+    classes = stations.map(lambda s: meta.get(s, (None, "marine"))[1])
+
+    base, rules = [], []
+    for state, analyte, water_class in zip(states, frame["analyte"], classes):
+        value, _unit, _source = threshold_for(thresholds, state, analyte,
+                                              water_class)
+        base.append(value)
+        rules.append(ratio_rule_for(thresholds, state, analyte, water_class))
+    frame["exceedance_threshold"] = pd.to_numeric(pd.Series(base, index=frame.index),
+                                                  errors="coerce")
+    frame["ratio_value"] = np.nan
+    frame["ratio_rule_applied"] = False
+    frame["ratio_rule_unavailable"] = False
+
+    has_rule = pd.Series([r is not None for r in rules], index=frame.index)
+    if not has_rule.any():
+        return frame
+
+    keys = same_sample_key(frame)
+    values = pd.to_numeric(frame["value"], errors="coerce")
+    for rule in {id(r): r for r in rules if r is not None}.values():
+        companion = str(rule.get("companion_analyte"))
+        above = float(rule.get("above"))
+        strict = float(rule.get("threshold_when_above"))
+        rows = pd.Series([r is not None
+                          and r.get("companion_analyte") == companion
+                          and float(r.get("above")) == above
+                          for r in rules], index=frame.index)
+        if not rows.any():
+            continue
+        # One companion value per bottle. Duplicates on one key are averaged
+        # rather than picked from, so the pairing does not depend on row order.
+        mate = frame[frame["analyte"] == companion]
+        lookup = (pd.Series(pd.to_numeric(mate["value"], errors="coerce").to_numpy(),
+                            index=same_sample_key(mate))
+                  .groupby(level=0).mean())
+        paired = keys[rows].map(lookup)
+        denominator = values[rows]
+        ratio = paired / denominator.where(denominator > 0)
+        frame.loc[rows, "ratio_value"] = ratio
+        fires = ratio > above
+        frame.loc[rows, "ratio_rule_applied"] = fires.fillna(False)
+        frame.loc[rows, "ratio_rule_unavailable"] = ratio.isna()
+        strict_rows = rows & frame["ratio_rule_applied"]
+        frame.loc[strict_rows, "exceedance_threshold"] = strict
+    return frame
 
 
 def auc(values, positive):
@@ -105,8 +241,25 @@ def fit_site_analyte(group, site, analyte, thresholds, strict=True):
 
     value, unit, source = threshold_for(thresholds, site.get("state"), analyte,
                                         site.get("water_class", "marine"))
-    exceeds = (pd.to_numeric(group["value"], errors="coerce") > value
-               if value is not None else pd.Series(np.nan, index=group.index))
+    # Per-row limits where a criterion has two limbs (wq.fit.apply_ratio_rules
+    # puts them on the frame). Falling back to the scalar keeps every caller
+    # that has not run that step working unchanged.
+    if "exceedance_threshold" in group.columns:
+        limits = pd.to_numeric(group["exceedance_threshold"], errors="coerce")
+    else:
+        limits = pd.Series(value, index=group.index, dtype="float64")
+    measured = pd.to_numeric(group["value"], errors="coerce")
+    scoreable = limits.notna()
+    exceeds = (measured > limits).where(scoreable)
+    if not scoreable.any():
+        exceeds = pd.Series(np.nan, index=group.index)
+    reason = "" if scoreable.any() else source
+    n_strict = int(group.get("ratio_rule_applied",
+                             pd.Series(False, index=group.index))
+                   .fillna(False).astype(bool).sum())
+    n_no_ratio = int(group.get("ratio_rule_unavailable",
+                               pd.Series(False, index=group.index))
+                     .fillna(False).astype(bool).sum())
 
     rows = []
     for predictor in config.PREDICTORS:
@@ -141,7 +294,7 @@ def fit_site_analyte(group, site, analyte, thresholds, strict=True):
             print(f"  WARNING: {message}")
 
         separation, n_exceed, n_clean = (auc(series, exceeds)
-                                         if value is not None
+                                         if scoreable.any()
                                          else (np.nan, 0, 0))
         rows.append({
             "station_id": site.get("station_id"),
@@ -162,6 +315,9 @@ def fit_site_analyte(group, site, analyte, thresholds, strict=True):
             "threshold": value,
             "threshold_unit": unit,
             "threshold_source": source,
+            "exceedance_reason": reason,
+            "n_ratio_rule_applied": n_strict,
+            "n_ratio_unavailable": n_no_ratio,
         })
     return rows
 
@@ -213,6 +369,15 @@ def run(joined, sites, nondetects=None, strict=True, payload=None):
     if nondetects is not None and not nondetects.empty:
         flags = {(str(r["station_id"]), r["analyte"]): bool(r["nondetect_flag"])
                  for _, r in nondetects.iterrows()}
+
+    joined = apply_ratio_rules(joined, sites, thresholds)
+    fired = int(joined["ratio_rule_applied"].sum())
+    blind = int(joined["ratio_rule_unavailable"].sum())
+    if fired or blind:
+        print(f"  two-limb criteria: the stricter limb applied to {fired:,} "
+              f"sample(s); {blind:,} had no same-sample companion result, so "
+              "the\n  permissive limb stood and their exceedance count is an "
+              "undercount rather than a measurement")
 
     by_station = {str(s["station_id"]): s for _, s in sites.iterrows()}
     rows, attrition = [], []
