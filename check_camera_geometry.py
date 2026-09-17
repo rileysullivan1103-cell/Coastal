@@ -518,19 +518,26 @@ def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
     reference = load_gray(paths[pick], downsample=downsample)
     if reference is None:
         return pd.DataFrame()
-    rows = []
+    rows, mismatched = [], 0
     for path, date in zip(paths, dates):
         image = load_gray(path, downsample=downsample)
         if image is None:
             continue
         if image.shape != reference.shape:
-            # A resolution change is reported separately and loudly; cropping
-            # to the common area at least keeps the rest of the record usable.
-            height = min(reference.shape[0], image.shape[0])
-            width = min(reference.shape[1], image.shape[1])
-            base, moved = (reference[:height, :width], image[:height, :width])
-        else:
-            base, moved = reference, image
+            # A DIFFERENT FRAME SIZE IS DIFFERENT GROUND, and cropping to the
+            # common area does not make it comparable -- it makes it look
+            # comparable. Walton's five 1280x720 frames are 16:9 against a 4:3
+            # record, so the top-left 1280x720 of the big frame is not the same
+            # scene as the small frame at all; registering them returns a
+            # number with no meaning, and that number then votes in the median,
+            # the two-route gap and the noise floor derived from it.
+            #
+            # A frame size change is a hard epoch boundary. Frames on the other
+            # side of one are not measured against this reference at all; they
+            # are counted and reported, and they belong to their own run.
+            mismatched += 1
+            continue
+        base, moved = reference, image
         got = phase_shift(base, moved,
                           max_shift=max_shift / downsample if max_shift
                           else None)
@@ -541,6 +548,11 @@ def coarse_shifts(paths, dates, pick, downsample=COARSE_DOWNSAMPLE,
                      "confidence": confidence, "outside": outside})
     if not rows:
         return pd.DataFrame()
+    if mismatched:
+        print(f"  {mismatched} frames are a DIFFERENT SIZE from the reference "
+              f"and were not\n  registered against it: a frame size change is "
+              f"its own epoch, and cropping\n  to a common area would compare "
+              f"different ground. Run them separately.")
     frame = pd.DataFrame(rows).set_index("date").sort_index()
     strayed = int(frame["outside"].sum())
     if strayed:
@@ -674,7 +686,7 @@ def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
     That is a test with a right answer, which nothing before it in this module
     has been.
     """
-    rows = []
+    rows, crossings = [], 0
     previous, previous_date = None, None
     for path, date in zip(paths, dates):
         image = load_gray(path, downsample=downsample)
@@ -686,11 +698,14 @@ def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
             previous, previous_date = image, date
             continue
         if image.shape != previous.shape:
-            height = min(previous.shape[0], image.shape[0])
-            width = min(previous.shape[1], image.shape[1])
-            base, moved = previous[:height, :width], image[:height, :width]
-        else:
-            base, moved = previous, image
+            # Same rule as the direct route: a step ACROSS a frame size change
+            # is not a small number, it is an unmeasurable one. The chain
+            # continues from the new size, and the pair that spanned the change
+            # is left out rather than carried as anything.
+            crossings += 1
+            previous, previous_date = image, date
+            continue
+        base, moved = previous, image
         got = phase_shift(base, moved,
                           max_shift=max_shift / downsample if max_shift
                           else None)
@@ -704,6 +719,10 @@ def sequential_shifts(paths, dates, downsample=COARSE_DOWNSAMPLE,
         rows.append({"date": date, "previous": spanned,
                      "dy": dy * downsample, "dx": dx * downsample,
                      "confidence": confidence})
+    if crossings:
+        print(f"  {crossings} consecutive pairs span a frame size change and "
+              f"were NOT measured;\n  a step across one is unmeasurable, not "
+              f"small.")
     if not rows:
         return pd.DataFrame()
     frame = pd.DataFrame(rows).set_index("date").sort_index()

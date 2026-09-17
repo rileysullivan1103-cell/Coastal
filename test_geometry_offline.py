@@ -1672,6 +1672,65 @@ def test_a_changed_frame_size_is_reported():
         shutil.rmtree(tmp)
 
 
+def test_a_different_frame_size_is_dropped_not_cropped():
+    """Cropping to a common area does not make two geometries comparable.
+
+    Both routes used to crop a mismatched frame to the top-left corner it
+    shares with the reference and register it anyway. At Walton that means
+    five 1280x720 frames -- 16:9 -- cut against a 2560x1920 record, which is
+    4:3. The top-left 1280x720 of the big frame is not the same scene as the
+    small frame; it is a different field of view. Registering them returns a
+    number with no meaning, and that number then votes in the median offset,
+    in the two-route gap, and in the noise floor derived from that gap.
+
+    A frame size change is a hard epoch boundary. Frames across one are
+    counted and reported, and they belong to their own run.
+    """
+    print("\nframes of another size are not registered")
+    tmp = tempfile.mkdtemp()
+    try:
+        from PIL import Image
+        def scene(height, width):
+            """Structure a correlator can actually lock onto."""
+            frame = np.zeros((height, width), dtype=np.uint8)
+            frame[:] = np.linspace(20, 90, width, dtype=np.uint8)
+            for row, col in ((0.2, 0.25), (0.55, 0.6), (0.7, 0.2)):
+                top, left = int(row * height), int(col * width)
+                frame[top:top + height // 8, left:left + width // 8] = 235
+            return frame
+
+        dates = list(pd.date_range("2024-03-20", periods=7, freq="1D",
+                                   tz="UTC"))
+        paths = []
+        for index in range(7):
+            # Four 4:3 frames, then two 16:9 ones, then 4:3 again -- the shape
+            # of the Walton span, which reverts rather than staying changed.
+            big = index not in (4, 5)
+            frame = scene(192, 256) if big else scene(108, 192)
+            path = os.path.join(tmp, f"f{index:02d}.jpg")
+            Image.fromarray(frame).save(path, quality=95)
+            paths.append(path)
+
+        direct = g.coarse_shifts(paths, dates, pick=0, downsample=1)
+        check("the odd-sized frames are not measured against the reference",
+              len(direct) == 5, f"{len(direct)} rows from 7 frames")
+        check("...and the dates kept are the ones of the reference's size",
+              list(direct.index) == [dates[i] for i in (0, 1, 2, 3, 6)],
+              [str(d.date()) for d in direct.index])
+
+        chain = g.sequential_shifts(paths, dates, downsample=1)
+        # Pairs 3->4 and 5->6 span the change; 4->5 is within the small size.
+        spans = [(a, b) for a, b in zip(chain.index, chain["previous"])]
+        check("no pair that spans the size change is measured",
+              all(list(dates).index(a) != 4 and list(dates).index(a) != 6
+                  for a, _ in spans),
+              [f"{a.date()}<-{b.date()}" for a, b in spans])
+        check("...and the chain still runs on either side of it",
+              len(chain) >= 3, f"{len(chain)} measured pairs")
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_epochs_count_stills_not_just_samples():
     print("\nepoch sizes in stills")
     dates = list(pd.date_range("2024-01-07", periods=10, freq="7D", tz="UTC"))
@@ -1725,6 +1784,7 @@ def main():
                  test_the_survey_tiles_the_whole_frame,
                  test_a_large_survey_still_finds_the_rigid_block,
                  test_a_changed_frame_size_is_reported,
+                 test_a_different_frame_size_is_dropped_not_cropped,
                  test_epochs_count_stills_not_just_samples):
         test()
     print("\n" + ("ALL PASS" if not FAILURES
