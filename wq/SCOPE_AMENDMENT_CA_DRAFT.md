@@ -20,8 +20,9 @@ Nothing here was chosen in response to a result.
 | 10 | Holdout = 20% of clusters + last 12 months, seed `20260916` | **NO — redrawing invalidates every comparison** |
 | 11 | Santa Cruz Wharf and Carpinteria excluded from replication statistics | **NO — they are already excluded from the holdout too** |
 | 12 | Exceedance comparisons across `region` are confounded by criterion and unit (§4b) | yes |
-| 13 | **PENDING** — what to do about NE fecal coliform being shellfish monitoring (§4c i) | yes, re-fit |
-| 14 | **PENDING** — whether to keep the 22 Great Lakes stations (§4c ii) | yes, re-fit |
+| 13 | **DECIDED** — NE fecal coliform scored against NSSP via a `programme` block (§4c i) | yes, re-fit |
+| 14 | **DECIDED** — the 22 Great Lakes stations excluded (§4c ii) | yes, re-fit |
+| 15 | **DECIDED** — evaluation drops training stations within **0.5 km** of a test cluster; 1.0 km as sensitivity (§6) | yes |
 
 Items 10 and 11 are the ones that stop being free once Phase 2 runs.
 
@@ -141,10 +142,11 @@ C4 exceedance column carries this asymmetry. Report it that way.
 This is on top of the confounding already noted in section 4: region is also
 the state programme, the lab method and the analyte mix.
 
-## 4c. Decisions pending from the pre-report checks
+## 4c. Decisions taken from the pre-report checks
 
-Two findings are recorded here and **not yet acted on**. Both change what the
-study contains, so they are the author's call, not the pipeline's.
+Both findings below are now **acted on**, decided before any Californian
+coefficient existed. Commits `afecf12` (both) and `d6f49e7` (the buffer);
+manifest scope amendment 2 records the exclusion.
 
 **(i) The Northeast fecal coliform is not beach monitoring.** Of 1,692 fitted
 FECAL pairs outside California, **zero** come from a BEACH Act bathing-beach
@@ -156,10 +158,30 @@ in this data every `BEACH Program Site-*` station measures ENT or E. coli and
 none measures fecal coliform. California's FECAL, by contrast, is 488 of 498
 pairs from `BEACH Program Site-Ocean`.
 
-Left as it stands, the FECAL distribution pools a shellfish harvest
-classification with a beach posting decision and calls the result one analyte.
+Left as it stood, the FECAL distribution would pool a shellfish harvest
+classification with a beach posting decision and call the result one analyte.
 It also means the Phase 1 `outfall_type` finding — carried by NJDEP stations —
 was a finding about shellfish waters.
+
+**DECIDED: a `programme` stratum with NSSP thresholds.** `thresholds.json`
+gains a `programmes` block, looked up *before* the state block, carrying the
+NSSP approved-growing-area fecal limit of **43 MPN/100 mL** (verified verbatim
+against Virginia's adoption of the Model Ordinance). Two caveats travel with
+it: 43 is a **90th percentile** of a station's distribution, not a
+single-sample maximum, so roughly a tenth of samples at a compliant station
+are expected to exceed it; and 43 is the MPN figure where the
+membrane-filtration equivalent is 31 CFU, which this pipeline never
+interconverts. The companion geometric-mean limit of 14 is not applied at all,
+because the pipeline scores samples and not stations.
+
+`programme` is derived by `strata.programme_of` from the **WQP location type
+and nothing else** — deriving it from the analyte mix would be easier and is
+precisely what `strata.py` may not do, since strata must be assignable before
+results exist. So the label claims only what it can: published under the BEACH
+Act, or not. It does **not** assert that a `non_beach` station is a growing
+area, and one that is not would be scored against a standard it is not managed
+under. Split: **1,777 `beach_act` / 1,798 `non_beach`**, of which New Jersey
+is 1,744.
 
 **(ii) The Great Lakes level is 22 stations.** All `21NYBCH` bathing beaches,
 all `water_class: fresh`, contributing 22 fitted pairs, every one E. coli.
@@ -167,6 +189,10 @@ They are the only fresh-water stations in the study, so excluding them would
 make the whole study marine and retire the `_default` fresh block entirely.
 Without them `region` is a clean two-level stratum, Atlantic 2,830 against
 Pacific 723.
+
+**DECIDED: excluded.** Listed in `wq/excluded_stations.csv` with a reason, and
+reported in the attrition census under their own outcome rather than quietly
+absent. Manifest scope amendment 2.
 
 ## 5. D6 headline
 
@@ -200,6 +226,18 @@ Per state — 19.2% to 20.5% everywhere, and 19.4% to 21.7% per analyte:
 | CT | 21 | 31 | 2,966 |
 | NY | 29 | 34 | 2,159 |
 | RI | 15 | 26 | 2,841 |
+
+**Adjacency and the training buffer.** Holding out a cluster is not the same as
+holding out a beach: the median held-out cluster has a training station **561 m**
+away, 44.6% have one inside 500 m and **76.3% inside 1 km**, and the closest
+possible is 150 m because that is the cluster radius. The evaluation fit
+therefore drops training stations within **0.5 km** of any test cluster
+(`holdout.buffered_training_stations`), costing 16.1% of training stations;
+**1.0 km is the recorded sensitivity**, costing 40.3% overall and 51.4% of New
+Jersey's — and since New Jersey is the whole shellfish population, at 1 km the
+two arms differ by coast as well as by beach. `holdout_sites.csv` is unchanged:
+the test set is fixed and hashed, and moving it to suit the geometry would be
+choosing a test set after looking at it.
 
 **Guard:** every diagnostic drops held-out clusters *and* the held-out months
 by default, via `common.drop_held_out`. Keeping them requires
