@@ -803,6 +803,10 @@ def test_a_quota_trip_inside_a_NEW_region_is_caught():
               covariates._tide_gauge_is_dry("TESTDRY"))
         check("a gauge with data is not",
               not covariates._tide_gauge_is_dry("TESTWET"))
+        check("a gauge id that went through a CSV as a float still matches",
+              covariates._tide_gauge_is_dry("TESTDRY")
+              and covariates._gauge_id(9410678.0) == "9410678",
+              "pandas reads a column of digits as float64")
         check("a gauge NEVER ASKED is not dry — it must still fail",
               not covariates._tide_gauge_is_dry("TESTNEVERFETCHED"),
               "this is the spent-quota case")

@@ -737,6 +737,27 @@ def _marine_cell_is_dry(key):
         return False
 
 
+def _gauge_id(value):
+    """A CO-OPS gauge id as the cache spells it.
+
+    covariate_sources.csv round-trips tide_station through pandas, which reads
+    a column of digits as float64, so 9410678 comes back as "9410678.0" and
+    every cache lookup built from it misses. The guard then counted 402
+    stations whose gauge had answered "no water level here" as eligible and
+    failing, and read 87.4% where the same check during the build read 100%.
+    The two disagreed only because one held the id in memory and the other had
+    been through a CSV.
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text
+
+
 def _tide_gauge_is_dry(gauge):
     """True only when CO-OPS has ANSWERED that this gauge has no water level.
 
@@ -752,7 +773,8 @@ def _tide_gauge_is_dry(gauge):
     A gauge with NO cache file is still eligible, and still fails. That is the
     case a spent quota produces, and it is the one this guard exists to catch.
     """
-    if not gauge or str(gauge) == "nan":
+    gauge = _gauge_id(gauge)
+    if not gauge:
         return False
     path = os.path.join(CACHE_DIR, f"coops_water_level_{gauge}.csv")
     if not os.path.exists(path):
@@ -772,8 +794,8 @@ def _eligible_stations(rule, stations, sites, meta):
     if kind == "has_tide_gauge":
         if meta is None or "tide_station" not in meta.columns:
             return set()
-        gauged = meta[meta["tide_station"].notna()
-                      & (meta["tide_station"].astype(str) != "")]
+        ids = meta["tide_station"].map(_gauge_id)
+        gauged = meta[ids != ""].assign(tide_station=ids[ids != ""])
         # A gauge that has answered "no water level here" is an answer about
         # the gauge network, exactly as an empty marine cell is an answer
         # about the coast. A gauge never asked is not.
