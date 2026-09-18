@@ -170,3 +170,55 @@ disappears rather than being estimated.
 4. **Solar radiation** — one ERA5 variable, ~a day of quota, best-founded
    omission.
 5. Everything else — no.
+
+---
+
+# Addendum, 2026-09-18 — decisions taken and two expectations overturned
+
+## The permutation null was conservative, not inflated
+
+The concern was that the within-month shuffle destroys the outcome's serial
+correlation, making the null too easy and every "excess over null" an upper
+bound. `--null circular_shift` rolls the series along the time axis instead,
+so every autocorrelation survives and only the covariate alignment breaks.
+
+On the beach population it goes the other way:
+
+| analyte | null@0.30 within → circular | beats own null within → circular |
+|---|---|---|
+| ECOLI | 0.079 → **0.047** | 52.4% → **53.8%** |
+| ENT | 0.182 → **0.163** | 46.0% → **47.1%** |
+| FECAL | 0.114 → **0.071** | 55.8% → **58.4%** |
+| TOTAL | 0.068 → **0.050** | 61.1% → **61.9%** |
+
+Within-month shuffling keeps a sample inside its own calendar month and so
+near similar covariate conditions, which makes it the **tighter** null. The
+headline share of pairs beating their own null was understated, and the two
+nulls differ by only one to three points — which is reassuring about both.
+
+## E. coli river stations: already excluded
+
+Of the ten non-beach E. coli stations, six are USGS gauges on the Connecticut,
+Quinnipiac and Naugatuck rivers, one is a Delaware river, one the Passaic at
+Clay St, one a Harborwatch estuary point and one a Yurok tribal estuary site.
+**`study_scope == beach` already excludes all ten**, leaving 283 beach E. coli
+stations. No further action needed.
+
+Two of them — Smyrna River and Passaic River — landed in `shellfish` rather
+than `unclassified`, because they report fecal coliform and the shellfish rule
+is an inference from that. That is the documented error mode of the rule,
+affecting two stations.
+
+## Great Lakes: IN by the stated rule, pending a quota decision
+
+All chunks now complete (IN 2024 and MN 2019–2026 were transient WQP failures
+and fetched on retry). **368 stations clear the 30-sample floor** — MI 194,
+OH 81, IL 29, PA 27, IN 25, MN 12 — against a rule of "in if roughly 100
+clear". 363 fittable pairs, **every one E. coli**, which is the regulatory
+split doing its work: freshwater beaches are posted on E. coli.
+
+Including them would roughly double the study's E. coli and give it a genuine
+second group. The cost is **164 new Open-Meteo cells**, about 1.7 days of ERA5
+against the daily ceiling plus marine — a real commitment, and one that cannot
+run while the California covariate rebuild is using the same quota. Sequenced
+after it rather than decided against.
