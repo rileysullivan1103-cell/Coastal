@@ -878,8 +878,40 @@ def test_a_quota_trip_inside_a_NEW_region_is_caught():
                 status = _json.load(open(status_path))
                 check("and it says FAIL", status["status"] == "FAIL",
                       "; ".join(status["reasons"])[:70])
+                check("an ABSOLUTE failure is recorded as such",
+                      status.get("absolute_check_failed") is True)
                 check("--fit refuses on it",
                       _fit_refuses(run_wq, Args()))
+
+            # An absolute failure is never waivable by --allow-degraded:
+            # a source that did not answer is not the operator's to excuse.
+            class Accept:
+                allow_degraded_covariates = True
+            try:
+                run_wq._guard_degraded_covariates(starved, meta, Accept())
+            except SystemExit:
+                pass
+            status = _json.load(open(status_path))
+            check("accepting a DEGRADED build does not waive an absolute "
+                  "failure", status["status"] == "FAIL",
+                  "era5 missing 2 of 4 stations")
+
+            # A regression-only failure IS waivable, because the previous file
+            # can be the wrong one -- 372 fabricated shore normals were removed
+            # and the guard called the correction a loss.
+            healthy_sites = sites
+            run_wq._write_build_status(
+                covariates.source_coverage(healthy, healthy_sites, meta),
+                pd.DataFrame([{"predictor": "wind_onshore_ms",
+                               "coverage_before": 0.998,
+                               "coverage_now": 0.893, "lost": 0.105}]),
+                False, ["wind_onshore_ms fell"], accepted=True)
+            status = _json.load(open(status_path))
+            check("an ACCEPTED regression-only loss passes",
+                  status["status"] == "PASS")
+            check("and the acceptance is on the record",
+                  status["accepted_regression"] is True)
+            check("--fit proceeds on it", not _fit_refuses(run_wq, Args()))
         finally:
             config.DATA_DIR = original_dir
 

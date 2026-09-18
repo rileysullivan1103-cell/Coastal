@@ -353,13 +353,35 @@ def stage_covariates(args):
 BUILD_STATUS = "covariates_build_status.json"
 
 
-def _write_build_status(coverage, lost, passed, reasons):
+def _write_build_status(coverage, lost, passed, reasons, accepted=False):
     """The record --fit reads. A build that half-happened has to leave a
     machine-readable trace, because the tables it writes look exactly like a
     complete run's and scrollback does not survive the night."""
+    # A source that did not answer and a value deliberately withheld are not
+    # the same failure, and only one of them is the operator's to waive.
+    #
+    # An ABSOLUTE failure means a source that should have answered did not --
+    # a spent quota, a dead service -- and no flag makes that acceptable, so
+    # it stays FAIL however the run was invoked.
+    #
+    # A REGRESSION is only ever a comparison with the previous file, and the
+    # previous file can be the wrong one. That is exactly what happened here:
+    # 372 stations stopped carrying a fabricated shore normal, so
+    # wind_onshore_ms fell from 0.998 to 0.893 and the guard called it a loss.
+    # It was a correction. The guard cannot know that and should not guess, so
+    # it stops and asks; when the operator says the loss is intended, the
+    # answer is recorded rather than the question left blocking everything
+    # downstream.
+    absolute_failed = bool((~coverage["passed"]).any())
+    status = "PASS" if passed else "FAIL"
+    if not passed and accepted and not absolute_failed:
+        status = "PASS"
     payload = {
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "status": "PASS" if passed else "FAIL",
+        "status": status,
+        "accepted_regression": bool(accepted and not passed
+                                    and not absolute_failed),
+        "absolute_check_failed": absolute_failed,
         "reasons": reasons,
         "sources": [
             {k: (None if (isinstance(v, float) and pd.isna(v)) else v)
@@ -433,7 +455,8 @@ def _guard_degraded_covariates(joined, meta, args):
                        f"{row['coverage_before']:.3f} -> {row['coverage_now']:.3f}"
                        for _, row in lost.iterrows())
     passed = failed.empty and lost.empty
-    _write_build_status(coverage, lost, passed, reasons)
+    accepted = bool(getattr(args, "allow_degraded_covariates", False))
+    _write_build_status(coverage, lost, passed, reasons, accepted=accepted)
 
     if not failed.empty:
         print("\n" + "!" * 78)
