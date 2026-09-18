@@ -78,8 +78,14 @@ class Pair:
     def __init__(self, station_id, analyte, group):
         self.station_id = station_id
         self.analyte = analyte
-        months = pd.to_datetime(group["date"], errors="coerce").dt.month
+        stamps = pd.to_datetime(group["date"], errors="coerce")
+        months = stamps.dt.month
         self.blocks = months.fillna(-1).to_numpy()
+        # Chronological position, for the circular-shift null. A shift is only
+        # meaningful along the time axis, and rows arrive in whatever order the
+        # join left them in.
+        self.order_in_time = np.argsort(
+            stamps.fillna(pd.Timestamp("2100-01-01")).to_numpy(), kind="stable")
         target = pd.to_numeric(group["log_value"], errors="coerce")
         # Same two lines as wq.fit.fit_site_analyte, in the same order.
         self.y = (target - target.groupby(self.blocks).transform("mean")
@@ -127,6 +133,53 @@ class Pair:
         n = next(m["n"] for m in self.masks if predictor in m["predictors"])
         return abs(self.observed[predictor]), predictor, n
 
+    def _score(self, full, permutations):
+        """max |rho| across predictors for each permuted outcome column."""
+        best = np.zeros(permutations)
+        for entry in self.masks:
+            ranks = _normalise(_ranks(full[entry["mask"]]))
+            rho = np.abs(_corr(entry["x"], ranks))
+            best = np.maximum(best, rho.max(axis=0))
+        return best
+
+    def null_best_circular(self, rng, permutations):
+        """A circular time shift, which keeps the outcome's own memory intact.
+
+        The within-month shuffle below breaks the outcome-covariate link, but
+        it also destroys the outcome's serial correlation: a dirty fortnight
+        becomes fourteen independent dirty days. Rain is autocorrelated too,
+        so a null built from independent draws is easier to beat than the real
+        world, and every "excess over null" computed against it is an UPPER
+        BOUND on the real excess.
+
+        A circular shift moves the whole series along the time axis by a
+        random lag and wraps it. Every autocorrelation in the outcome survives
+        exactly; only its alignment with the covariates is destroyed. That is
+        the harder and more honest null.
+
+        The shift is drawn away from both ends, because a lag of one or of
+        n-1 leaves almost every sample next to its own neighbour.
+        """
+        if not self.masks:
+            return np.full(permutations, np.nan)
+        y_ok = np.isfinite(self.y)
+        rows = np.flatnonzero(y_ok)
+        chrono = [i for i in self.order_in_time if y_ok[i]]
+        n = len(chrono)
+        if n < 8:
+            return np.full(permutations, np.nan)
+        series = self.y[chrono]
+        low = max(2, int(round(0.05 * n)))
+        high = n - low
+        if high <= low:
+            return np.full(permutations, np.nan)
+        lags = rng.integers(low, high, size=permutations)
+        full = np.full((len(self.y), permutations), np.nan)
+        idx = np.array(chrono)
+        for column, lag in enumerate(lags):
+            full[idx, column] = np.roll(series, lag)
+        return self._score(full, permutations)
+
     def null_best(self, rng, permutations):
         """max |rho| over the predictors, once per permutation."""
         if not self.masks:
@@ -152,12 +205,7 @@ class Pair:
         rows = np.flatnonzero(y_ok)[order]
         full[rows] = permuted
 
-        best = np.zeros(permutations)
-        for entry in self.masks:
-            ranks = _normalise(_ranks(full[entry["mask"]]))
-            rho = np.abs(_corr(entry["x"], ranks))
-            best = np.maximum(best, rho.max(axis=0))
-        return best
+        return self._score(full, permutations)
 
 
 def build_pairs(samples, wanted):
@@ -204,6 +252,13 @@ def check_against_fit(pairs, coefficients, tolerance=1e-6):
 def main():
     parser = common.diagnostic_parser(__doc__)
     parser.add_argument("--permutations", type=int, default=200)
+    parser.add_argument("--null", default="within_month",
+                        choices=["within_month", "circular_shift"],
+                        help="within_month shuffles inside calendar-month "
+                             "blocks and destroys the outcome's serial "
+                             "correlation, so its excess is an UPPER BOUND. "
+                             "circular_shift rolls the series along the time "
+                             "axis and keeps that memory intact.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None,
                         help="fit only the first N pairs (timing runs only)")
@@ -221,7 +276,8 @@ def main():
     print("TASK 3  A NULL FOR THE D6 ADDRESSABLE-SITE COUNT")
     print("=" * 78)
     print(f"  {len(wanted):,} headline site-analyte pairs, "
-          f"{args.permutations} permutations, seed {args.seed}")
+          f"{args.permutations} permutations, seed {args.seed}, "
+          f"null={args.null}")
 
     columns = ["station_id", "analyte", "date", "log_value"] + config.PREDICTORS
     samples = common.load_samples(usecols=columns)
@@ -237,7 +293,9 @@ def main():
     rows = []
     for index, pair in enumerate(pairs, 1):
         best, predictor, n = pair.best_observed()
-        null = pair.null_best(rng, args.permutations)
+        null = (pair.null_best_circular(rng, args.permutations)
+                if args.null == "circular_shift"
+                else pair.null_best(rng, args.permutations))
         record = {"station_id": pair.station_id, "analyte": pair.analyte,
                   "best_predictor": predictor, "best_abs_rho": best,
                   "n_ctrl_of_best": n,
@@ -310,8 +368,9 @@ def main():
           .rename("pairs").to_string())
 
     print("\nwrote:")
-    common.write(summary, "task3_null_summary.csv")
-    common.write(per_pair, "task3_null_per_pair.csv")
+    suffix = "" if args.null == "within_month" else f"_{args.null}"
+    common.write(summary, f"task3_null_summary{suffix}.csv")
+    common.write(per_pair, f"task3_null_per_pair{suffix}.csv")
     common.write(ecoli[show], "task3_ecoli_detail.csv")
 
 

@@ -762,6 +762,55 @@ def test_every_config_constant_the_code_uses_still_exists():
           config.spec_hash())
 
 
+def test_the_circular_shift_null_keeps_the_series_memory():
+    """The within-month shuffle breaks the outcome-covariate link and also
+    destroys the outcome's serial correlation. The circular shift keeps every
+    autocorrelation intact and only moves the alignment."""
+    print("\n[circular-shift null]")
+    from wq.diagnostics import task3_null as t3
+    rng = np.random.default_rng(3)
+    n = 120
+    dates = pd.date_range("2021-01-03", periods=n, freq="7D")
+    # a strongly autocorrelated outcome: a random walk
+    walk = np.cumsum(rng.normal(size=n))
+    group = pd.DataFrame({
+        "station_id": "A", "analyte": "ENT", "date": dates,
+        "log_value": walk, "rain_24h_mm": rng.random(n),
+        "rain_48h_mm": rng.random(n), "rain_72h_mm": rng.random(n),
+    })
+    pair = t3.Pair("A", "ENT", group).prepare()
+
+    def lag1(v):
+        v = np.asarray(v, dtype=float)
+        v = v[np.isfinite(v)]
+        return float(np.corrcoef(v[:-1], v[1:])[0, 1])
+
+    chrono = [i for i in pair.order_in_time if np.isfinite(pair.y[i])]
+    original = lag1(pair.y[chrono])
+    check("the fixture really is autocorrelated", original > 0.5,
+          f"lag-1 = {original:.2f}")
+
+    rolled = np.roll(pair.y[chrono], 37)
+    check("a circular shift preserves lag-1 autocorrelation",
+          abs(lag1(rolled) - original) < 0.05,
+          f"{lag1(rolled):.2f} vs {original:.2f}")
+    shuffled = pair.y[chrono].copy()
+    np.random.default_rng(0).shuffle(shuffled)
+    check("a shuffle destroys it", abs(lag1(shuffled)) < 0.3,
+          f"lag-1 = {lag1(shuffled):.2f}")
+
+    circ = pair.null_best_circular(np.random.default_rng(1), 40)
+    within = pair.null_best(np.random.default_rng(1), 40)
+    check("the circular null returns a score per permutation",
+          np.isfinite(circ).sum() == 40, f"{int(np.isfinite(circ).sum())}/40")
+    check("both nulls stay in [0,1]",
+          float(np.nanmax(circ)) <= 1.0 and float(np.nanmax(within)) <= 1.0)
+    check("a short series declines the shift rather than faking one",
+          not np.isfinite(t3.Pair("B", "ENT", group.head(6)).prepare()
+                          .null_best_circular(np.random.default_rng(1), 5)).any(),
+          "n<8 returns NaN")
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -784,7 +833,8 @@ def main():
                  test_the_report_does_not_spend_the_holdout_describing_it,
                  test_study_scope_separates_beaches_from_growing_areas,
                  test_chunks_on_disk_cannot_widen_the_study,
-                 test_every_config_constant_the_code_uses_still_exists):
+                 test_every_config_constant_the_code_uses_still_exists,
+                 test_the_circular_shift_null_keeps_the_series_memory):
         test()
     print()
     if FAILURES:
