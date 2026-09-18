@@ -1011,6 +1011,44 @@ def test_overrides_cannot_smuggle_beach_type():
     os.remove(path)
 
 
+def test_a_refused_shore_normal_is_not_replaced_by_a_guess():
+    """geo.shore_normal refuses when the 100 m seaward probe lands on land --
+    inside a harbour it hits the opposite shore. That refusal is the geometry
+    saying there is no single seaward direction, and it must not be papered
+    over with a regional constant: 372 stations in this study are in that
+    position, and wind_onshore_ms would be computed against a bearing the
+    coastline had already denied."""
+    print("\n[refused shore normal]")
+    from wq import covariates
+    refused = {"station_id": "H1", "region": "Pacific", "coastline_sane": True,
+               "shore_normal_deg": None}
+    value, source = covariates.shore_normal_for(refused)
+    check("a refused fit yields no bearing", not np.isfinite(value))
+    check("and the source says the coastline refused",
+          "refused" in source, source)
+
+    never = {"station_id": "N1", "region": "Pacific", "coastline_sane": None,
+             "shore_normal_deg": None}
+    value, source = covariates.shore_normal_for(never)
+    check("a coastline never fetched still gets the regional default",
+          np.isfinite(value) and source == "region", f"{value} / {source}")
+
+    fitted = {"station_id": "F1", "region": "Pacific", "coastline_sane": True,
+              "shore_normal_deg": 191.0, "shore_normal_source": "coastline_tangent"}
+    check("a measured normal is untouched",
+          covariates.shore_normal_for(fitted)[0] == 191.0)
+
+    gl = {"station_id": "G1", "region": "Great Lakes", "coastline_sane": None,
+          "shore_normal_deg": None}
+    check("the Great Lakes still get no default at all",
+          not np.isfinite(covariates.shore_normal_for(gl)[0]))
+
+    onshore, along = covariates.wind_components(
+        pd.Series([5.0]), pd.Series([270.0]), np.nan)
+    check("no bearing means no wind components, not zero ones",
+          not np.isfinite(onshore.iloc[0]) and not np.isfinite(along.iloc[0]))
+
+
 def main():
     for test in (test_land_and_water,
                  test_sanity_check_catches_a_reversed_way,
@@ -1034,7 +1072,8 @@ def main():
                  test_manifest_records_layers_and_amendments,
                  test_beach_type_is_hand_assigned_only,
                  test_review_workflow,
-                 test_overrides_cannot_smuggle_beach_type):
+                 test_overrides_cannot_smuggle_beach_type,
+                 test_a_refused_shore_normal_is_not_replaced_by_a_guess):
         test()
     print()
     if FAILURES:

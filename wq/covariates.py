@@ -505,6 +505,30 @@ def shore_normal_for(site, marine_bearing=None, overrides=None):
                                   or "coastline_tangent")
     if marine_bearing is not None and np.isfinite(marine_bearing):
         return float(marine_bearing), "marine_nudge"
+
+    # A coastline that WAS fetched and whose seaward check refused is not the
+    # same as a coastline nobody asked about, and the two must not share a
+    # fallback.
+    #
+    # geo.shore_normal computes the normal, steps 100 m along it, and asks
+    # whether that point is water; if it is not, it returns None rather than a
+    # bearing that is exactly backwards. Inside a harbour or an enclosed bay
+    # that probe lands on the opposite shore, a breakwater or a pier, so the
+    # refusal is the geometry saying there IS no single seaward direction
+    # here. 372 stations in this study are in that position -- 234 in New
+    # Jersey, 71 in California -- with names like Aquatic Park, BAY#220_SL and
+    # Alamitos Bay B-24.
+    #
+    # Handing those a regional constant asserts a direction the geometry has
+    # already denied, and then wind_onshore_ms and wind_alongshore_ms are
+    # computed against it as though it were measured. Returning nothing is the
+    # honest answer: those two predictors go null, the coverage machinery
+    # reports them missing, and nobody reads a fabricated bearing as a fact
+    # about a harbour. The regional default survives only for a station whose
+    # coastline was never fetched at all, where a guess is at least a guess
+    # about an unknown rather than a contradiction of a measurement.
+    if site.get("coastline_sane") is True:
+        return np.nan, "coastline refused: no single seaward bearing"
     default = REGION_SHORE_NORMAL.get(site.get("region"))
     if default is None:
         return np.nan, "none"
