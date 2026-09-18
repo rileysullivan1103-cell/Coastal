@@ -222,3 +222,47 @@ second group. The cost is **164 new Open-Meteo cells**, about 1.7 days of ERA5
 against the daily ceiling plus marine — a real commitment, and one that cannot
 run while the California covariate rebuild is using the same quota. Sequenced
 after it rather than decided against.
+
+---
+
+# Addendum 2 — the three candidate predictors, tested
+
+All three were proposed in §3 above on the strength of their physics. All
+three were then measured on the beach population, month-demeaned within site,
+against `rain_48h_mm` as the incumbent benchmark. **The null rate for a single
+predictor at the median n of 65 is about 11.6%**, which is the number
+"share clearing 0.20" has to beat.
+
+| candidate | pairs | median rho | median \|rho\| | share \|rho\| ≥ 0.20 | verdict |
+|---|---|---|---|---|---|
+| **rain_48h** (incumbent) | 3,223 | **+0.191** | **0.197** | **49.0%** | the benchmark |
+| antecedent dry days | 3,099 | −0.007 | 0.074 | **12.0%** | **indistinguishable from noise** |
+| time of day | 2,392 | −0.032 | 0.088 | 18.0% | marginal |
+| solar radiation | 798 | **−0.111** | 0.112 | 19.8% | real, and weak |
+
+**Antecedent dry days is exactly the null rate.** 12.0% against 11.6%
+expected. The first-flush effect is real in the literature and is not visible
+here at all — plausibly because 73% of beach rows have zero 24-hour rain, so
+the dry-spell variable is mostly measuring "it is summer in California".
+
+**Time of day is marginal** and confounded: sampling is concentrated at
+06:00–07:00, so the variation is between a handful of agencies' schedules
+rather than across the diurnal cycle.
+
+**Solar radiation is the real one, and it is still weak.** The sign is
+negative, as sunlight-driven die-off requires, and it is consistent across all
+four analytes — ENT −0.134, TOTAL −0.116, FECAL −0.080, ECOLI −0.072 — with
+enterococcus the strongest, which is what UV sensitivity predicts. So this is
+a genuine signal rather than noise. But at a median |rho| of 0.112 it performs
+like `wave_height` (0.09), which is already in the predictor list and
+contributes nothing usable.
+
+**Recommendation: do not add any of the three.** Solar would cost a full
+333-cell ERA5 re-fetch to buy a predictor in the same band as the ones already
+doing no work. One caveat worth recording: this tested same-day mean
+shortwave, and the physics is about cumulative dose between contamination and
+sampling. A lagged solar term might do better and was not tested.
+
+The broader point is the one that keeps recurring. Rain is the only predictor
+in this study that does anything, no site attribute explains why it varies
+between beaches, and adding more weather does not change either fact.
