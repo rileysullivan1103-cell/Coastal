@@ -1,0 +1,721 @@
+station_id,beach_type,water_body_type,water_body_class,ab411_beach,registry_station,match_m,source,assigned_on
+CABEACH_WQX-0,open_coast,Open Coast,Saltwater,No,0,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-1000,open_coast,Open Coast,Saltwater,No,1000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-10000,open_coast,Open Coast,Saltwater,No,10000,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-1100,open_coast,Open Coast,Saltwater,No,1100,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-11000,open_coast,Open Coast,Saltwater,No,11000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-12N,open_coast,Open Coast,Saltwater,No,12N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-13000,open_coast,Open Coast,Saltwater,No,13000,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-14000,open_coast,Open Coast,Saltwater,No,14000,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-15000,open_coast,Open Coast,Saltwater,No,15000,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-15N,open_coast,Open Coast,Saltwater,No,15N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-15S,open_coast,Open Coast,Saltwater,No,15S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-17000,open_coast,Open Coast,Saltwater,No,17000,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-18000,open_coast,Open Coast,Saltwater,No,18000,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-19000,open_coast,Open Coast,Saltwater,No,19000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-20000,open_coast,Open Coast,Saltwater,No,20000,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-21000,open_coast,Open Coast,Saltwater,No,21000,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-21N,open_coast,Open Coast,Saltwater,No,21N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-21S,open_coast,Open Coast,Saltwater,No,21S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-22000,open_coast,Open Coast,Saltwater,No,22000,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-23000,open_coast,Open Coast,Saltwater,No,23000,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-2500,open_coast,Open Coast,Saltwater,No,2500,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-25000,open_coast,Open Coast,Saltwater,No,25000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-27N,open_coast,Open Coast,Saltwater,No,27N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-27S,open_coast,Open Coast,Saltwater,No,27S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-29000,open_coast,Open Coast,Saltwater,No,29000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-29S,open_coast,Open Coast,Saltwater,No,29S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-30000,open_coast,Open Coast,Saltwater,No,30000,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-32000,open_coast,Open Coast,Saltwater,No,32000,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-33000,open_coast,Open Coast,Saltwater,No,33000,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-33N,open_coast,Open Coast,Saltwater,No,33N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-34000,open_coast,Open Coast,Saltwater,No,34000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-35000,open_coast,Open Coast,Saltwater,No,35000,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-36000,open_coast,Open Coast,Saltwater,No,36000,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-37000,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,37000,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-38000,open_coast,Open Coast,Saltwater,No,38000,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-39000,open_coast,Open Coast,Saltwater,No,39000,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-39N,open_coast,Open Coast,Saltwater,No,39N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-39S,open_coast,Open Coast,Saltwater,No,39S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-3N,open_coast,Open Coast,Saltwater,No,3N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-3S,open_coast,Open Coast,Saltwater,No,3S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-4000,open_coast,Open Coast,Saltwater,No,4000,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-40000,open_coast,Open Coast,Saltwater,No,40000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-41000,open_coast,Open Coast,Saltwater,No,41000,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-42000,open_coast,Open Coast,Saltwater,No,42000,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-43000,open_coast,Open Coast,Saltwater,No,43000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-44000,open_coast,Open Coast,Saltwater,No,44000,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-45000,open_coast,Open Coast,Saltwater,No,45000,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-46000,open_coast,Open Coast,Saltwater,No,46000,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-47000,open_coast,Open Coast,Saltwater,No,47000,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-49500,open_coast,Open Coast,Saltwater,No,49500,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-5000,open_coast,Open Coast,Saltwater,No,5000,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-50000,open_coast,Open Coast,Saltwater,No,50000,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-6N,open_coast,Open Coast,Saltwater,No,6N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-6S,open_coast,Open Coast,Saltwater,No,6S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-7000,open_coast,Open Coast,Saltwater,No,7000,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-8100,open_coast,Open Coast,Saltwater,No,8100,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-9N,open_coast,Open Coast,Saltwater,No,9N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-9S,open_coast,Open Coast,Saltwater,No,9S,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-AB10,open_coast,Open Coast,Saltwater,No,AB10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-AB8,open_coast,Open Coast,Saltwater,No,AB8,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ACM1D,open_coast,Open Coast,Saltwater,No,ACM1D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ACM1U,open_coast,Open Coast,Saltwater,No,ACM1D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ACM1Z,open_coast,Open Coast,Saltwater,No,C1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Aquatic Park,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Aquatic Park,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-10,open_coast,Open Coast,Saltwater,No,B-10,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-11,open_coast,Open Coast,Saltwater,No,B-11,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-14,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,B-14,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-22,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,B-22,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-24,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,No,B-24,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-25,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,No,B-25,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-31,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,B-31,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-5,open_coast,Open Coast,Saltwater,No,B-5,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-56,open_coast,Open Coast,Saltwater,No,B-56,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-60,open_coast,Open Coast,Saltwater,No,B-60,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-64,open_coast,Open Coast,Saltwater,No,B-64,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-67,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,B-67,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-7,open_coast,Open Coast,Saltwater,No,B-7,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-8,open_coast,Open Coast,Saltwater,No,B-8,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-B-9,open_coast,Open Coast,Saltwater,No,B-9,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAKER NE,open_coast,Open Coast,Saltwater,No,BAKER NE,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAKER NW,open_coast,Open Coast,Saltwater,No,BAKER NW,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAKER SW,open_coast,Open Coast,Saltwater,No,BAKER SW,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#202.4_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#202.4_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#202.5_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#202.5_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#210.1_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#210.1_SL,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#211_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#211_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#220_SL,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,Yes,BAY#220_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#230_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#230_SL,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#300.1_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#300.1_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#301.1_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#301.1_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#301.2_SL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BAY#301.2_SL,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BAY#320_SL,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,Yes,BAY#320_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BC-010,open_coast,Open Coast,Saltwater,No,IB-010,172.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BC-020,open_coast,Open Coast,Saltwater,No,IB-020,2.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BCO1,open_coast,Open Coast,Saltwater,No,BCO1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP07,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP07,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP08,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP08,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP12,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP12,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP13,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP13,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP14,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP14,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP15,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP15,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP16,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP16,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BDP17,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BDP17,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Bean Hollow Creek,open_coast,Open Coast,Saltwater,No,Bean Hollow Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Bean Hollow State Beach,open_coast,Open Coast,Saltwater,No,Bean Hollow State Beach,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BGCD,open_coast,Open Coast,Saltwater,No,BGCD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BGCU,open_coast,Open Coast,Saltwater,No,BGCU,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH04,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH04,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH05,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH05,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH06,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH06,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH09,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH09,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH11,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH11,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH12,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH12,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH13,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH13,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH15,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH15,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BHH16,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BHH16,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Big River,open_coast,Open Coast,Saltwater,No,Big River,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Black Point,open_coast,Open Coast,Saltwater,No,Black Point,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BLUBRDD,open_coast,Open Coast,Saltwater,No,BLUBRDD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BLUBRDU,open_coast,Open Coast,Saltwater,No,BLUBRDD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BLUBRDZ,open_coast,Open Coast,Saltwater,No,S15,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BLULGND,open_coast,Open Coast,Saltwater,No,BLULGND,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BLULGNU,open_coast,Open Coast,Saltwater,No,BLULGND,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BLULGNZ,open_coast,Open Coast,Saltwater,No,BLULGNZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB01,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB01,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB02,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB02,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB03,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB03,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB05,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB05,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB07,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB07,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB09,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB09,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB10,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB11,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB11,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB12,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB12,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB14,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB14,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB15,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB15,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB17,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB17,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB18,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB18,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB20,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB20,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB21,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB21,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB22,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB22,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB23,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB23,61.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB24E,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB24E,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB24M,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB24M,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB24N,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB24N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB24W,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB24W,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB25,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB25,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB28,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB28,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB29,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB29,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB30,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB30,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB31,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB31,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB32,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB32,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB33,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB33,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB34,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB34,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNB35,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,BNB35,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNS01,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BNS01,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BNS02,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,BNS02,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-BOLINAS,open_coast,Open Coast,Saltwater,No,BOLINAS,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Calera Creek,open_coast,Open Coast,Saltwater,No,Calera Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Campbell Cove,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Campbell Cove,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Caspar Headlands,open_coast,Open Coast,Saltwater,Yes,Caspar Headlands,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CAY13,open_coast,Open Coast,Saltwater,No,CAY13,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CAY14,open_coast,Open Coast,Saltwater,No,CAY14,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CAY16,open_coast,Open Coast,Saltwater,No,CAY16,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CB-01,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,CB-01,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CB-02,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,CB-02,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CBOA,open_coast,Open Coast,Saltwater,Yes,CBOA,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CHICKEN RANCH,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,Yes,CHICKEN RANCH,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CHICKEN RANCH DITCH,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,Yes,CHICKEN RANCH DITCH,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CHINA CAMP,open_coast,Open Coast,Saltwater,Yes,CHINA CAMP,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Clam Beach Co. Park,open_coast,Open Coast,Saltwater,Yes,Clam Beach Co. Park,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CLEOD,open_coast,Open Coast,Saltwater,No,CLEOD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CLEOU,open_coast,Open Coast,Saltwater,No,CLEOD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CLEOZ,open_coast,Open Coast,Saltwater,No,CLEOZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Cowell,open_coast,Open Coast,Saltwater,No,Cowell,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Cowell-BC,open_coast,Open Coast,Saltwater,No,Cowell-BC,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Cowell-CW,open_coast,Open Coast,Saltwater,No,Cowell-CW,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Coyote Point County Park,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Coyote Point County Park,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Crown 2001 Shoreline Dr.,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Crown 2001 Shoreline Dr.,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Crown Bath House,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Crown Bath House,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Crown Bird Sanctuary,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Crown Bird Sanctuary,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Crown Crab Cove,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Crown Crab Cove,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Crown Sunset Rd.,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Crown Sunset Rd.,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Crown Windsurfer Corner,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Crown Windsurfer Corner,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CSBBR1Z,open_coast,Open Coast,Saltwater,No,CSBBR1D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-CSBMP1Z,open_coast,Open Coast,Saltwater,No,CSBMP1D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DILLON,open_coast,Open Coast,Saltwater,Yes,DILLON,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DMB,open_coast,Open Coast,Saltwater,No,DMB,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Doran Park,open_coast,Open Coast,Saltwater,No,Doran Park,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH001,open_coast,Open Coast,Saltwater,No,DPH 001,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 001,open_coast,Open Coast,Saltwater,No,DPH 001,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH002,open_coast,Open Coast,Saltwater,No,DPH 002,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 002,open_coast,Open Coast,Saltwater,No,DPH 002,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH002B,open_coast,Open Coast,Saltwater,No,DPH 002B,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 002B,open_coast,Open Coast,Saltwater,No,DPH 002B,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH003,open_coast,Open Coast,Saltwater,No,DPH 003,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 003,open_coast,Open Coast,Saltwater,No,DPH 003,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH004,open_coast,Open Coast,Saltwater,Yes,DPH 004,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 004,open_coast,Open Coast,Saltwater,Yes,DPH 004,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH004B,open_coast,Open Coast,Saltwater,Yes,DPH 004B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 004B,open_coast,Open Coast,Saltwater,Yes,DPH 004B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH005,open_coast,Open Coast,Saltwater,Yes,DPH 005,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 005,open_coast,Open Coast,Saltwater,Yes,DPH 005,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH005B,open_coast,Open Coast,Saltwater,Yes,DPH 005B,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 005B,open_coast,Open Coast,Saltwater,Yes,DPH 005B,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH006,open_coast,Open Coast,Saltwater,No,DPH 006,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 006,open_coast,Open Coast,Saltwater,No,DPH 006,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH007,open_coast,Open Coast,Saltwater,No,DPH 007,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 007,open_coast,Open Coast,Saltwater,No,DPH 007,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH007B,open_coast,Open Coast,Saltwater,Yes,DPH 007B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 007B,open_coast,Open Coast,Saltwater,Yes,DPH 007B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH008,open_coast,Open Coast,Saltwater,No,DPH 008,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 008,open_coast,Open Coast,Saltwater,No,DPH 008,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH008B,open_coast,Open Coast,Saltwater,No,DPH 008B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 008B,open_coast,Open Coast,Saltwater,No,DPH 008B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH009,open_coast,Open Coast,Saltwater,No,DPH 009,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 009,open_coast,Open Coast,Saltwater,No,DPH 009,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH009B,open_coast,Open Coast,Saltwater,No,DPH 009B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 009B,open_coast,Open Coast,Saltwater,No,DPH 009B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH010,open_coast,Open Coast,Saltwater,No,DPH 010,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 010,open_coast,Open Coast,Saltwater,No,DPH 010,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH010B,open_coast,Open Coast,Saltwater,No,DPH 010B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 010B,open_coast,Open Coast,Saltwater,No,DPH 010B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH101,open_coast,Open Coast,Saltwater,No,DPH 101,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 101,open_coast,Open Coast,Saltwater,No,DPH 101,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH102,open_coast,Open Coast,Saltwater,No,DPH 102,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 102,open_coast,Open Coast,Saltwater,No,DPH 102,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH102B,open_coast,Open Coast,Saltwater,No,DPH 102B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 102B,open_coast,Open Coast,Saltwater,No,DPH 102B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH103,open_coast,Open Coast,Saltwater,No,DPH 103,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 103,open_coast,Open Coast,Saltwater,No,DPH 103,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH103B,open_coast,Open Coast,Saltwater,No,DPH 103B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 103B,open_coast,Open Coast,Saltwater,No,DPH 103B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH104,open_coast,Open Coast,Saltwater,No,DPH 104,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 104,open_coast,Open Coast,Saltwater,No,DPH 104,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH104B,open_coast,Open Coast,Saltwater,No,DPH 104B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 104B,open_coast,Open Coast,Saltwater,No,DPH 104B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH105,open_coast,Open Coast,Saltwater,No,DPH 105,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 105,open_coast,Open Coast,Saltwater,No,DPH 105,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH105B,open_coast,Open Coast,Saltwater,No,DPH 105B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 105B,open_coast,Open Coast,Saltwater,No,DPH 105B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH106,open_coast,Open Coast,Saltwater,No,DPH 106,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 106,open_coast,Open Coast,Saltwater,No,DPH 106,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH107,open_coast,Open Coast,Saltwater,No,DPH 107,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 107,open_coast,Open Coast,Saltwater,No,DPH 107,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH107B,open_coast,Open Coast,Saltwater,No,DPH 107B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 107B,open_coast,Open Coast,Saltwater,No,DPH 107B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH108,open_coast,Open Coast,Saltwater,No,DPH 108,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 108,open_coast,Open Coast,Saltwater,No,DPH 108,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH109,open_coast,Open Coast,Saltwater,No,DPH 109,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 109,open_coast,Open Coast,Saltwater,No,DPH 109,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH110,open_coast,Open Coast,Saltwater,No,DPH 110,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 110,open_coast,Open Coast,Saltwater,No,DPH 110,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH111,open_coast,Open Coast,Saltwater,No,DPH 111,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 111,open_coast,Open Coast,Saltwater,No,DPH 111,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH112,open_coast,Open Coast,Saltwater,No,DPH 112,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 112,open_coast,Open Coast,Saltwater,No,DPH 112,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH112B,open_coast,Open Coast,Saltwater,No,DPH 112B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 112B,open_coast,Open Coast,Saltwater,No,DPH 112B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH113,open_coast,Open Coast,Saltwater,No,DPH 113,45.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 113,open_coast,Open Coast,Saltwater,No,DPH 113,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH113B,open_coast,Open Coast,Saltwater,No,DPH 113B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 113B,open_coast,Open Coast,Saltwater,No,DPH 113B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH114,open_coast,Open Coast,Saltwater,No,DPH 114,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 114,open_coast,Open Coast,Saltwater,No,DPH 114,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH115,open_coast,Open Coast,Saltwater,No,DPH 115,82.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 115,open_coast,Open Coast,Saltwater,No,DPH 115,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH115B,open_coast,Open Coast,Saltwater,No,DPH 115B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 115B,open_coast,Open Coast,Saltwater,No,DPH 115B,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH116,open_coast,Open Coast,Saltwater,No,DPH 116,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 116,open_coast,Open Coast,Saltwater,No,DPH 116,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH117,open_coast,Open Coast,Saltwater,No,DPH 117,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 117,open_coast,Open Coast,Saltwater,No,DPH 117,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH118,open_coast,Open Coast,Saltwater,No,DPH 118,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 118,open_coast,Open Coast,Saltwater,No,DPH 118,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH119,open_coast,Open Coast,Saltwater,No,DPH 119,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 119,open_coast,Open Coast,Saltwater,No,DPH 119,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH120,open_coast,Open Coast,Saltwater,No,DPH 120,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 120,open_coast,Open Coast,Saltwater,No,DPH 120,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH121,open_coast,Open Coast,Saltwater,No,DPH 121,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 121,open_coast,Open Coast,Saltwater,No,DPH 121,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH122,open_coast,Open Coast,Saltwater,No,DPH 122,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 122,open_coast,Open Coast,Saltwater,No,DPH 122,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH123,open_coast,Open Coast,Saltwater,No,DPH 123,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 123,open_coast,Open Coast,Saltwater,No,DPH 123,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH124,open_coast,Open Coast,Saltwater,No,DPH 124,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DPH 124,open_coast,Open Coast,Saltwater,No,DPH 124,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DRAKES BEACH,open_coast,Open Coast,Saltwater,Yes,DRAKES BEACH,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DRAKES ESTERO,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,Yes,DRAKES ESTERO,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DSB1Z,open_coast,Open Coast,Saltwater,No,DSB1D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DSB4Z,open_coast,Open Coast,Saltwater,No,DSB4Z,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DSB5D,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,DSB5D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DSB5U,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,DSB5D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DSB5Z,open_coast,Open Coast,Saltwater,No,DSB5Z,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DUMONDD,open_coast,Open Coast,Saltwater,No,S14,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DUMONDU,open_coast,Open Coast,Saltwater,No,S14,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-DUMONDZ,open_coast,Open Coast,Saltwater,No,S14,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Dunes State Beach,open_coast,Open Coast,Saltwater,No,Dunes State Beach,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-010,open_coast,Open Coast,Saltwater,No,EH-010,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-030,open_coast,Open Coast,Saltwater,No,EH-030,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-050,open_coast,Open Coast,Saltwater,No,EH-050,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-060,open_coast,Open Coast,Saltwater,No,EH-060,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-070,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,EH-070,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-080,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,EH-080,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-090,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,EH-090,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-120,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,EH-120,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-160,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,EH-160,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-200,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,EH-200,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-211,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,EH-211,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-250,open_coast,Open Coast,Saltwater,No,EH-250,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-255,open_coast,Open Coast,Saltwater,Yes,EH-255,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-260,open_coast,Open Coast,Saltwater,No,EH-260,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-280,open_coast,Open Coast,Saltwater,No,EH-280,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-290,open_coast,Open Coast,Saltwater,Yes,EH-290,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-300,open_coast,Open Coast,Saltwater,Yes,EH-300,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-305,open_coast,Open Coast,Saltwater,No,EH-305,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-310,open_coast,Open Coast,Saltwater,No,EH-310,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-320,open_coast,Open Coast,Saltwater,No,EH-320,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-330,open_coast,Open Coast,Saltwater,No,EH-330,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-340,open_coast,Open Coast,Saltwater,No,EH-340,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-360,open_coast,Open Coast,Saltwater,No,EH-360,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-380,open_coast,Open Coast,Saltwater,No,EH-380,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-390,open_coast,Open Coast,Saltwater,Yes,EH-390,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-395,open_coast,Open Coast,Saltwater,No,EH-395,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-400,open_coast,Open Coast,Saltwater,No,EH-400,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-410,open_coast,Open Coast,Saltwater,No,EH-410,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-420,open_coast,Open Coast,Saltwater,Yes,EH-420,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-435,open_coast,Open Coast,Saltwater,No,EH-435,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-440,open_coast,Open Coast,Saltwater,No,EH-440,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-455,open_coast,Open Coast,Saltwater,No,EH-455,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-460,open_coast,Open Coast,Saltwater,No,EH-460,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-475,open_coast,Open Coast,Saltwater,No,EH-475,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-480,open_coast,Open Coast,Saltwater,No,EH-480,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-510,open_coast,Open Coast,Saltwater,Yes,EH-510,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EH-520,open_coast,Open Coast,Saltwater,No,EH-520,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ELMOROD,open_coast,Open Coast,Saltwater,No,ELMOROD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ELMOROU,open_coast,Open Coast,Saltwater,No,ELMOROD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ELMOROZ,open_coast,Open Coast,Saltwater,No,ELMOROZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ELPORTALZ,open_coast,Open Coast,Saltwater,No,ELPORTALZ,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EMRLDD,open_coast,Open Coast,Saltwater,No,EMRLDD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EMRLDU,open_coast,Open Coast,Saltwater,No,EMRLDU,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EMRLDZ,open_coast,Open Coast,Saltwater,No,EMRLDZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EN-010,open_coast,Open Coast,Saltwater,No,EN-010,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EN-020,open_coast,Open Coast,Saltwater,No,EN-020,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EN-030,open_coast,Open Coast,Saltwater,No,EN-030,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EN-040,open_coast,Open Coast,Saltwater,No,EN-040,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-EN-050,open_coast,Open Coast,Saltwater,No,EN-050,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Erckenbrack Park,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Erckenbrack Park,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Fitzgerald Marine (Moss Beach),open_coast,Open Coast,Saltwater,No,Fitzgerald Marine (Moss Beach),0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-FM-010,open_coast,Open Coast,Saltwater,Yes,FM-010,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-FM-030,open_coast,Open Coast,Saltwater,Yes,FM-030,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-FM-050,open_coast,Open Coast,Saltwater,No,FM-050,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-FM-070,open_coast,Open Coast,Saltwater,No,FM-070,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-FM-080,open_coast,Open Coast,Saltwater,No,FM-080,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-FM-090,open_coast,Open Coast,Saltwater,Yes,FM-090,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-FM-100,open_coast,Open Coast,Saltwater,No,FM-100,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Francis State Beach,open_coast,Open Coast,Saltwater,No,Francis State Beach,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Frenchmans Creek,open_coast,Open Coast,Saltwater,No,Frenchmans Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Gazos Creek,open_coast,Open Coast,Saltwater,No,Gazos Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Gazos Creek Access,open_coast,Open Coast,Saltwater,No,Gazos Creek Access,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Goat Rock,open_coast,Open Coast,Saltwater,No,Goat Rock,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Gualala,open_coast,Open Coast,Saltwater,No,Gualala,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+"CABEACH_WQX-Gull Park, Foster City",enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,"Gull Park, Foster City",0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Hare Creek,open_coast,Open Coast,Saltwater,Yes,Hare Creek,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HEARTS DESIRE,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,HEARTS DESIRE,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HEISLRD,open_coast,Open Coast,Saltwater,No,HEISLRD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HEISLRU,open_coast,Open Coast,Saltwater,No,HEISLRD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HEISLRZ,open_coast,Open Coast,Saltwater,No,HEISLRD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HSB23,open_coast,Open Coast,Saltwater,Yes,HSB23,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPCB1,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,CB-01,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPCB2,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,CB-02,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS1,open_coast,Open Coast,Saltwater,No,SMB-MC-2,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS11,open_coast,Open Coast,Saltwater,No,SMB-2-10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS12,open_coast,Open Coast,Saltwater,No,SMB-2-13,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS2,open_coast,Open Coast,Saltwater,No,SMB-1-18,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS3,open_coast,Open Coast,Saltwater,No,SMB-2-4,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS4,open_coast,Open Coast,Saltwater,No,SMB-2-7,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS5,open_coast,Open Coast,Saltwater,No,SMB-3-3,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS6,open_coast,Open Coast,Saltwater,No,SMB-3-4,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS7,open_coast,Open Coast,Saltwater,No,SMB-3-5,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-HYPS8,open_coast,Open Coast,Saltwater,No,SMB-3-8,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-010,open_coast,Open Coast,Saltwater,No,IB-010,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-020,open_coast,Open Coast,Saltwater,No,IB-020,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-030,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,No,IB-030,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-040,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,No,IB-040,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-045,open_coast,Open Coast,Saltwater,No,IB-045,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-050,open_coast,Open Coast,Saltwater,No,IB-050,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-060,open_coast,Open Coast,Saltwater,Yes,IB-060,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-067,open_coast,Open Coast,Saltwater,Yes,IB-067,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-068,open_coast,Open Coast,Saltwater,Yes,IB-068,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-069,open_coast,Open Coast,Saltwater,Yes,IB-069,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-070,open_coast,Open Coast,Saltwater,Yes,IB-070,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-079,open_coast,Open Coast,Saltwater,No,IB-079,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-IB-080,open_coast,Open Coast,Saltwater,No,IB-080,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Keller North Beach,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Keller North Beach,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Keller South Beach,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,Keller South Beach,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Kiteboard Beach,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Kiteboard Beach,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDS1,open_coast,Open Coast,Saltwater,Yes,SMB-7-3,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDS2,open_coast,Open Coast,Saltwater,Yes,SMB-7-4,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDS3,open_coast,Open Coast,Saltwater,Yes,SMB-7-5,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDS5,open_coast,Open Coast,Saltwater,No,SMB-7-6,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDS6,open_coast,Open Coast,Saltwater,Yes,SMB-7-8,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDS7,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,SMB-7-9,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDSB,open_coast,Open Coast,Saltwater,Yes,SMB-7-2,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LACSDSM,open_coast,Open Coast,Saltwater,No,SMB-7-1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Lakeshore Park Rec Center,open_coast,Open Coast,Saltwater,No,Lakeshore Park Rec Center,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LAWSONS LANDING,open_coast,Open Coast,Saltwater,Yes,LAWSONS LANDING,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LINDALD,open_coast,Open Coast,Saltwater,No,LINDALD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LINDALU,open_coast,Open Coast,Saltwater,No,LINDALD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LINDALZ,open_coast,Open Coast,Saltwater,No,LINDALZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Linda Mar Beach #5,open_coast,Open Coast,Saltwater,No,Linda Mar Beach #5,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Linda Mar Beach #7,open_coast,Open Coast,Saltwater,No,Linda Mar Beach #7,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-LOP,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,LOP,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Luffenholtz Creek,open_coast,Open Coast,Saltwater,Yes,Luffenholtz Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Main,open_coast,Open Coast,Saltwater,No,Main,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Main-B,open_coast,Open Coast,Saltwater,No,Main-B,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MAINBCD,open_coast,Open Coast,Saltwater,No,MAINBCD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MAINBCU,open_coast,Open Coast,Saltwater,No,MAINBCD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MAINBCZ,open_coast,Open Coast,Saltwater,No,MAINBCZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Main-C,open_coast,Open Coast,Saltwater,No,Main-C,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MARIPOZ,open_coast,Open Coast,Saltwater,No,MARIPOZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Marlin Park,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Marlin Park,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Martini Creek,open_coast,Open Coast,Saltwater,No,Martini Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-015,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-015,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-031,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-031,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-041,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-041,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-051,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-051,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-053,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-053,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-060,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-060,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-070,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-070,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-080,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-080,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-085,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-085,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-090,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-090,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-100,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-100,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB11,open_coast,Open Coast,Saltwater,No,MB11,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-115,open_coast,Open Coast,Saltwater,Yes,MB-115,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB12,open_coast,Open Coast,Saltwater,No,MB12,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-120,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-120,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB13,open_coast,Open Coast,Saltwater,No,MB13,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-131,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-131,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB14,open_coast,Open Coast,Saltwater,Yes,MB14,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-140,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-140,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-160,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-160,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-170,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-170,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-173,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-173,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-203,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-203,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-205,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-205,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-223,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-223,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-225,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MB-225,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MB-226,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MB-226,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MBH,open_coast,Open Coast,Saltwater,Yes,MBH,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-McNEARS BEACH,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,McNEARS BEACH,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDCD,open_coast,Open Coast,Saltwater,No,MDCD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDCU,open_coast,Open Coast,Saltwater,No,MDCU,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDP10,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MDP10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDP11,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MDP11,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDP18,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MDP18,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDRH-1,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MDRH-1,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDRH-2,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MDRH-2,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MDRH-3,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MDRH-3,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MHH01,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MHH01,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MHH07,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MHH07,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MHH10,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MHH10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MHH14,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,MHH14,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Mill Creek/Trinidad,open_coast,Open Coast,Saltwater,Yes,Mill Creek/Trinidad,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MILLER PARK,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MILLER PARK,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MILLERTON POINT,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MILLERTON POINT,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Montara State Beach,open_coast,Open Coast,Saltwater,No,Montara State Beach,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Moonstone Beach,open_coast,Open Coast,Saltwater,Yes,Moonstone Beach,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MSB,open_coast,Open Coast,Saltwater,Yes,MSB,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MSL,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,MSL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MUIR BEACH - CENTRAL,open_coast,Open Coast,Saltwater,Yes,MUIR BEACH - CENTRAL,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MUIR BEACH - NORTH,open_coast,Open Coast,Saltwater,Yes,MUIR BEACH - NORTH,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-MUIR BEACH - SOUTH,open_coast,Open Coast,Saltwater,Yes,MUIR BEACH - SOUTH,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-North Mad River Mouth,open_coast,Open Coast,Saltwater,Yes,North Mad River Mouth,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-North Roosevelt Creek,open_coast,Open Coast,Saltwater,No,North Roosevelt Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O010,open_coast,Open Coast,Saltwater,No,O010,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O060,open_coast,Open Coast,Saltwater,Yes,O060,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O080,open_coast,Open Coast,Saltwater,Yes,O080,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O099,open_coast,Open Coast,Saltwater,Yes,O099,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O100,open_coast,Open Coast,Saltwater,Yes,O100,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O110,open_coast,Open Coast,Saltwater,No,O110,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O140,open_coast,Open Coast,Saltwater,No,O140,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O170,open_coast,Open Coast,Saltwater,No,O170,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O235,open_coast,Open Coast,Saltwater,No,O235,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O240,open_coast,Open Coast,Saltwater,No,O240,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O320,open_coast,Open Coast,Saltwater,Yes,O320,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O340,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,O340,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O370,open_coast,Open Coast,Saltwater,Yes,O370,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O380,open_coast,Open Coast,Saltwater,Yes,O380,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O410,open_coast,Open Coast,Saltwater,No,O410,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O440,open_coast,Open Coast,Saltwater,No,O440,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O450,open_coast,Open Coast,Saltwater,No,O450,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O460,open_coast,Open Coast,Saltwater,No,O460,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O478,open_coast,Open Coast,Saltwater,No,O478,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O488,open_coast,Open Coast,Saltwater,No,O488,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O490,open_coast,Open Coast,Saltwater,No,O490,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O494,open_coast,Open Coast,Saltwater,No,O494,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O510,open_coast,Open Coast,Saltwater,Yes,O510,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O520,open_coast,Open Coast,Saltwater,Yes,O520,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O530,open_coast,Open Coast,Saltwater,No,O530,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O560,open_coast,Open Coast,Saltwater,Yes,O560,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O580,open_coast,Open Coast,Saltwater,Yes,O580,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-O590,open_coast,Open Coast,Saltwater,Yes,O590,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-010,open_coast,Open Coast,Saltwater,No,OC-010,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-020,open_coast,Open Coast,Saltwater,No,OC-020,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-022,open_coast,Open Coast,Saltwater,No,OC-022,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-030,open_coast,Open Coast,Saltwater,No,OC-030,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-040,open_coast,Open Coast,Saltwater,No,OC-040,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-050,open_coast,Open Coast,Saltwater,No,OC-050,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-080,open_coast,Open Coast,Saltwater,No,OC-080,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-090,open_coast,Open Coast,Saltwater,No,OC-090,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-100,open_coast,Open Coast,Saltwater,Yes,OC-100,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OC-110,open_coast,Open Coast,Saltwater,Yes,OC-110,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCB11,open_coast,Open Coast,Saltwater,Yes,OCB11,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCB12,open_coast,Open Coast,Saltwater,Yes,OCB12,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCB13,open_coast,Open Coast,Saltwater,Yes,OCB13,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#15EAST_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#15EAST_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#15_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#15_SL,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#16_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#16_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#17_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#17_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#18_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#18_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#19_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#19_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#20_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#20_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#21.1_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#21.1_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#21_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#21_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OCEAN#22_SL,open_coast,Open Coast,Saltwater,Yes,OCEAN#22_SL,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OLB05,open_coast,Open Coast,Saltwater,No,ODB05,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OLDE12,open_coast,Open Coast,Saltwater,Yes,OLDE12,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ONB39,open_coast,Open Coast,Saltwater,No,ONB39,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OSB01,open_coast,Open Coast,Saltwater,No,OSB01,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OSB02,open_coast,Open Coast,Saltwater,No,OSB02,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OSB03,open_coast,Open Coast,Saltwater,No,OSB03,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OSB04,open_coast,Open Coast,Saltwater,No,OSB04,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OSB05,open_coast,Open Coast,Saltwater,No,OSB05,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OSL25,open_coast,Open Coast,Saltwater,No,OSL25,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-OSUB1,open_coast,Open Coast,Saltwater,Yes,OSUB1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Oyster Point Marina,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,No,Oyster Point Marina,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PARADISE COVE,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,PARADISE COVE,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PB3,open_coast,Open Coast,Saltwater,Yes,PB3,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PB4,open_coast,Open Coast,Saltwater,Yes,PB4,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PB5,open_coast,Open Coast,Saltwater,Yes,PB5,0.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PEARLD,open_coast,Open Coast,Saltwater,No,PEARLD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PEARLU,open_coast,Open Coast,Saltwater,No,PEARLD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PEARLZ,open_coast,Open Coast,Saltwater,No,PEARLZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pescadero Creek,open_coast,Open Coast,Saltwater,No,Pescadero Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pescadero State Beach,open_coast,Open Coast,Saltwater,No,Pescadero State Beach,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PFB,open_coast,Open Coast,Saltwater,Yes,PFB,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PICO23,open_coast,Open Coast,Saltwater,Yes,PICO23,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PICOD,open_coast,Open Coast,Saltwater,No,PICOZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PICOZ,open_coast,Open Coast,Saltwater,No,PICOZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PIERD,open_coast,Open Coast,Saltwater,No,PIERD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PIERU,open_coast,Open Coast,Saltwater,No,PIERD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PIERZ,open_coast,Open Coast,Saltwater,No,PIERZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pilarcitos Creek,open_coast,Open Coast,Saltwater,No,Pilarcitos Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pillar Point #5,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Pillar Point #5,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pillar Point #7,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Pillar Point #7,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pillar Point #8,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Pillar Point #8,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pillar Point #9,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,Pillar Point #9,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-040,open_coast,Open Coast,Saltwater,Yes,PL-040,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-050,open_coast,Open Coast,Saltwater,Yes,PL-050,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-070,open_coast,Open Coast,Saltwater,Yes,PL-070,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-080,open_coast,Open Coast,Saltwater,No,PL-080,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-082,open_coast,Open Coast,Saltwater,No,PL-082,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-090,open_coast,Open Coast,Saltwater,No,PL-090,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-100,open_coast,Open Coast,Saltwater,No,PL-100,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-110,open_coast,Open Coast,Saltwater,No,PL-110,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PL-120,open_coast,Open Coast,Saltwater,Yes,PL-120,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-POCHED,open_coast,Open Coast,Saltwater,No,POCHED,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-POCHEU,open_coast,Open Coast,Saltwater,No,POCHED,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-POCHEZ,open_coast,Open Coast,Saltwater,No,POCHEZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pomponio Creek,open_coast,Open Coast,Saltwater,No,Pomponio Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pomponio State Beach,open_coast,Open Coast,Saltwater,No,Pomponio State Beach,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PPCD,open_coast,Open Coast,Saltwater,No,PPCD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-PPCU,open_coast,Open Coast,Saltwater,No,PPCU,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Pudding Creek,open_coast,Open Coast,Saltwater,Yes,Pudding Creek,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-RIVERAZ,open_coast,Open Coast,Saltwater,No,RIVERAD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Rockaway Beach,open_coast,Open Coast,Saltwater,No,Rockaway Beach,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-RODEO BEACH - CENTRAL,open_coast,Open Coast,Saltwater,Yes,RODEO BEACH - CENTRAL,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-RODEO BEACH - NORTH,open_coast,Open Coast,Saltwater,Yes,RODEO BEACH - NORTH,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-RODEO BEACH - SOUTH,open_coast,Open Coast,Saltwater,Yes,RODEO BEACH - SOUTH,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Roosevelt State Beach,open_coast,Open Coast,Saltwater,No,Roosevelt State Beach,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-0,open_coast,Open Coast,Saltwater,No,S-0,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S1,open_coast,Open Coast,Saltwater,No,S1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-1,open_coast,Open Coast,Saltwater,No,S-1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S10,open_coast,Open Coast,Saltwater,No,S10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S11,open_coast,Open Coast,Saltwater,No,S11,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-11,open_coast,Open Coast,Saltwater,No,S-11,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S12,open_coast,Open Coast,Saltwater,No,S12,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-13,open_coast,Open Coast,Saltwater,No,S-13,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-15,open_coast,Open Coast,Saltwater,No,S-15,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-17,open_coast,Open Coast,Saltwater,No,S-17,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-19,open_coast,Open Coast,Saltwater,No,S-19,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S2,open_coast,Open Coast,Saltwater,No,S2,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-2,open_coast,Open Coast,Saltwater,No,S-2,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-21,open_coast,Open Coast,Saltwater,No,S-21,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-23,open_coast,Open Coast,Saltwater,No,S-23,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S3,open_coast,Open Coast,Saltwater,No,S3,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-3,open_coast,Open Coast,Saltwater,No,S-3,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S4,open_coast,Open Coast,Saltwater,No,S4,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S5,open_coast,Open Coast,Saltwater,No,S5,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-5,open_coast,Open Coast,Saltwater,No,S-5,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S6,open_coast,Open Coast,Saltwater,No,S6,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-6,open_coast,Open Coast,Saltwater,No,S-6,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S7,open_coast,Open Coast,Saltwater,No,S7,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S8,open_coast,Open Coast,Saltwater,No,S8,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S9,open_coast,Open Coast,Saltwater,No,S9,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-S-9,open_coast,Open Coast,Saltwater,No,S-9,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Salmon Creek,open_coast,Open Coast,Saltwater,No,Salmon Creek,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-San Gregorio Creek,open_coast,Open Coast,Saltwater,No,San Gregorio Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-San Gregorio State Beach,open_coast,Open Coast,Saltwater,No,San Gregorio State Beach,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-San Pedro Creek,open_coast,Open Coast,Saltwater,No,San Pedro Creek,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-San Vicente Creek,open_coast,Open Coast,Saltwater,No,San Vicente Creek,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SAR-N,open_coast,Open Coast,Saltwater,No,SAR-N,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SCB,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,SCB,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SCHOONMAKER BEACH,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,SCHOONMAKER BEACH,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SCM1D,open_coast,Open Coast,Saltwater,No,SCM1D,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SCM1U,open_coast,Open Coast,Saltwater,No,SCM1U,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SCM1Z,open_coast,Open Coast,Saltwater,No,SCM1Z,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SDA,open_coast,Open Coast,Saltwater,Yes,SDA,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SE-010,open_coast,Open Coast,Saltwater,No,SE-010,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SE-020,open_coast,Open Coast,Saltwater,No,SE-020,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SE-030,open_coast,Open Coast,Saltwater,No,SE-030,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SE-040,open_coast,Open Coast,Saltwater,No,SE-040,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SE-050,open_coast,Open Coast,Saltwater,No,SE-050,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SE-060,open_coast,Open Coast,Saltwater,No,SE-060,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SE-070,open_coast,Open Coast,Saltwater,No,SE-070,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SEW7,open_coast,Open Coast,Saltwater,Yes,SEW7,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Sharp Park Beach #3,open_coast,Open Coast,Saltwater,No,Sharp Park Beach #3,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Sharp Park Beach #6,open_coast,Open Coast,Saltwater,No,Sharp Park Beach #6,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SHELL BEACH,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,Yes,SHELL BEACH,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SI-010,open_coast,Open Coast,Saltwater,No,SI-010,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SI-020,open_coast,Open Coast,Saltwater,No,SI-020,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SI-030,open_coast,Open Coast,Saltwater,No,SI-030,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SJC1D,open_coast,Open Coast,Saltwater,No,SJC1D,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SJC1U,open_coast,Open Coast,Saltwater,No,SJC1U,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SJC1Z,open_coast,Open Coast,Saltwater,No,SJC1Z,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SLINDALZ,open_coast,Open Coast,Saltwater,No,SLINDALZ,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-10,open_coast,Open Coast,Saltwater,Yes,SMB-1-10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-12,open_coast,Open Coast,Saltwater,Yes,SMB-1-12,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-13,open_coast,Open Coast,Saltwater,Yes,SMB-1-13,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-14,open_coast,Open Coast,Saltwater,Yes,SMB-1-14,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-16,open_coast,Open Coast,Saltwater,Yes,SMB-1-16,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-17,open_coast,Open Coast,Saltwater,Yes,SMB-1-17,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-18,open_coast,Open Coast,Saltwater,No,SMB-1-18,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-3,open_coast,Open Coast,Saltwater,Yes,SMB-1-3,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-6,open_coast,Open Coast,Saltwater,No,SMB-1-6,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-1-8,open_coast,Open Coast,Saltwater,No,SMB-1-8,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-2-1,open_coast,Open Coast,Saltwater,No,SMB-2-1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-2-10,open_coast,Open Coast,Saltwater,No,SMB-2-10,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-2-11,open_coast,Open Coast,Saltwater,No,SMB-2-11,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-2-13,open_coast,Open Coast,Saltwater,No,SMB-2-13,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-2-4,open_coast,Open Coast,Saltwater,No,SMB-2-4,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-2-7,open_coast,Open Coast,Saltwater,No,SMB-2-7,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-3-3,open_coast,Open Coast,Saltwater,No,SMB-3-3,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-3-4,open_coast,Open Coast,Saltwater,No,SMB-3-4,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-3-5,open_coast,Open Coast,Saltwater,No,SMB-3-5,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-3-6,open_coast,Open Coast,Saltwater,No,SMB-3-6,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-3-8,open_coast,Open Coast,Saltwater,No,SMB-3-8,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-1,open_coast,Open Coast,Saltwater,No,SMB-7-1,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-2,open_coast,Open Coast,Saltwater,Yes,SMB-7-2,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-3,open_coast,Open Coast,Saltwater,Yes,SMB-7-3,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-4,open_coast,Open Coast,Saltwater,Yes,SMB-7-4,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-5,open_coast,Open Coast,Saltwater,Yes,SMB-7-5,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-6,open_coast,Open Coast,Saltwater,No,SMB-7-6,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-8,open_coast,Open Coast,Saltwater,Yes,SMB-7-8,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-7-9,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,No,SMB-7-9,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SMB-MC-2,open_coast,Open Coast,Saltwater,No,SMB-MC-2,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-South Roosevelt Creek,open_coast,Open Coast,Saltwater,No,South Roosevelt Beach,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SPB,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,SPB,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-SSB,open_coast,Open Coast,Saltwater,Yes,SSB,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-STCO,enclosed_bay,"Sound, Bay, or Inlet",Saltwater,Yes,STCO,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Stillwater,open_coast,Open Coast,Saltwater,No,Stillwater,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-STINSON BEACH - CENTRAL,open_coast,Open Coast,Saltwater,Yes,STINSON BEACH - CENTRAL,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-STINSON BEACH - NORTH,open_coast,Open Coast,Saltwater,Yes,STINSON BEACH - NORTH,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-STINSON BEACH - SOUTH,open_coast,Open Coast,Saltwater,Yes,STINSON BEACH - SOUTH,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Surfers Beach,open_coast,Open Coast,Saltwater,No,Surfers Beach,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-TRFCYND,open_coast,Open Coast,Saltwater,No,TRFCYND,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-TRFCYNU,open_coast,Open Coast,Saltwater,No,TRFCYND,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-TRFCYNZ,open_coast,Open Coast,Saltwater,No,TRFCYNZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Van Damme,open_coast,Open Coast,Saltwater,No,Van Damme,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Venice Beach,open_coast,Open Coast,Saltwater,No,Venice Beach,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-VICTRAD,open_coast,Open Coast,Saltwater,No,S16,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-VICTRAU,open_coast,Open Coast,Saltwater,No,S16,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-VICTRAZ,open_coast,Open Coast,Saltwater,No,S16,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Virgin Creek,open_coast,Open Coast,Saltwater,Yes,Virgin Creek,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-VVS,open_coast,Open Coast,Saltwater,Yes,VVS,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WESTD,open_coast,Open Coast,Saltwater,No,WESTD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WESTU,open_coast,Open Coast,Saltwater,No,WESTD,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WESTZ,open_coast,Open Coast,Saltwater,No,WESTZ,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Wharf-East,open_coast,Open Coast,Saltwater,No,Wharf-East,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-Whitehouse Pool,enclosed_bay,"Sound, Bay, or Inlet",Estuarine,Yes,Whitehouse Pool,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000004,open_coast,Open Coast,Saltwater,No,WP0000004,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000007,open_coast,Open Coast,Saltwater,No,WP0000007,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000012,open_coast,Open Coast,Saltwater,Yes,WP0000012,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000013,open_coast,Open Coast,Saltwater,No,WP0000013,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000018,open_coast,Open Coast,Saltwater,No,WP0000018,0.8,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000023,open_coast,Open Coast,Saltwater,No,WP0000023,0.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000037,open_coast,Open Coast,Saltwater,No,WP0000037,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000072,open_coast,Open Coast,Saltwater,No,WP0000072,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000079,open_coast,Open Coast,Saltwater,No,WP0000079,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000080,open_coast,Open Coast,Saltwater,No,WP0000080,0.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000083,open_coast,Open Coast,Saltwater,No,WP0000083,0.5,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000085,open_coast,Open Coast,Saltwater,No,WP0000085,0.3,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000147,open_coast,Open Coast,Saltwater,No,WP0000147,0.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000180,open_coast,Open Coast,Saltwater,No,WP0000180,0.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000183,open_coast,Open Coast,Saltwater,No,WP0000183,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-WP0000188,open_coast,Open Coast,Saltwater,No,WP0000188,0.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CABEACH_WQX-ZMB,open_coast,Open Coast,Saltwater,Yes,ZMB,0.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Cowell,open_coast,Open Coast,Saltwater,No,Cowell,27.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Cowell-BC,open_coast,Open Coast,Saltwater,No,Cowell-C,18.6,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Cowell-C,open_coast,Open Coast,Saltwater,No,Cowell-C,12.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Cowell-CW,open_coast,Open Coast,Saltwater,No,Cowell-CW,7.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-CSD-031,open_coast,Open Coast,Saltwater,No,EH-260,51.7,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Main,open_coast,Open Coast,Saltwater,No,Main,11.4,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Main-A,open_coast,Open Coast,Saltwater,No,Main-B,5.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Main-B,open_coast,Open Coast,Saltwater,No,Main-B,5.9,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Main-C,open_coast,Open Coast,Saltwater,No,Main-B,11.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Main-D,open_coast,Open Coast,Saltwater,No,Main,19.2,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Wharf,open_coast,Open Coast,Saltwater,No,O488,16.1,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
+CEDEN-Wharf-East,open_coast,Open Coast,Saltwater,No,Main-B,14.0,data.ca.gov CKAN resource 98e628ff-d012-4982-ad32-b9f9ad8ab524 (CA beach station registry),2026-09-17
