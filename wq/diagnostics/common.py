@@ -35,7 +35,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 
-from wq import config, holdout, scope as study_scope  # noqa: E402
+from wq import config, holdout, keys, scope as study_scope  # noqa: E402
 
 OUT_DIR = os.path.join(config.OUT_DIR, "diagnostics")
 # Set by --scope. A scoped run writes to its own tree so a beach-only number
@@ -70,11 +70,13 @@ def write(frame, name):
 
 
 def load_coefficients():
-    return pd.read_csv(os.path.join(config.OUT_DIR, "coefficients.csv"))
+    return keys.coerce(pd.read_csv(
+        os.path.join(config.OUT_DIR, "coefficients.csv"), low_memory=False))
 
 
 def load_attrition():
-    return pd.read_csv(os.path.join(config.OUT_DIR, "attrition.csv"))
+    return keys.coerce(pd.read_csv(
+        os.path.join(config.OUT_DIR, "attrition.csv"), low_memory=False))
 
 
 def load_nondetects():
@@ -82,14 +84,15 @@ def load_nondetects():
 
 
 def load_sites():
-    return pd.read_csv(os.path.join(config.DATA_DIR,
-                                    "stations_stratified.csv"))
+    return keys.coerce(pd.read_csv(
+        os.path.join(config.DATA_DIR, "stations_stratified.csv"),
+        low_memory=False))
 
 
 def load_samples(usecols=None):
-    return pd.read_csv(os.path.join(config.DATA_DIR,
-                                    "samples_with_covariates.csv"),
-                       usecols=usecols, low_memory=False)
+    return keys.coerce(pd.read_csv(
+        os.path.join(config.DATA_DIR, "samples_with_covariates.csv"),
+        usecols=usecols, low_memory=False))
 
 
 def flagged_pairs(nondetects=None):

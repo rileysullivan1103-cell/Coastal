@@ -93,7 +93,8 @@ def read_hypothesis_sites(path=None):
     path = path or HYPOTHESIS_PATH
     if not os.path.exists(path):
         return pd.DataFrame(columns=["station_id", "site_cluster", "label"])
-    return pd.read_csv(path, dtype=str)
+    from . import keys
+    return keys.coerce(pd.read_csv(path, dtype=str))
 
 
 def read_holdout(path=None):

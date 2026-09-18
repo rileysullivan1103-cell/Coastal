@@ -33,8 +33,9 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from . import (clean, config, covariates, fit, holdout, layers, manifest,
-               pull, report, review, scope as study_scope, spatial, strata)
+from . import (clean, config, covariates, fit, holdout, keys, layers,
+               manifest, pull, report, review, scope as study_scope, spatial,
+               strata)
 
 CAFFEINATE_FLAG = "WQ_CAFFEINATED"
 
@@ -94,7 +95,7 @@ def _read(name, what):
     path = _path(name)
     if not os.path.exists(path):
         sys.exit(f"{path} is missing — {what}")
-    return pd.read_csv(path, low_memory=False)
+    return keys.coerce(pd.read_csv(path, low_memory=False))
 
 
 def _write(frame, name):
@@ -430,7 +431,7 @@ def _guard_degraded_covariates(joined, meta, args):
     previous = None
     path = _path(JOINED)
     if os.path.exists(path):
-        previous = pd.read_csv(path, low_memory=False)
+        previous = keys.coerce(pd.read_csv(path, low_memory=False))
     lost = covariates.regression_against(joined, previous)
 
     # The absolute check. regression_against only sees stations a previous
@@ -586,8 +587,10 @@ def stage_report(args):
     print("\n=== REPORT ===")
     payload = manifest.require_manifest()
     sites = _read(STRATIFIED, "run --strata first")
-    coefficients = pd.read_csv(os.path.join(config.OUT_DIR, COEFFICIENTS))
-    attrition = pd.read_csv(os.path.join(config.OUT_DIR, ATTRITION))
+    coefficients = keys.coerce(
+        pd.read_csv(os.path.join(config.OUT_DIR, COEFFICIENTS), low_memory=False))
+    attrition = keys.coerce(
+        pd.read_csv(os.path.join(config.OUT_DIR, ATTRITION), low_memory=False))
     shares = _read(NONDETECTS, "run --clean first")
     meta_path = _path(COVARIATE_META)
     if os.path.exists(meta_path):

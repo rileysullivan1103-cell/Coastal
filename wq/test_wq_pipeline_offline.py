@@ -928,6 +928,76 @@ def _fit_refuses(run_wq, args):
     return False
 
 
+def test_a_guard_gives_the_same_answer_down_both_code_paths():
+    """The tide-station bug: a guard read 100% against an in-memory frame and
+    87.4% against the CSV that same build had just written, because pandas
+    turns a column of gauge ids into float64 and writes 9410678 back as
+    9410678.0. It was found by accident. This runs the SAME guard down both
+    paths and requires them to agree."""
+    print("\n[same guard, both paths]")
+    from wq import keys
+    from wq.covariates import CACHE_DIR, _EMPTY_MARKER
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    dry = os.path.join(CACHE_DIR, "coops_water_level_9410678.csv")
+    made = False
+    if not os.path.exists(dry):
+        pd.DataFrame(columns=[_EMPTY_MARKER]).to_csv(dry, index=False)
+        made = True
+    try:
+        # in memory the ids are strings, exactly as covariates.build leaves them
+        # C carries no gauge at all, which is what puts a NaN in the column
+        # and makes pandas read the whole thing back as float64 -- the exact
+        # condition under which 9410678 becomes "9410678.0".
+        meta_mem = pd.DataFrame([
+            {"station_id": "A", "tide_station": "9410678"},   # gauge answered "none"
+            {"station_id": "B", "tide_station": "9411340"},   # a live gauge
+            {"station_id": "C", "tide_station": None},        # no gauge within range
+        ])
+        sites = pd.DataFrame([{"station_id": s, "lat": 34.0, "lon": -119.0,
+                               "state": "CA"} for s in "ABC"])
+        rows = []
+        for s in "ABC":
+            rows.append({"station_id": s, "date": "2021-01-01",
+                         "rain_24h_mm": 1.0, "temperature_2m": 2.0,
+                         "wind_onshore_ms": 0.5, "wave_height": 1.0,
+                         "wave_period": 8.0, "level_m": np.nan,
+                         "rate_m_per_hr": np.nan, "water_temp_c": np.nan})
+        joined = pd.DataFrame(rows)
+
+        mem = covariates.source_coverage(joined, sites, meta_mem)
+
+        # the same meta, round-tripped through a CSV as the pipeline writes it
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "covariate_sources.csv")
+            meta_mem.to_csv(path, index=False)
+            raw = pd.read_csv(path, low_memory=False)
+            check("pandas really does change the id on the way back",
+                  str(raw["tide_station"].iloc[0]) != "9410678",
+                  f"read back as {raw['tide_station'].iloc[0]!r} "
+                  f"(dtype {raw['tide_station'].dtype})")
+            disk = covariates.source_coverage(joined, sites, keys.coerce(raw))
+
+        for source in ("era5", "marine", "tide", "water_temp"):
+            a = mem.set_index("source").loc[source]
+            b = disk.set_index("source").loc[source]
+            check(f"{source}: both paths agree on eligibility",
+                  int(a["eligible_stations"]) == int(b["eligible_stations"]),
+                  f"memory {int(a['eligible_stations'])} vs csv "
+                  f"{int(b['eligible_stations'])}")
+        check("and the dry gauge is excluded either way",
+              int(mem.set_index("source").loc["tide", "eligible_stations"]) == 1
+              and int(disk.set_index("source").loc["tide", "eligible_stations"]) == 1,
+              "A's gauge answered 'no water level', C has none: only B eligible")
+        check("coercing is idempotent",
+              keys.as_key(keys.as_key(9410678.0)) == "9410678")
+        check("a genuine decimal identifier is not truncated",
+              keys.as_key("12.5") == "12.5")
+    finally:
+        if made:
+            os.remove(dry)
+
+
 def main():
     for test in (test_grid_cell_sharing,
                  test_a_cached_nothing_can_be_read_back,
@@ -938,6 +1008,7 @@ def main():
                  test_a_cache_from_an_older_schema_is_not_an_answer,
                  test_a_spent_quota_cannot_overwrite_a_good_covariate_file,
                  test_a_quota_trip_inside_a_NEW_region_is_caught,
+                 test_a_guard_gives_the_same_answer_down_both_code_paths,
                  test_an_empty_layer_has_to_say_why,
                  test_shore_normal_priority,
                  test_wind_components,

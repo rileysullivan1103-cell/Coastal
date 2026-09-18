@@ -95,7 +95,8 @@ def read(path=None):
     path = path or SCOPE_PATH
     if not os.path.exists(path):
         return pd.DataFrame(columns=["station_id", "study_scope"])
-    return pd.read_csv(path, dtype={"station_id": str})
+    from . import keys
+    return keys.coerce(pd.read_csv(path, dtype={"station_id": str}))
 
 
 def stations_in(scope, path=None):
