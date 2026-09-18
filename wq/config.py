@@ -239,6 +239,60 @@ SPEC_KEYS = (
 # Above it the median collapses and the spread doubles. A station reporting
 # 89.5% of its enterococcus at exactly 10 sat just under the old 0.90 bar and
 # went unflagged while carrying a headline coefficient of -0.231.
+# What a covariate build has to achieve before its output may replace the
+# file already on disk. NOT in SPEC_KEYS: these gate whether a BUILD is
+# accepted, and change no coefficient, no pair and no floor.
+#
+# They exist because the guard that came first compared coverage only against
+# the stations the previous file already held, and the 723 new Californian
+# stations were in no previous file. A quota trip landing entirely inside
+# California would have passed that check by construction.
+#
+# The asymmetry between the four is the whole design:
+#
+#   era5        unconditional, and nearly total. It is a reanalysis GRID --
+#               every coastal point has a value, so a station with no ERA5 row
+#               did not fail to have weather, it failed to be asked.
+#   marine      conditional. The wave model has no answer for a land cell, and
+#               the cache records that as an absence rather than a refusal.
+#   tide        conditional, same polarity. A station with no CO-OPS gauge
+#               within MAX_TIDE_GAUGE_KM is not eligible, and neither is one
+#               whose gauge has ANSWERED that it holds no water level. A gauge
+#               never ASKED is still eligible and still fails: that is the
+#               quota case.
+#   water_temp  not gated at all. Gauges that report water level frequently do
+#               not report temperature.
+#
+# A source with min_station_coverage None is recorded and never gates.
+COVARIATE_SOURCE_REQUIREMENTS = {
+    "era5": {
+        "predictors": ["rain_24h_mm", "rain_48h_mm", "rain_72h_mm",
+                       "temperature_2m", "wind_onshore_ms",
+                       "wind_alongshore_ms"],
+        "eligibility": "all",
+        "min_station_coverage": 0.99,
+        "why": "a reanalysis grid has a value everywhere; a gap is a refusal",
+    },
+    "marine": {
+        "predictors": ["wave_height", "wave_period"],
+        "eligibility": "cell_has_water",
+        "min_station_coverage": 0.95,
+        "why": "no waves in a land cell is an answer, not a failure",
+    },
+    "tide": {
+        "predictors": ["level_m", "rate_m_per_hr"],
+        "eligibility": "has_tide_gauge",
+        "min_station_coverage": 0.95,
+        "why": "no gauge within MAX_TIDE_GAUGE_KM is a fact about the coast",
+    },
+    "water_temp": {
+        "predictors": ["water_temp_c"],
+        "eligibility": "has_tide_gauge",
+        "min_station_coverage": None,
+        "why": "water-level gauges often do not report temperature",
+    },
+}
+
 # D2 (reporting, NOT specification): what a stratum has to achieve before the
 # report says it EXPLAINS the spread rather than merely differing from a
 # shuffle. Outside SPEC_KEYS -- these gate wording, not arithmetic. Every

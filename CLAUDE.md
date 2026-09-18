@@ -12,6 +12,19 @@ python wq/test_wq_fit_offline.py
 python wq/test_wq_geo_offline.py
 ```
 
+**Check the EXIT CODE, not the output.** A suite that dies on an uncaught
+exception prints a traceback and no `FAIL` lines, so counting `FAIL` lines
+reports it as passing. And in shell, `$(basename $t)` resets `$?` — capture the
+status into a variable on the line after the run:
+
+```sh
+for t in wq/test_*_offline.py; do n=$(basename $t); python $t >/dev/null 2>&1; rc=$?;
+  printf "%-32s exit=%s\n" "$n" "$rc"; done
+```
+
+Both of those mistakes were made here, and together they let two separate
+`config.py` deletions through.
+
 **This is not advisory and "it was a small edit" is not an exception.** On
 2026-09-17 a one-constant edit to `wq/config.py` silently deleted
 `STRATUM_MIN_NARROWING` and `STRATUM_MIN_SMALLEST_LEVEL_SHARE`, because the

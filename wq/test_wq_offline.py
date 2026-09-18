@@ -717,6 +717,51 @@ def test_chunks_on_disk_cannot_widen_the_study():
           "the gate is about the UNSCOPED case only")
 
 
+def test_every_config_constant_the_code_uses_still_exists():
+    """Twice now a config.py edit has deleted a constant it was not aiming at,
+    because the replaced span reached further than intended -- once
+    STRATUM_MIN_NARROWING and STRATUM_MIN_SMALLEST_LEVEL_SHARE, once
+    COVARIATE_SOURCE_REQUIREMENTS. Both survived a suite run: the first because
+    nothing exercised it, the second because the crash it caused was an
+    uncaught exception rather than a FAIL line, and the check being used
+    counted FAIL lines.
+
+    So this walks the package, finds every config.X the code actually
+    references, and asserts each one is there. A deletion now fails here
+    instead of three hours later inside a covariate build.
+    """
+    print("\n[config constants]")
+    import glob as _glob
+    import re as _re
+    package = os.path.dirname(os.path.abspath(__file__))
+    referenced = {}
+    for path in _glob.glob(os.path.join(package, "**", "*.py"), recursive=True):
+        if os.path.basename(path).startswith("test_"):
+            continue
+        text = open(path).read()
+        for name in _re.findall(r"\bconfig\.([A-Z][A-Z0-9_]+)\b", text):
+            referenced.setdefault(name, set()).add(os.path.basename(path))
+    check("the scan found a meaningful number of constants",
+          len(referenced) >= 15, f"{len(referenced)} referenced")
+    missing = {n: sorted(f) for n, f in referenced.items()
+               if not hasattr(config, n)}
+    check("every config.X referenced in wq/ exists", not missing,
+          "; ".join(f"{n} used by {', '.join(f)}"
+                    for n, f in sorted(missing.items())) or "none missing")
+    # the ones whose absence has actually broken a run
+    for name in ("COVARIATE_SOURCE_REQUIREMENTS", "STRATUM_MIN_NARROWING",
+                 "STRATUM_MIN_SMALLEST_LEVEL_SHARE", "FLAT_SERIES_SHARE"):
+        check(f"config.{name} is present", hasattr(config, name))
+    # this one lives in strata.py, not config -- the first draft of this test
+    # asserted it on config and failed, which is the test working
+    check("strata.SITE_CLUSTER_RADIUS_KM is present",
+          hasattr(strata, "SITE_CLUSTER_RADIUS_KM"))
+    check("the frozen specification is still complete",
+          all(hasattr(config, k) for k in config.SPEC_KEYS))
+    check("and its hash is unchanged", config.spec_hash() == "e4da2f400be5c6f0",
+          config.spec_hash())
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -738,7 +783,8 @@ def main():
                  test_the_review_directory_does_not_shadow_the_review_module,
                  test_the_report_does_not_spend_the_holdout_describing_it,
                  test_study_scope_separates_beaches_from_growing_areas,
-                 test_chunks_on_disk_cannot_widen_the_study):
+                 test_chunks_on_disk_cannot_widen_the_study,
+                 test_every_config_constant_the_code_uses_still_exists):
         test()
     print()
     if FAILURES:
