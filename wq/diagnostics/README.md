@@ -19,6 +19,12 @@ python -m wq.diagnostics.task0_reconcile
 python -m wq.diagnostics.task1_rain
 python -m wq.diagnostics.task2_stratum                     # default: outfall_type
 python -m wq.diagnostics.task2_stratum --stratum region
+python -m wq.diagnostics.holdout_audit --write-buffer
+
+# the headline population is beaches, not the pooled study
+python -m wq.diagnostics.task1_rain --scope beach
+python -m wq.diagnostics.task3_null --scope beach
+python -m wq.diagnostics.task3_null --scope beach --null circular_shift
 python -m wq.diagnostics.task3_null                       # 200 permutations, seed 0
 python -m wq.diagnostics.task3_null --permutations 500 --seed 7
 python -m wq.diagnostics.task3_null --permutations 20 --limit 300   # timing probe
@@ -35,7 +41,8 @@ permutations.
 | `task0_reconcile.py` | Closes the gap between `coefficients.csv` (32,857 rows) and D5's test count (24,596) | `task0_reconciliation.csv`, `task0_untested_by_predictor.csv`, `task0_by_analyte.csv` |
 | `task1_rain.py` | Rain vs bacteria per analyte and window, with sign, raw significance, BH and magnitude side by side; broken out by `outfall_type`; looks for the three prior small-sample beaches | `task1_rain_by_analyte.csv`, `task1_rain_by_outfall_type.csv`, `task1_negative_by_outfall_type.csv`, `task1_prior_sites_lookup.csv` |
 | `task2_stratum.py` | **EXPLORATORY / post hoc.** Stress-tests any pre-registered grouping (`--stratum`, default `outfall_type`): small levels excluded, small levels merged, leave-one-level-out, large-levels-only, pooled and per analyte | `task2_<stratum>_variants.csv`, `task2_<stratum>_small_level_stations.csv`, `task2_<stratum>_small_level_shared.csv` |
-| `task3_null.py` | A permutation null for D6's addressable-site count: the outcome is shuffled within calendar-month blocks and the max-of-k `\|rho_ctrl\|` is recomputed | `task3_null_summary.csv`, `task3_null_per_pair.csv`, `task3_ecoli_detail.csv` |
+| `task3_null.py` | A permutation null for D6's addressable-site count. `--null within_month` (default) shuffles inside calendar-month blocks; `--null circular_shift` rolls the series along the time axis and keeps its autocorrelation | `task3_null_summary[_<null>].csv`, `task3_null_per_pair[_<null>].csv`, `task3_ecoli_detail.csv` |
+| `holdout_audit.py` | Reconciles the site_clusters against the holdout's eligible pool and measures how far each held-out cluster is from the nearest TRAINING station, then prices the buffer. `--write-buffer` commits the excluded training stations | `holdout_unaccounted_clusters.csv`, `holdout_adjacency.csv`, and `wq/holdout_buffer.csv` |
 
 `common.py` holds the loaders and the definitions the scripts share
 (`headline`, `untested_reason`, `bh_significant`). It reads those definitions
@@ -49,6 +56,19 @@ off `wq/fit.py` and `wq/report.py` rather than restating them.
 * **BH is global.** `report_multiple_testing` runs one Benjamini-Hochberg
   step-up over all 24,596 headline tests. `common.bh_significant` reproduces
   that set, not a friendlier per-analyte one.
+* **`--scope` is the one that matters most.** The study contains two different
+  monitoring designs and the product is only about one of them: of 1,692 fitted
+  fecal-coliform pairs outside California, ZERO come from a BEACH Act station
+  and almost all are NSSP shellfish growing-area monitoring. `--scope beach`
+  restricts to the 1,796 bathing-beach stations and **redirects every output to
+  `data/wq/out/beach_only/`**, so a beach number can never overwrite the pooled
+  one or be mistaken for it. `shellfish` is a real result and a different
+  question. See `wq/scope.py`.
+* **`--null circular_shift` is the harder null**, and it was expected to be the
+  easier one. The within-month shuffle destroys the outcome's serial
+  correlation; the circular shift keeps it and only breaks the covariate
+  alignment. Measured, the circular null comes out LOWER for every analyte, so
+  within-month is the tighter test and the headline was conservative.
 * **Every task takes `--evaluate-holdout` and `--include-hypothesis-sites`.**
   By default each one drops the 617 held-out site clusters, the samples after
   2025-06-30, and the two hypothesis beaches (Santa Cruz Wharf, Carpinteria
