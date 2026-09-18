@@ -451,9 +451,76 @@ def pull_results(states=None, years=None, refresh=False, probe=False,
     return load_raw_results(states, years)
 
 
-def load_raw_results(states=None, years=None):
+STUDY_STATES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "study_states.csv")
+
+
+def study_states(path=None):
+    """The states the study is deliberately about, as a committed list."""
+    path = path or STUDY_STATES_PATH
+    if not os.path.exists(path):
+        return None
+    frame = pd.read_csv(path, dtype=str)
+    return set(frame["state"].str.strip().str.upper())
+
+
+def _gate_unscoped_states(states, allow_widening=False):
+    """Stop an unrestricted --clean quietly widening the study population.
+
+    load_raw_results with no --states reads EVERY chunk on disk. That is the
+    right behaviour for a pull and the wrong one for a clean, because chunks
+    arrive for reasons that have nothing to do with the study: Virginia was
+    pulled to audit one figure in a deck, and the Great Lakes states were
+    pulled and then deliberately excluded. Either would have walked into the
+    next unrestricted clean without anyone deciding.
+
+    The population is a pre-registered quantity. It changes by amendment --
+    wq.manifest --amend-scope, which writes a dated entry and an author --
+    and not by which files happen to be in a directory.
+    """
+    if states is not None:
+        return
+    declared = study_states()
+    if declared is None:
+        return
+    on_disk = set()
+    for path in glob.glob(os.path.join(config.RAW_DIR, "results_*.csv")):
+        name = os.path.basename(path)[len("results_"):]
+        on_disk.add(name.rsplit("_", 1)[0].upper())
+    extra = sorted(on_disk - declared)
+    if not extra:
+        return
+    listed = ", ".join(extra)
+    if allow_widening:
+        print(f"  WIDENING THE STUDY POPULATION with {listed} — "
+              "--allow-scope-widening was given.\n  This is a scope change "
+              "and belongs in the manifest.")
+        return
+    sys.exit(
+        f"\nRefusing to load results for {len(extra)} state(s) the study has "
+        f"not adopted: {listed}\n"
+        f"Declared population ({len(declared)}): "
+        f"{', '.join(sorted(declared))}  [wq/study_states.csv]\n\n"
+        "Chunks on disk are not a decision. Virginia was pulled to audit one "
+        "figure; the Great\nLakes states were pulled and then deliberately "
+        "excluded. Either would otherwise walk\ninto the next unrestricted "
+        "clean without anyone choosing it.\n\n"
+        "To work on the declared population, say so:\n"
+        "    python -m wq.run_wq --clean --states "
+        f"{','.join(sorted(declared))}\n"
+        "To adopt a state, amend the scope and add it to wq/study_states.csv:\n"
+        '    python -m wq.manifest --amend-scope <STATE> --why "..." '
+        '--by "..."\n'
+        "To load everything once without adopting anything:\n"
+        "    --allow-scope-widening")
+
+
+def load_raw_results(states=None, years=None, allow_widening=False):
     """Every cached chunk, concatenated. Missing chunks are reported, because
     a silently short national pull looks exactly like a small country."""
+    _gate_unscoped_states(states, allow_widening)
+    if states is None and study_states():
+        states = sorted(study_states())
     states = states or sorted(COASTAL_STATES)
     this_year = date.today().year
     years = years or list(range(this_year - config.YEARS_BACK + 1, this_year + 1))

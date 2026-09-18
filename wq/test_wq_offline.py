@@ -674,6 +674,49 @@ def test_study_scope_separates_beaches_from_growing_areas():
               str(counts))
 
 
+def test_chunks_on_disk_cannot_widen_the_study():
+    """A result chunk arrives for reasons that have nothing to do with the
+    study. Virginia was pulled to audit one figure in a deck; the Great Lakes
+    states were pulled and then deliberately excluded. Both sat in the raw
+    directory where the next unrestricted --clean would have read them."""
+    print("\n[scope widening gate]")
+    declared = pull.study_states()
+    check("the study's states are a committed list", declared is not None,
+          ", ".join(sorted(declared)) if declared else "MISSING")
+    check("the list is the six the study actually adopted",
+          declared == {"CA", "CT", "MA", "NJ", "NY", "RI"},
+          "five pre-registered plus California by amendment")
+
+    import glob as _glob
+    on_disk = set()
+    for path in _glob.glob(os.path.join(config.RAW_DIR, "results_*.csv")):
+        name = os.path.basename(path)[len("results_"):]
+        on_disk.add(name.rsplit("_", 1)[0].upper())
+    extra = on_disk - (declared or set())
+    if extra:
+        raised = False
+        try:
+            pull._gate_unscoped_states(None)
+        except SystemExit as exc:
+            raised = True
+            message = str(exc)
+        check("an unscoped load is refused while undeclared chunks exist",
+              raised, f"{len(extra)} undeclared: {', '.join(sorted(extra))}")
+        if raised:
+            check("the refusal names the states and the way to adopt them",
+                  all(e in message for e in sorted(extra))
+                  and "--amend-scope" in message)
+        # the escape hatch exists and does not raise
+        try:
+            pull._gate_unscoped_states(None, allow_widening=True)
+            check("--allow-scope-widening proceeds instead of refusing", True)
+        except SystemExit:
+            check("--allow-scope-widening proceeds instead of refusing", False)
+    check("naming states explicitly is never gated",
+          pull._gate_unscoped_states(["CA"]) is None,
+          "the gate is about the UNSCOPED case only")
+
+
 def main():
     for test in (test_value_parsing,
                  test_nondetects_are_substituted_not_dropped,
@@ -694,7 +737,8 @@ def main():
                  test_the_holdout_is_drawn_before_anything_is_fitted,
                  test_the_review_directory_does_not_shadow_the_review_module,
                  test_the_report_does_not_spend_the_holdout_describing_it,
-                 test_study_scope_separates_beaches_from_growing_areas):
+                 test_study_scope_separates_beaches_from_growing_areas,
+                 test_chunks_on_disk_cannot_widen_the_study):
         test()
     print()
     if FAILURES:

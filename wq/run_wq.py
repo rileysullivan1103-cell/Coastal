@@ -295,7 +295,9 @@ def stage_ckan(args):
 def stage_clean(args):
     print("\n=== HYGIENE ===")
     sites = _read(STATIONS, "run --stations first")
-    raw = pull.load_raw_results(args.states)
+    raw = pull.load_raw_results(
+        args.states,
+        allow_widening=getattr(args, "allow_scope_widening", False))
     ckan_path = _path("ca_ckan_results.csv")
     ckan = pd.read_csv(ckan_path, low_memory=False) if os.path.exists(ckan_path) else None
     if raw.empty and ckan is None:
@@ -671,6 +673,10 @@ def main():
     parser.add_argument("--all", action="store_true",
                         help="every stage in order")
     parser.add_argument("--states", help="comma-separated, e.g. CA,FL")
+    parser.add_argument("--allow-scope-widening", action="store_true",
+                        help="let --clean load result chunks for states the "
+                             "study has not adopted. A scope change belongs "
+                             "in the manifest; this is the escape hatch.")
     parser.add_argument("--allow-failed-states", action="store_true",
                         help="continue after a state or chunk fails, instead "
                              "of stopping")

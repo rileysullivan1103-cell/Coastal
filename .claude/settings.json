@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *wq/config.py) cd \"$CLAUDE_PROJECT_DIR\" && out=$(for t in wq/test_wq_offline.py wq/test_wq_pipeline_offline.py wq/test_wq_fit_offline.py wq/test_wq_geo_offline.py; do /Users/rileysullivan/Coastal/.venv/bin/python \"$t\" 2>&1; done); n=$(printf '%s' \"$out\" | grep -c '^  FAIL '); if [ \"$n\" -gt 0 ]; then printf '{\"decision\":\"block\",\"reason\":\"wq/config.py was edited and %s offline check(s) now FAIL. Fix before continuing:\\n%s\"}' \"$n\" \"$(printf '%s' \"$out\" | grep '^  FAIL ' | head -20)\"; else echo '{\"systemMessage\":\"config.py edited — all four offline suites pass.\"}'; fi;; esac",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
