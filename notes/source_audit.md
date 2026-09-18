@@ -219,9 +219,22 @@ split doing its work: freshwater beaches are posted on E. coli.
 
 Including them would roughly double the study's E. coli and give it a genuine
 second group. The cost is **164 new Open-Meteo cells**, about 1.7 days of ERA5
-against the daily ceiling plus marine — a real commitment, and one that cannot
-run while the California covariate rebuild is using the same quota. Sequenced
-after it rather than decided against.
+against the daily ceiling plus marine.
+
+**DECIDED 2026-09-18: not worth it. The Great Lakes stay out.** The count
+cleared the stated rule, so this is a decision against the rule rather than an
+application of it, and the reason is what the rest of the audit found: the
+Great Lakes would add 363 pairs of a single analyte to a study in which no
+grouping explains the spread and only rain predicts anything. A second E. coli
+group buys a comparison between two populations whose coefficients are already
+known not to be explained by which population they came from. That is not
+worth 1.7 days of quota.
+
+Nothing changes in the code: scope amendment 2 and `wq/excluded_stations.csv`
+already exclude the 22 New York stations, and the seven Great Lakes states
+were never adopted into `wq/study_states.csv`. The results stay on disk and
+cost nothing; the gate in `pull.load_raw_results` stops them entering a clean
+by accident.
 
 ---
 
